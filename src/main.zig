@@ -7,6 +7,7 @@ const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
 const img = @import("zigimg");
 const shaders = @import("shaders");
+const fontana = @import("fontana");
 
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
@@ -77,7 +78,7 @@ const max_texture_quads_per_render: u32 = 1024;
 const max_frames_in_flight: u32 = 2;
 
 /// Enable Vulkan validation layers
-const enable_validation_layers = if (@import("builtin").mode == .Debug) true else false;
+const enable_validation_layers = if (builtin.mode == .Debug) true else false;
 
 const vulkan_engine_version = vk.makeApiVersion(0, 0, 1, 0);
 const vulkan_engine_name = "No engine";
@@ -422,7 +423,8 @@ pub fn main() !void {
 
     try setup(allocator, &graphics_context);
 
-    libav.av_log_set_level(libav.AV_LOG_DEBUG);
+    if (builtin.mode == .Debug)
+        libav.av_log_set_level(libav.AV_LOG_DEBUG);
 
     output_format = libav.av_guess_format(null, output_file_path, null) orelse {
         std.log.err("Failed to determine output format", .{});
@@ -436,7 +438,6 @@ pub fn main() !void {
         "mp4",
         output_file_path,
     );
-    std.log.info("avformat_alloc_output_context2: {d}", .{ret_code});
     std.debug.assert(ret_code == 0);
 
     //
@@ -493,22 +494,22 @@ pub fn main() !void {
         output_file_path,
         libav.AVIO_FLAG_WRITE,
     );
-    std.log.info("avio_open: {d}", .{ret_code});
-    std.debug.assert(ret_code == 0);
+    if (ret_code < 0) {
+        std.log.err("Failed to open AVIO context", .{});
+        return error.OpenAVIOContextFailed;
+    }
 
     var dummy_dict: ?*libav.AVDictionary = null;
     ret_code = libav.avformat_write_header(
         format_context,
         @ptrCast([*c]?*libav.AVDictionary, &dummy_dict),
     );
-    std.log.info("avformat_write_header: {d}", .{ret_code});
-    std.debug.assert(ret_code == 0);
+    if (ret_code < 0) {
+        std.log.err("Failed to write screen recording header", .{});
+        return error.WriteFormatHeaderFailed;
+    }
 
     libav.av_dict_free(&dummy_dict);
-
-    std.debug.assert(video_codec.id == libav.AV_CODEC_ID_H264);
-
-    std.log.info("Setup complete", .{});
 
     const shm_name = "/wl_shm_2345";
     const fd = std.c.shm_open(
@@ -528,8 +529,6 @@ pub fn main() !void {
     const allocation_size_bytes: usize = required_bytes + (std.mem.page_size - alignment_padding_bytes);
 
     std.debug.assert(allocation_size_bytes % std.mem.page_size == 0);
-
-    std.log.info("Mapping {d}", .{allocation_size_bytes});
 
     try std.os.ftruncate(fd, allocation_size_bytes);
 
@@ -556,8 +555,6 @@ pub fn main() !void {
         write_screenshot_thread.join();
     }
 
-    std.log.info("Terminated cleanly", .{});
-
     //
     // Finish Video Stream
     //
@@ -573,6 +570,8 @@ pub fn main() !void {
 
     _ = libav.avcodec_free_context(@ptrCast([*c][*c]libav.AVCodecContext, &video_codec_context));
     _ = libav.avformat_free_context(format_context);
+
+    std.log.info("Terminated cleanly", .{});
 }
 
 fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {

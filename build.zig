@@ -41,6 +41,11 @@ pub fn build(b: *Builder) void {
     });
 
     exe.addPackage(.{
+        .name = "fontana",
+        .source = .{ .path = "deps/fontana/src/fontana.zig" },
+    });
+
+    exe.addPackage(.{
         .name = "wayland",
         .source = .{ .generated = &scanner.result },
     });

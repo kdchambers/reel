@@ -7,3 +7,6 @@
 [submodule "deps/zig-wayland"]
 	path = deps/zig-wayland
 	url = https://github.com/kdchambers/zig-wayland
+[submodule "deps/fontana"]
+	path = deps/fontana
+	url = https://github.com/kdchambers/fontana
