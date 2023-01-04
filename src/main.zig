@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2022 Keith Chambers
+// Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -7,6 +7,11 @@ const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
 const img = @import("zigimg");
 const shaders = @import("shaders");
+
+const geometry = @import("geometry.zig");
+const graphics = @import("graphics.zig");
+const QuadFaceWriter = graphics.QuadFaceWriter;
+const QuadFaceWriterPool = graphics.QuadFaceWriterPool;
 
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
@@ -400,261 +405,6 @@ const ScreenRecordBuffer = struct {
     buffer: *wl.Buffer = undefined,
 };
 
-/// Used to allocate QuadFaceWriters that share backing memory
-fn QuadFaceWriterPool(comptime VertexType: type) type {
-    return struct {
-        const QuadFace = graphics.QuadFace;
-
-        memory_ptr: [*]QuadFace(VertexType),
-        memory_quad_range: u32,
-
-        pub fn initialize(start: [*]align(@alignOf(VertexType)) u8, memory_quad_range: u32) @This() {
-            return .{
-                .memory_ptr = @ptrCast([*]QuadFace(VertexType), start),
-                .memory_quad_range = memory_quad_range,
-            };
-        }
-
-        pub fn create(self: *@This(), quad_index: u16, quad_size: u16) QuadFaceWriter(VertexType) {
-            std.debug.assert((quad_index + quad_size) <= self.memory_quad_range);
-            return QuadFaceWriter(VertexType).initialize(self.memory_ptr, quad_index, quad_size);
-        }
-    };
-}
-
-fn QuadFaceWriter(comptime VertexType: type) type {
-    return struct {
-        const QuadFace = graphics.QuadFace;
-
-        memory_ptr: [*]QuadFace(VertexType),
-
-        quad_index: u32,
-        capacity: u32,
-        used: u32 = 0,
-
-        pub fn initialize(base: [*]QuadFace(VertexType), quad_index: u32, quad_size: u32) @This() {
-            return .{
-                .memory_ptr = @ptrCast([*]QuadFace(VertexType), &base[quad_index]),
-                .quad_index = quad_index,
-                .capacity = quad_size,
-                .used = 0,
-            };
-        }
-
-        pub fn indexFromBase(self: @This()) u32 {
-            return self.quad_index + self.used;
-        }
-
-        pub fn remaining(self: *@This()) u32 {
-            std.debug.assert(self.capacity >= self.used);
-            return @intCast(u32, self.capacity - self.used);
-        }
-
-        pub fn reset(self: *@This()) void {
-            self.used = 0;
-        }
-
-        pub fn create(self: *@This()) !*QuadFace(VertexType) {
-            if (self.used == self.capacity) return error.OutOfMemory;
-            defer self.used += 1;
-            return &self.memory_ptr[self.used];
-        }
-
-        pub fn allocate(self: *@This(), amount: u32) ![]QuadFace(VertexType) {
-            if ((self.used + amount) > self.capacity) return error.OutOfMemory;
-            defer self.used += amount;
-            return self.memory_ptr[self.used .. self.used + amount];
-        }
-    };
-}
-
-const graphics = struct {
-    fn TypeOfField(comptime t: anytype, comptime field_name: []const u8) type {
-        for (@typeInfo(t).Struct.fields) |field| {
-            if (std.mem.eql(u8, field.name, field_name)) {
-                return field.type;
-            }
-        }
-        unreachable;
-    }
-
-    pub const AnchorPoint = enum {
-        center,
-        top_left,
-        top_right,
-        bottom_left,
-        bottom_right,
-    };
-
-    pub fn generateQuad(
-        comptime VertexType: type,
-        extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
-        comptime anchor_point: AnchorPoint,
-    ) QuadFace(VertexType) {
-        std.debug.assert(TypeOfField(VertexType, "x") == TypeOfField(VertexType, "y"));
-        return switch (anchor_point) {
-            .top_left => [_]VertexType{
-                // zig fmt: off
-                .{ .x = extent.x,                .y = extent.y },                 // Top Left
-                .{ .x = extent.x + extent.width, .y = extent.y },                 // Top Right
-                .{ .x = extent.x + extent.width, .y = extent.y + extent.height }, // Bottom Right
-                .{ .x = extent.x,                .y = extent.y + extent.height }, // Bottom Left
-            },
-            .bottom_left => [_]VertexType{
-                .{ .x = extent.x,                .y = extent.y - extent.height }, // Top Left
-                .{ .x = extent.x + extent.width, .y = extent.y - extent.height }, // Top Right
-                .{ .x = extent.x + extent.width, .y = extent.y },                 // Bottom Right
-                .{ .x = extent.x,                .y = extent.y },                 // Bottom Left
-            },
-            .center => [_]VertexType{
-                .{ .x = extent.x - (extent.width / 2.0), .y = extent.y - (extent.height / 2.0) }, // Top Left
-                .{ .x = extent.x + (extent.width / 2.0), .y = extent.y - (extent.height / 2.0) }, // Top Right
-                .{ .x = extent.x + (extent.width / 2.0), .y = extent.y + (extent.height / 2.0) }, // Bottom Right
-                .{ .x = extent.x - (extent.width / 2.0), .y = extent.y + (extent.height / 2.0) }, // Bottom Left
-                // zig fmt: on
-            },
-            else => @compileError("Invalid AnchorPoint"),
-        };
-    }
-
-    pub fn generateTexturedQuad(
-        comptime VertexType: type,
-        extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
-        texture_extent: geometry.Extent2D(TypeOfField(VertexType, "tx")),
-        comptime anchor_point: AnchorPoint,
-    ) QuadFace(VertexType) {
-        std.debug.assert(TypeOfField(VertexType, "x") == TypeOfField(VertexType, "y"));
-        std.debug.assert(TypeOfField(VertexType, "tx") == TypeOfField(VertexType, "ty"));
-        var base_quad = generateQuad(VertexType, extent, anchor_point);
-        base_quad[0].tx = texture_extent.x;
-        base_quad[0].ty = texture_extent.y;
-        base_quad[1].tx = texture_extent.x + texture_extent.width;
-        base_quad[1].ty = texture_extent.y;
-        base_quad[2].tx = texture_extent.x + texture_extent.width;
-        base_quad[2].ty = texture_extent.y + texture_extent.height;
-        base_quad[3].tx = texture_extent.x;
-        base_quad[3].ty = texture_extent.y + texture_extent.height;
-        return base_quad;
-    }
-
-    pub fn generateQuadColored(
-        comptime VertexType: type,
-        extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
-        quad_color: RGBA(f32),
-        comptime anchor_point: AnchorPoint,
-    ) QuadFace(VertexType) {
-        std.debug.assert(TypeOfField(VertexType, "x") == TypeOfField(VertexType, "y"));
-        var base_quad = generateQuad(VertexType, extent, anchor_point);
-        base_quad[0].color = quad_color;
-        base_quad[1].color = quad_color;
-        base_quad[2].color = quad_color;
-        base_quad[3].color = quad_color;
-        return base_quad;
-    }
-
-    pub const GenericVertex = packed struct {
-        x: f32 = 1.0,
-        y: f32 = 1.0,
-        // This default value references the last pixel in our texture which
-        // we set all values to 1.0 so that we can use it to multiply a color
-        // without changing it. See fragment shader
-        tx: f32 = 1.0,
-        ty: f32 = 1.0,
-        color: RGBA(f32) = .{
-            .r = 1.0,
-            .g = 1.0,
-            .b = 1.0,
-            .a = 1.0,
-        },
-
-        pub fn nullFace() QuadFace(GenericVertex) {
-            return .{ .{}, .{}, .{}, .{} };
-        }
-    };
-
-    pub fn QuadFace(comptime VertexType: type) type {
-        return [4]VertexType;
-    }
-
-    pub fn RGB(comptime BaseType: type) type {
-        return packed struct {
-            pub fn fromInt(r: u8, g: u8, b: u8) @This() {
-                return .{
-                    .r = @intToFloat(BaseType, r) / 255.0,
-                    .g = @intToFloat(BaseType, g) / 255.0,
-                    .b = @intToFloat(BaseType, b) / 255.0,
-                };
-            }
-
-            pub inline fn toRGBA(self: @This()) RGBA(BaseType) {
-                return .{
-                    .r = self.r,
-                    .g = self.g,
-                    .b = self.b,
-                    .a = 1.0,
-                };
-            }
-
-            r: BaseType,
-            g: BaseType,
-            b: BaseType,
-        };
-    }
-
-    pub fn RGBA(comptime BaseType: type) type {
-        return packed struct {
-            pub fn fromInt(comptime IntType: type, r: IntType, g: IntType, b: IntType, a: IntType) @This() {
-                return .{
-                    .r = @intToFloat(BaseType, r) / 255.0,
-                    .g = @intToFloat(BaseType, g) / 255.0,
-                    .b = @intToFloat(BaseType, b) / 255.0,
-                    .a = @intToFloat(BaseType, a) / 255.0,
-                };
-            }
-
-            pub inline fn isEqual(self: @This(), color: @This()) bool {
-                return (self.r == color.r and self.g == color.g and self.b == color.b and self.a == color.a);
-            }
-
-            r: BaseType,
-            g: BaseType,
-            b: BaseType,
-            a: BaseType,
-        };
-    }
-};
-
-const geometry = struct {
-    pub fn Coordinates2D(comptime BaseType: type) type {
-        return packed struct {
-            x: BaseType,
-            y: BaseType,
-        };
-    }
-
-    pub fn Dimensions2D(comptime BaseType: type) type {
-        return packed struct {
-            height: BaseType,
-            width: BaseType,
-        };
-    }
-
-    pub fn Extent2D(comptime BaseType: type) type {
-        return packed struct {
-            x: BaseType,
-            y: BaseType,
-            height: BaseType,
-            width: BaseType,
-
-            inline fn isWithinBounds(self: @This(), comptime T: type, point: T) bool {
-                const end_x = self.x + self.width;
-                const end_y = self.y + self.height;
-                return (point.x >= self.x and point.y >= self.y and point.x <= end_x and point.y <= end_y);
-            }
-        };
-    }
-};
-
 /// Push constant structure that is used in our fragment shader
 const PushConstant = packed struct {
     width: f32,
@@ -683,7 +433,7 @@ pub fn main() !void {
     ret_code = libav.avformat_alloc_output_context2(
         @ptrCast([*c][*c]libav.AVFormatContext, &format_context),
         null,
-        "mp4", 
+        "mp4",
         output_file_path,
     );
     std.log.info("avformat_alloc_output_context2: {d}", .{ret_code});
@@ -715,7 +465,7 @@ pub fn main() !void {
         return;
     };
 
-    if(hw_frame_context) |context| {
+    if (hw_frame_context) |context| {
         video_codec_context.hw_frames_ctx = libav.av_buffer_ref(context);
     }
 
@@ -725,13 +475,13 @@ pub fn main() !void {
     _ = libav.av_dict_set(&options, "crf", "35", 0);
     _ = libav.av_dict_set(&options, "tune", "zerolatency", 0);
 
-    if(libav.avcodec_open2(video_codec_context, video_codec, &options) < 0) {
+    if (libav.avcodec_open2(video_codec_context, video_codec, &options) < 0) {
         std.log.err("Failed to open codec", .{});
         return;
     }
     libav.av_dict_free(&options);
 
-    if(libav.avcodec_parameters_from_context(video_stream.codecpar, video_codec_context) < 0) {
+    if (libav.avcodec_parameters_from_context(video_stream.codecpar, video_codec_context) < 0) {
         std.log.err("Failed to avcodec_parameters_from_context", .{});
         return;
     }
@@ -748,7 +498,7 @@ pub fn main() !void {
 
     var dummy_dict: ?*libav.AVDictionary = null;
     ret_code = libav.avformat_write_header(
-        format_context, 
+        format_context,
         @ptrCast([*c]?*libav.AVDictionary, &dummy_dict),
     );
     std.log.info("avformat_write_header: {d}", .{ret_code});
@@ -767,15 +517,15 @@ pub fn main() !void {
         std.os.linux.O.EXCL,
     );
 
-    if(fd < 0) {
+    if (fd < 0) {
         std.log.err("Failed to open shm. Error code {d}", .{fd});
         return;
     }
     _ = std.c.shm_unlink(shm_name);
 
     const required_bytes: usize = screenshot_required_bytes * screen_record_buffers.len;
-    const alignment_padding_bytes: usize  = required_bytes % std.mem.page_size;
-    const allocation_size_bytes: usize  = required_bytes + (std.mem.page_size - alignment_padding_bytes);
+    const alignment_padding_bytes: usize = required_bytes % std.mem.page_size;
+    const allocation_size_bytes: usize = required_bytes + (std.mem.page_size - alignment_padding_bytes);
 
     std.debug.assert(allocation_size_bytes % std.mem.page_size == 0);
 
@@ -783,18 +533,11 @@ pub fn main() !void {
 
     try std.os.ftruncate(fd, allocation_size_bytes);
 
-    shared_memory_map = try std.os.mmap(
-        null, 
-        allocation_size_bytes, 
-        std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
-        std.os.linux.MAP.SHARED,
-        fd,
-        0
-    );
+    shared_memory_map = try std.os.mmap(null, allocation_size_bytes, std.os.linux.PROT.READ | std.os.linux.PROT.WRITE, std.os.linux.MAP.SHARED, fd, 0);
     shared_memory_pool = try wl.Shm.createPool(wayland_client.shared_memory, fd, allocation_size_bytes);
 
     var buffer_index: usize = 0;
-    while(buffer_index < screen_record_buffers.len) : (buffer_index += 1) {
+    while (buffer_index < screen_record_buffers.len) : (buffer_index += 1) {
         screen_record_buffers[buffer_index].buffer = try shared_memory_pool.createBuffer(
             @intCast(i32, buffer_index * screenshot_required_bytes),
             1920,
@@ -808,7 +551,7 @@ pub fn main() !void {
 
     cleanup(allocator, &graphics_context);
 
-    if(write_screenshot_thread_opt) |write_screenshot_thread| {
+    if (write_screenshot_thread_opt) |write_screenshot_thread| {
         std.log.info("Waiting for screenshot writer thread to complete", .{});
         write_screenshot_thread.join();
     }
@@ -827,7 +570,7 @@ pub fn main() !void {
     _ = libav.avio_closep(
         @ptrCast([*c][*c]libav.AVIOContext, &format_context.pb),
     );
-    
+
     _ = libav.avcodec_free_context(@ptrCast([*c][*c]libav.AVCodecContext, &video_codec_context));
     _ = libav.avformat_free_context(format_context);
 }
@@ -850,7 +593,6 @@ fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
 }
 
 fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
-
     const target_ms_per_frame: u32 = 1000 / input_fps;
     const target_ns_per_frame = target_ms_per_frame * std.time.ns_per_ms;
 
@@ -861,9 +603,9 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
         const frame_start_ns = std.time.nanoTimestamp();
 
-        // NOTE: Running this at a high `input_fps` (E.g 60) seems to put a lot of strain on 
-        //       the wayland compositor. On my system with sway and river I've seen the 
-        //       CPU usage of the compositor run 3 times that of this application in response 
+        // NOTE: Running this at a high `input_fps` (E.g 60) seems to put a lot of strain on
+        //       the wayland compositor. On my system with sway and river I've seen the
+        //       CPU usage of the compositor run 3 times that of this application in response
         //       to this call alone.
         // TODO: Find a more efficient way to interact with the compositor if possible
         const code = wayland_client.display.roundtrip();
@@ -880,18 +622,18 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             try recreateSwapchain(allocator, app);
         }
 
-        if(is_draw_required) {
+        if (is_draw_required) {
             is_draw_required = false;
             try draw();
             is_render_requested = true;
             is_record_requested = true;
         }
 
-        if(is_render_requested) {
+        if (is_render_requested) {
             is_render_requested = false;
 
             // Even though we're running at a constant loop, we don't always need to re-record command buffers
-            if(is_record_requested) {
+            if (is_record_requested) {
                 is_record_requested = false;
                 try recordRenderPass(app.*, vertex_buffer_quad_count * 6);
             }
@@ -899,13 +641,13 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             try renderFrame(allocator, app);
         }
 
-        if(is_recording) {
+        if (is_recording) {
             var buffer_index: usize = 0;
-            while(buffer_index < screen_record_buffers.len) : (buffer_index += 1) {
-                if(screen_record_buffers[buffer_index].frame_index == std.math.maxInt(u32))
+            while (buffer_index < screen_record_buffers.len) : (buffer_index += 1) {
+                if (screen_record_buffers[buffer_index].frame_index == std.math.maxInt(u32))
                     break;
             }
-            if(buffer_index == screen_record_buffers.len) {
+            if (buffer_index == screen_record_buffers.len) {
                 std.log.warn("No available buffers to record screen frame. Skipping", .{});
             } else {
                 const output = wayland_client.output_opt.?;
@@ -913,13 +655,13 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                     std.log.warn("Failed to capture wayland output. Error: {}", .{err});
                     break :blk null;
                 };
-                if(screen_frame_opt) |screen_frame| {
+                if (screen_frame_opt) |screen_frame| {
                     screen_record_buffers[buffer_index].buffer_index = @intCast(u32, buffer_index);
                     screen_record_buffers[buffer_index].frame_index = recording_frame_index;
                     screen_record_buffers[buffer_index].captured_frame = screen_frame;
                     screen_record_buffers[buffer_index].captured_frame.setListener(
-                        *ScreenRecordBuffer, 
-                        screencopyFrameListener, 
+                        *ScreenRecordBuffer,
+                        screencopyFrameListener,
                         &screen_record_buffers[buffer_index],
                     );
                 }
@@ -953,7 +695,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
         frame_index += 1;
 
-        if(is_recording) {
+        if (is_recording) {
             recording_frame_index += 1;
         }
 
@@ -987,7 +729,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_awake_ns / frame_count))});
     const runtime_seconds = @intToFloat(f64, frame_duration_total_ns) / std.time.ns_per_s;
     const screenshots_per_sec = @intToFloat(f64, screenshot_count) / runtime_seconds;
-    std.log.info("Screenshot count: {d} ({d:.2} / sec)", .{screenshot_count, screenshots_per_sec});
+    std.log.info("Screenshot count: {d} ({d:.2} / sec)", .{ screenshot_count, screenshots_per_sec });
 
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
 }
@@ -997,25 +739,26 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 fn draw() !void {
     const outer_margin_pixels: u32 = 20;
     const inner_margin_pixels: u32 = 10;
-    
-    const dimensions_pixels = geometry.Dimensions2D(u32) {
+
+    const dimensions_pixels = geometry.Dimensions2D(u32){
         .width = icon_dimensions.width,
         .height = icon_dimensions.height,
     };
 
-    if(draw_window_decorations_requested and screen_dimensions.height <= window_decorations.height_pixels) {
+    if (draw_window_decorations_requested and screen_dimensions.height <= window_decorations.height_pixels) {
         vertex_buffer_quad_count = 0;
         return;
     }
 
-    const available_screen_dimensions = if(draw_window_decorations_requested) 
-        geometry.Dimensions2D(u16){ .height = screen_dimensions.height - window_decorations.height_pixels, .width = screen_dimensions.width} 
-    else screen_dimensions;
+    const available_screen_dimensions = if (draw_window_decorations_requested)
+        geometry.Dimensions2D(u16){ .height = screen_dimensions.height - window_decorations.height_pixels, .width = screen_dimensions.width }
+    else
+        screen_dimensions;
 
     const insufficient_horizontal_space = (available_screen_dimensions.width < (dimensions_pixels.width + outer_margin_pixels * 2));
     const insufficient_vertical_space = (available_screen_dimensions.height < (dimensions_pixels.height + outer_margin_pixels * 2));
 
-    if(insufficient_horizontal_space or insufficient_vertical_space) {
+    if (insufficient_horizontal_space or insufficient_vertical_space) {
         vertex_buffer_quad_count = 0;
         return;
     }
@@ -1025,7 +768,7 @@ fn draw() !void {
 
     {
         const required_space = dimensions_pixels.width + inner_margin_pixels;
-        while(horizonal_quad_space_pixels >= required_space) {
+        while (horizonal_quad_space_pixels >= required_space) {
             horizonal_count += 1;
             horizonal_quad_space_pixels -= required_space;
         }
@@ -1036,13 +779,13 @@ fn draw() !void {
 
     {
         const required_space = dimensions_pixels.height + inner_margin_pixels;
-        while(vertical_quad_space_pixels >= required_space) {
+        while (vertical_quad_space_pixels >= required_space) {
             vertical_count += 1;
             vertical_quad_space_pixels -= required_space;
         }
     }
 
-    const y_offset_window_decorations: u32 = if(draw_window_decorations_requested) window_decorations.height_pixels else 0;
+    const y_offset_window_decorations: u32 = if (draw_window_decorations_requested) window_decorations.height_pixels else 0;
 
     const x_begin_pixels = outer_margin_pixels + (horizonal_quad_space_pixels / 2);
     const y_begin_pixels = y_offset_window_decorations + outer_margin_pixels + (vertical_quad_space_pixels / 2);
@@ -1054,14 +797,14 @@ fn draw() !void {
     const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
-    if(draw_window_decorations_requested) {
+    if (draw_window_decorations_requested) {
         var faces = try face_writer.allocate(3);
         const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
         {
             //
             // Draw window decoration topbar background
             //
-            const extent = geometry.Extent2D(f32) {
+            const extent = geometry.Extent2D(f32){
                 .x = -1.0,
                 .y = -1.0,
                 .width = 2.0,
@@ -1074,7 +817,7 @@ fn draw() !void {
             // Draw exit button in window decoration topbar
             //
             std.debug.assert(window_decorations.exit_button.size_pixels <= window_decorations.height_pixels);
-            const screen_icon_dimensions = geometry.Dimensions2D(f32) {
+            const screen_icon_dimensions = geometry.Dimensions2D(f32){
                 .width = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.width),
                 .height = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.height),
             };
@@ -1082,13 +825,13 @@ fn draw() !void {
             const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.width);
             const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.height);
             const texture_coordinates = iconTextureLookup(.close);
-            const texture_extent = geometry.Extent2D(f32) {
+            const texture_extent = geometry.Extent2D(f32){
                 .x = texture_coordinates.x,
                 .y = texture_coordinates.y,
                 .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
                 .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
             };
-            const extent = geometry.Extent2D(f32) {
+            const extent = geometry.Extent2D(f32){
                 .x = 1.0 - (outer_margin_hor + screen_icon_dimensions.width),
                 .y = -1.0 + outer_margin_ver,
                 .width = screen_icon_dimensions.width,
@@ -1099,7 +842,7 @@ fn draw() !void {
 
             // TODO: Update on screen size change
             const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
-            exit_button_extent = geometry.Extent2D(u16) { // Top left anchor
+            exit_button_extent = geometry.Extent2D(u16){ // Top left anchor
                 .x = screen_dimensions.width - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
                 .y = screen_dimensions.height - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
                 .width = window_decorations.exit_button.size_pixels,
@@ -1110,10 +853,10 @@ fn draw() !void {
     }
     var faces = try face_writer.allocate(horizonal_count * vertical_count);
     var horizonal_i: u32 = 0;
-    while(horizonal_i < horizonal_count) : (horizonal_i += 1) {
+    while (horizonal_i < horizonal_count) : (horizonal_i += 1) {
         var vertical_i: u32 = 0;
-        while(vertical_i < vertical_count) : (vertical_i += 1) {
-            const extent = geometry.Extent2D(f32) {
+        while (vertical_i < vertical_count) : (vertical_i += 1) {
+            const extent = geometry.Extent2D(f32){
                 .x = x_begin + (stride_horizonal * @intToFloat(f32, horizonal_i)),
                 .y = y_begin + (stride_vertical * @intToFloat(f32, vertical_i)),
                 .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, screen_dimensions.width)) * 2.0,
@@ -1121,7 +864,7 @@ fn draw() !void {
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
             const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list.len));
-            const texture_extent = geometry.Extent2D(f32) {
+            const texture_extent = geometry.Extent2D(f32){
                 .x = texture_coordinates.x,
                 .y = texture_coordinates.y,
                 .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
@@ -1131,7 +874,7 @@ fn draw() !void {
         }
     }
     vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count);
-    if(draw_window_decorations_requested) {
+    if (draw_window_decorations_requested) {
         vertex_buffer_quad_count += 3;
     }
 }
@@ -1139,7 +882,7 @@ fn draw() !void {
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     try waylandSetup();
 
-    const vulkan_lib_symbol = comptime switch(builtin.os.tag) {
+    const vulkan_lib_symbol = comptime switch (builtin.os.tag) {
         .windows => "vulkan-1.dll",
         .macos => "libvulkan.1.dylib",
         .netbsd, .openbsd => "libvulkan.so",
@@ -1161,7 +904,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     }
 
     app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
-    
+
     app.instance = try app.base_dispatch.createInstance(&vk.InstanceCreateInfo{
         .p_application_info = &vk.ApplicationInfo{
             .p_application_name = application_name,
@@ -1196,13 +939,13 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     errdefer app.instance_dispatch.destroySurfaceKHR(app.instance, app.surface, null);
 
     // Find a suitable physical device (GPU/APU) to use
-    // Criteria: 
+    // Criteria:
     //   1. Supports defined list of device extensions. See `device_extensions` above
     //   2. Has a graphics queue that supports presentation on our selected surface
     const best_physical_device = outer: {
         const physical_devices = blk: {
             var device_count: u32 = 0;
-            if(.success != (try app.instance_dispatch.enumeratePhysicalDevices(app.instance, &device_count, null))) {
+            if (.success != (try app.instance_dispatch.enumeratePhysicalDevices(app.instance, &device_count, null))) {
                 std.log.warn("Failed to query physical device count", .{});
                 return error.PhysicalDeviceQueryFailure;
             }
@@ -1220,12 +963,11 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         defer allocator.free(physical_devices);
 
         for (physical_devices) |physical_device, physical_device_i| {
-
             std.log.info("Physical vulkan devices found: {d}", .{physical_devices.len});
 
             const device_supports_extensions = blk: {
                 var extension_count: u32 = undefined;
-                if(.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, null))) {
+                if (.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, null))) {
                     std.log.warn("Failed to get device extension property count for physical device index {d}", .{physical_device_i});
                     continue;
                 }
@@ -1233,7 +975,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 const extensions = try allocator.alloc(vk.ExtensionProperties, extension_count);
                 defer allocator.free(extensions);
 
-                if(.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, extensions.ptr))) {
+                if (.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, extensions.ptr))) {
                     std.log.warn("Failed to load device extension properties for physical device index {d}", .{physical_device_i});
                     continue;
                 }
@@ -1243,7 +985,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                         // NOTE: We are relying on device_extensions to only contain c strings up to 255 charactors
                         //       available_extension.extension_name will always be a null terminated string in a 256 char buffer
                         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VK_MAX_EXTENSION_NAME_SIZE.html
-                        if(std.cstr.cmp(requested_extension, @ptrCast([*:0]const u8, &available_extension.extension_name)) == 0) {
+                        if (std.cstr.cmp(requested_extension, @ptrCast([*:0]const u8, &available_extension.extension_name)) == 0) {
                             continue :dev_extensions;
                         }
                     }
@@ -1252,7 +994,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 break :blk true;
             };
 
-            if(!device_supports_extensions) {
+            if (!device_supports_extensions) {
                 continue;
             }
 
@@ -1274,14 +1016,14 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             std.debug.print("** Queue Families found on device **\n\n", .{});
             printVulkanQueueFamilies(queue_families[0..queue_family_count], 0);
 
-            for(queue_families[0..queue_family_count]) |queue_family, queue_family_i| {
+            for (queue_families[0..queue_family_count]) |queue_family, queue_family_i| {
                 if (queue_family.queue_count <= 0) {
                     continue;
                 }
                 if (queue_family.queue_flags.graphics_bit) {
                     const present_support = try app.instance_dispatch.getPhysicalDeviceSurfaceSupportKHR(
-                        physical_device, 
-                        @intCast(u32, queue_family_i), 
+                        physical_device,
+                        @intCast(u32, queue_family_i),
                         app.surface,
                     );
                     if (present_support != 0) {
@@ -1290,7 +1032,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                     }
                 }
             }
-            // If we reach here, we couldn't find a suitable present_queue an will 
+            // If we reach here, we couldn't find a suitable present_queue an will
             // continue to the next device
         }
         break :outer null;
@@ -1309,7 +1051,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 .p_queue_priorities = &[1]f32{1.0},
                 .flags = .{},
             }),
-            .p_enabled_features = &vulkan_config.enabled_device_features, 
+            .p_enabled_features = &vulkan_config.enabled_device_features,
             .enabled_extension_count = device_extensions.len,
             .pp_enabled_extension_names = &device_extensions,
             .enabled_layer_count = if (enable_validation_layers) validation_layers.len else 0,
@@ -1335,10 +1077,10 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     );
 
     // Query and select appropriate surface format for swapchain
-    if(try selectSurfaceFormat(allocator, app.*, .srgb_nonlinear_khr, .b8g8r8a8_unorm)) |surface_format| {
+    if (try selectSurfaceFormat(allocator, app.*, .srgb_nonlinear_khr, .b8g8r8a8_unorm)) |surface_format| {
         app.surface_format = surface_format;
     } else {
-        return error.RequiredSurfaceFormatUnavailable;  
+        return error.RequiredSurfaceFormatUnavailable;
     }
 
     const mesh_memory_index: u32 = blk: {
@@ -1350,7 +1092,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         //  - Device local (Memory on the GPU / APU)
 
         const memory_properties = app.instance_dispatch.getPhysicalDeviceMemoryProperties(app.physical_device);
-        if(print_vulkan_objects.memory_type_all) {
+        if (print_vulkan_objects.memory_type_all) {
             std.debug.print("\n** Memory heaps found on system **\n\n", .{});
             printVulkanMemoryHeaps(memory_properties, 0);
             std.debug.print("\n", .{});
@@ -1384,7 +1126,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             if (memory_flags.host_visible_bit) {
                 suitable_memory_type_index_opt = memory_type_index;
                 if (memory_flags.device_local_bit) {
-                    std.log.info("Selected memory for mesh buffer: Heap index ({d}) Memory index ({d})", .{heap_index, memory_type_index});
+                    std.log.info("Selected memory for mesh buffer: Heap index ({d}) Memory index ({d})", .{ heap_index, memory_type_index });
                     break :blk memory_type_index;
                 }
             }
@@ -1410,7 +1152,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             },
             .mip_levels = 1,
             .array_layers = 1,
-            .initial_layout = .@"undefined",
+            .initial_layout = .undefined,
             .usage = .{ .transfer_dst_bit = true, .sampled_bit = true },
             .samples = .{ .@"1_bit" = true },
             .sharing_mode = .exclusive,
@@ -1442,11 +1184,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             .command_pool = command_pool,
             .command_buffer_count = 1,
         };
-        try app.device_dispatch.allocateCommandBuffers(
-            app.logical_device, 
-            &comment_buffer_alloc_info, 
-            @ptrCast([*]vk.CommandBuffer, &command_buffer)
-        );
+        try app.device_dispatch.allocateCommandBuffers(app.logical_device, &comment_buffer_alloc_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
     }
 
     try app.device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -1470,10 +1208,10 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 .queue_family_index_count = 0,
                 .p_queue_family_indices = undefined,
             };
-            break :blk try app.device_dispatch.createBuffer(app.logical_device, &create_buffer_info, null);            
+            break :blk try app.device_dispatch.createBuffer(app.logical_device, &create_buffer_info, null);
         };
 
-        const  staging_memory = blk: {
+        const staging_memory = blk: {
             const staging_memory_alloc = vk.MemoryAllocateInfo{
                 .allocation_size = texture_size_bytes * 2, // x2 because we have two array layers
                 .memory_type_index = mesh_memory_index, // TODO:
@@ -1505,7 +1243,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 .{
                     .src_access_mask = .{},
                     .dst_access_mask = .{ .transfer_write_bit = true },
-                    .old_layout = .@"undefined",
+                    .old_layout = .undefined,
                     .new_layout = .transfer_dst_optimal,
                     .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                     .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -1526,40 +1264,26 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
 
         const regions = [_]vk.BufferImageCopy{
-            .{ 
-                .buffer_offset = 0, 
-                .buffer_row_length = 0, 
-                .buffer_image_height = 0, 
-                .image_subresource = .{
-                    .aspect_mask = .{ .color_bit = true },
-                    .mip_level = 0,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                }, 
-                .image_offset = .{ .x = 0, .y = 0, .z = 0 }, 
-                    .image_extent = .{
-                    .width = texture_layer_dimensions.width,
-                    .height = texture_layer_dimensions.height,
-                    .depth = 1,
-                } 
-            },
-            .{ 
-                .buffer_offset = texture_size_bytes, 
-                .buffer_row_length = 0, 
-                .buffer_image_height = 0, 
-                .image_subresource = .{
-                    .aspect_mask = .{ .color_bit = true },
-                    .mip_level = 0,
-                    .base_array_layer = 1,
-                    .layer_count = 1,
-                }, 
-                .image_offset = .{ .x = 0, .y = 0, .z = 0 }, 
-                .image_extent = .{
-                    .width = texture_layer_dimensions.width,
-                    .height = texture_layer_dimensions.height,
-                    .depth = 1,
-                }
-            },
+            .{ .buffer_offset = 0, .buffer_row_length = 0, .buffer_image_height = 0, .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            }, .image_offset = .{ .x = 0, .y = 0, .z = 0 }, .image_extent = .{
+                .width = texture_layer_dimensions.width,
+                .height = texture_layer_dimensions.height,
+                .depth = 1,
+            } },
+            .{ .buffer_offset = texture_size_bytes, .buffer_row_length = 0, .buffer_image_height = 0, .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 1,
+                .layer_count = 1,
+            }, .image_offset = .{ .x = 0, .y = 0, .z = 0 }, .image_extent = .{
+                .width = texture_layer_dimensions.width,
+                .height = texture_layer_dimensions.height,
+                .depth = 1,
+            } },
         };
 
         _ = app.device_dispatch.cmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, .transfer_dst_optimal, 2, &regions);
@@ -1572,20 +1296,19 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
 
         // TODO: This could be done on another thread
-        for(icon_path_list) |icon_path, icon_path_i| {
+        for (icon_path_list) |icon_path, icon_path_i| {
             // TODO: Create an  arena / allocator of a fixed size that can be reused here.
             var icon_image = try img.Image.fromFilePath(allocator, icon_path);
             defer icon_image.deinit();
 
             const icon_type = @intToEnum(IconType, icon_path_i);
 
-            if(icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
-                std.log.err("Icon image for icon '{}' has unexpected dimensions."
-                         ++ "Icon assets may have gotten corrupted", .{icon_type});
+            if (icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
+                std.log.err("Icon image for icon '{}' has unexpected dimensions." ++ "Icon assets may have gotten corrupted", .{icon_type});
                 return error.AssetIconsDimensionsMismatch;
             }
 
-            const source_pixels = switch(icon_image.pixels) {
+            const source_pixels = switch (icon_image.pixels) {
                 .rgba32 => |pixels| pixels,
                 else => {
                     std.log.err("Icon images are expected to be in rgba32. Icon '{}' may have gotten corrupted", .{icon_type});
@@ -1593,9 +1316,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 },
             };
 
-            if(source_pixels.len != (icon_image.width * icon_image.height)) {
-                std.log.err("Loaded image for icon '{}' has an unexpected number of pixels."
-                         ++ "This is a bug in the application", .{icon_type});
+            if (source_pixels.len != (icon_image.width * icon_image.height)) {
+                std.log.err("Loaded image for icon '{}' has an unexpected number of pixels." ++ "This is a bug in the application", .{icon_type});
                 return error.AssetIconsMalformed;
             }
 
@@ -1603,14 +1325,14 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
             const x = @intCast(u32, icon_path_i) % icon_texture_row_count;
             const y = @intCast(u32, icon_path_i) / icon_texture_row_count;
-            const dst_offset_coords = geometry.Coordinates2D(u32) {
+            const dst_offset_coords = geometry.Coordinates2D(u32){
                 .x = x * icon_dimensions.width,
                 .y = y * icon_dimensions.height,
             };
             var src_y: u32 = 0;
-            while(src_y < icon_dimensions.height) : (src_y += 1) {
+            while (src_y < icon_dimensions.height) : (src_y += 1) {
                 var src_x: u32 = 0;
-                while(src_x < icon_dimensions.width) : (src_x += 1) {
+                while (src_x < icon_dimensions.width) : (src_x += 1) {
                     const src_index = src_x + (src_y * icon_dimensions.width);
                     const dst_index = (dst_offset_coords.x + src_x) + ((dst_offset_coords.y + src_y) * texture_layer_dimensions.width);
 
@@ -1622,7 +1344,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             }
         }
 
-        // Not sure if this is a hack, but because we multiply the texture sample by the 
+        // Not sure if this is a hack, but because we multiply the texture sample by the
         // color in the fragment shader, we need pixel in the texture that we known will return 1.0
         // Here we're setting the last pixel to 1.0, which corresponds to a texture mapping of 1.0, 1.0
         const last_index: usize = (@intCast(usize, texture_layer_dimensions.width) * texture_layer_dimensions.height) - 1;
@@ -1638,7 +1360,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         .{
             .src_access_mask = .{},
             .dst_access_mask = .{ .shader_read_bit = true },
-            .old_layout = .@"undefined",
+            .old_layout = .undefined,
             .new_layout = .shader_read_only_optimal,
             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -1691,13 +1413,13 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     const surface_capabilities = try app.instance_dispatch.getPhysicalDeviceSurfaceCapabilitiesKHR(app.physical_device, app.surface);
 
-    if(print_vulkan_objects.surface_abilties) {
+    if (print_vulkan_objects.surface_abilties) {
         std.debug.print("** Selected surface capabilites **\n\n", .{});
         printSurfaceCapabilities(surface_capabilities, 1);
         std.debug.print("\n", .{});
     }
 
-    if(transparancy_enabled) {
+    if (transparancy_enabled) {
         // Check to see if the compositor supports transparent windows and what
         // transparency mode needs to be set when creating the swapchain
         const supported = surface_capabilities.supported_composite_alpha;
@@ -1724,13 +1446,13 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.debug.assert(app.swapchain_extent.height <= surface_capabilities.max_image_extent.height);
 
     app.swapchain_min_image_count = surface_capabilities.min_image_count + 1;
-    
-    // TODO: Perhaps more flexibily should be allowed here. I'm unsure if an application is 
+
+    // TODO: Perhaps more flexibily should be allowed here. I'm unsure if an application is
     //       supposed to match the rotation of the system / monitor, but I would assume not..
     //       It is also possible that the inherit_bit_khr bit would be set in place of identity_bit_khr
-    if(surface_capabilities.current_transform.identity_bit_khr == false) {
-        std.log.err("Selected surface does not have the option to leave framebuffer image untransformed." ++ 
-                    "This is likely a vulkan bug.", .{});
+    if (surface_capabilities.current_transform.identity_bit_khr == false) {
+        std.log.err("Selected surface does not have the option to leave framebuffer image untransformed." ++
+            "This is likely a vulkan bug.", .{});
         return error.VulkanSurfaceTransformInvalid;
     }
 
@@ -1940,12 +1662,7 @@ const XCursor = struct {
 /// clicked one of these will be sent with the event.
 /// https://wayland-book.com/seat/pointer.html
 /// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
-const MouseButton = enum(c_int) {
-    left = 0x110,
-    right = 0x111,
-    middle = 0x112,
-    _
-};
+const MouseButton = enum(c_int) { left = 0x110, right = 0x111, middle = 0x112, _ };
 
 fn xdgWmBaseListener(xdg_wm_base: *xdg.WmBase, event: xdg.WmBase.Event, _: *WaylandClient) void {
     switch (event) {
@@ -1997,7 +1714,7 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, client: *Wayl
 fn shmListener(shm: *wl.Shm, event: wl.Shm.Event, client: *WaylandClient) void {
     _ = client;
     _ = shm;
-    switch(event) {
+    switch (event) {
         .format => |format| {
             std.log.info("Shm foramt: {}", .{format});
         },
@@ -2029,7 +1746,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             mouse_coordinates.x = motion.surface_x.toDouble();
             mouse_coordinates.y = motion.surface_y.toDouble();
 
-            if(@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
+            if (@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
                 return;
             }
 
@@ -2039,7 +1756,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             const mouse_y = screen_dimensions.height - @floatToInt(u16, mouse_coordinates.y);
             const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
 
-            if(is_within_bounds and !exit_button_hovered) {
+            if (is_within_bounds and !exit_button_hovered) {
                 exit_button_background_quad[0].color = window_decorations.exit_button.color_hovered;
                 exit_button_background_quad[1].color = window_decorations.exit_button.color_hovered;
                 exit_button_background_quad[2].color = window_decorations.exit_button.color_hovered;
@@ -2048,7 +1765,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 exit_button_hovered = true;
             }
 
-            if(!is_within_bounds and exit_button_hovered) {
+            if (!is_within_bounds and exit_button_hovered) {
                 exit_button_background_quad[0].color = window_decorations.color;
                 exit_button_background_quad[1].color = window_decorations.color;
                 exit_button_background_quad[2].color = window_decorations.color;
@@ -2058,8 +1775,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             }
         },
         .button => |button| {
-
-            if(!is_mouse_in_screen) {
+            if (!is_mouse_in_screen) {
                 return;
             }
 
@@ -2067,8 +1783,8 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             {
                 const mouse_x = @floatToInt(u16, mouse_coordinates.x);
                 const mouse_y = @floatToInt(u16, mouse_coordinates.y);
-                std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{mouse_x, mouse_y, screen_dimensions.width, screen_dimensions.height});
-                if(mouse_x < 3 and mouse_y < 3) {
+                std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{ mouse_x, mouse_y, screen_dimensions.width, screen_dimensions.height });
+                if (mouse_x < 3 and mouse_y < 3) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_left);
                 }
 
@@ -2076,49 +1792,49 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 const max_width = screen_dimensions.width - edge_threshold;
                 const max_height = screen_dimensions.height - edge_threshold;
 
-                if(mouse_x < edge_threshold and mouse_y > max_height) {
+                if (mouse_x < edge_threshold and mouse_y > max_height) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .top_left);
                     return;
                 }
 
-                if(mouse_x > max_width and mouse_y < edge_threshold) {
+                if (mouse_x > max_width and mouse_y < edge_threshold) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_right);
                     return;
                 }
 
-                if(mouse_x > max_width and mouse_y > max_height) {
+                if (mouse_x > max_width and mouse_y > max_height) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_right);
                     return;
                 }
 
-                if(mouse_x < edge_threshold) {
+                if (mouse_x < edge_threshold) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .left);
                     return;
                 }
 
-                if(mouse_x > max_width) {
+                if (mouse_x > max_width) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .right);
                     return;
                 }
 
-                if(mouse_y <= edge_threshold) {
+                if (mouse_y <= edge_threshold) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .top);
                     return;
                 }
 
-                if(mouse_y == max_height) {
+                if (mouse_y == max_height) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom);
                     return;
                 }
             }
 
-            if(@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
+            if (@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
                 return;
             }
 
-            if(draw_window_decorations_requested and mouse_button == .left) {
+            if (draw_window_decorations_requested and mouse_button == .left) {
                 // Start interactive window move if mouse coordinates are in window decorations bounds
-                if(@floatToInt(u32, mouse_coordinates.y) <= window_decorations.height_pixels) {
+                if (@floatToInt(u32, mouse_coordinates.y) <= window_decorations.height_pixels) {
                     client.xdg_toplevel.move(client.seat, button.serial);
                 }
                 const end_x = exit_button_extent.x + exit_button_extent.width;
@@ -2126,14 +1842,14 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 const mouse_x = @floatToInt(u16, mouse_coordinates.x);
                 const mouse_y = screen_dimensions.height - @floatToInt(u16, mouse_coordinates.y);
                 const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
-                if(is_within_bounds) {
+                if (is_within_bounds) {
                     std.log.info("Close button clicked. Shutdown requested.", .{});
                     is_shutdown_requested = true;
                 }
             }
         },
         .axis => |axis| {
-            std.log.info("Mouse: axis {} {}", .{axis.axis, axis.value.toDouble()});
+            std.log.info("Mouse: axis {} {}", .{ axis.axis, axis.value.toDouble() });
         },
         .frame => |frame| {
             _ = frame;
@@ -2211,7 +1927,6 @@ fn waylandSetup() !void {
 
     if (wayland_client.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
 
-
     //
     // Load cursor theme
     //
@@ -2229,7 +1944,6 @@ fn waylandSetup() !void {
 //
 
 fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
-
     const recreate_swapchain_start = std.time.nanoTimestamp();
 
     _ = try app.device_dispatch.waitForFences(
@@ -2336,12 +2050,7 @@ fn recordRenderPass(
     try app.device_dispatch.resetCommandPool(app.logical_device, app.command_pool, .{});
 
     // This value should never been seen, as we draw a background quad over it
-    const clear_color = graphics.RGBA(f32){ 
-        .r = 0.0,
-        .g = 0.0,
-        .b = 0.0,
-        .a = 1.0 - transparancy_level
-    };
+    const clear_color = graphics.RGBA(f32){ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 - transparancy_level };
     const clear_colors = [1]vk.ClearValue{
         vk.ClearValue{
             .color = vk.ClearColorValue{
@@ -2404,30 +2113,23 @@ fn recordRenderPass(
         app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &[1]vk.Buffer{texture_vertices_buffer}, &[1]vk.DeviceSize{0});
         app.device_dispatch.cmdBindIndexBuffer(command_buffer, texture_indices_buffer, 0, .uint16);
         app.device_dispatch.cmdBindDescriptorSets(
-            command_buffer, 
-            .graphics, 
-            app.pipeline_layout, 
-            0, 
-            1, 
-            &[1]vk.DescriptorSet{app.descriptor_sets[i]}, 
-            0, 
+            command_buffer,
+            .graphics,
+            app.pipeline_layout,
+            0,
+            1,
+            &[1]vk.DescriptorSet{app.descriptor_sets[i]},
+            0,
             undefined,
         );
-        
-        const push_constant = PushConstant {
-            .width = @intToFloat(f32, screen_dimensions.width),       
+
+        const push_constant = PushConstant{
+            .width = @intToFloat(f32, screen_dimensions.width),
             .height = @intToFloat(f32, screen_dimensions.height),
             .frame = @intToFloat(f32, frame_count),
         };
-       
-        app.device_dispatch.cmdPushConstants(
-            command_buffer, 
-            app.pipeline_layout, 
-            .{ .fragment_bit = true }, 
-            0, 
-            @sizeOf(PushConstant), 
-            &push_constant
-        );
+
+        app.device_dispatch.cmdPushConstants(command_buffer, app.pipeline_layout, .{ .fragment_bit = true }, 0, @sizeOf(PushConstant), &push_constant);
 
         app.device_dispatch.cmdDrawIndexed(command_buffer, indices_count, 1, 0, 0, 0);
 
@@ -2454,22 +2156,36 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     );
 
     // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkAcquireNextImageKHR.html
-    switch(acquire_image_result.result) {
+    switch (acquire_image_result.result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
             try recreateSwapchain(allocator, app);
             return;
         },
-        .error_out_of_host_memory => { return error.VulkanHostOutOfMemory; },
-        .error_out_of_device_memory => { return error.VulkanDeviceOutOfMemory; },
-        .error_device_lost => { return error.VulkanDeviceLost; },
-        .error_surface_lost_khr => { return error.VulkanSurfaceLost; },
-        .error_full_screen_exclusive_mode_lost_ext => { return error.VulkanFullScreenExclusiveModeLost; },
-        .timeout => { return error.VulkanAcquireFramebufferImageTimeout; },
-        .not_ready => { return error.VulkanAcquireFramebufferImageNotReady; },
+        .error_out_of_host_memory => {
+            return error.VulkanHostOutOfMemory;
+        },
+        .error_out_of_device_memory => {
+            return error.VulkanDeviceOutOfMemory;
+        },
+        .error_device_lost => {
+            return error.VulkanDeviceLost;
+        },
+        .error_surface_lost_khr => {
+            return error.VulkanSurfaceLost;
+        },
+        .error_full_screen_exclusive_mode_lost_ext => {
+            return error.VulkanFullScreenExclusiveModeLost;
+        },
+        .timeout => {
+            return error.VulkanAcquireFramebufferImageTimeout;
+        },
+        .not_ready => {
+            return error.VulkanAcquireFramebufferImageNotReady;
+        },
         else => {
             return error.VulkanAcquireNextImageUnknown;
-        }
+        },
     }
 
     const swapchain_image_index = acquire_image_result.image_index;
@@ -2509,22 +2225,36 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     const present_result = try app.device_dispatch.queuePresentKHR(app.graphics_present_queue, &present_info);
 
     // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkQueuePresentKHR.html
-    switch(present_result) {
+    switch (present_result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
             try recreateSwapchain(allocator, app);
             return;
         },
-        .error_out_of_host_memory => { return error.VulkanHostOutOfMemory; },
-        .error_out_of_device_memory => { return error.VulkanDeviceOutOfMemory; },
-        .error_device_lost => { return error.VulkanDeviceLost; },
-        .error_surface_lost_khr => { return error.VulkanSurfaceLost; },
-        .error_full_screen_exclusive_mode_lost_ext => { return error.VulkanFullScreenExclusiveModeLost; },
-        .timeout => { return error.VulkanAcquireFramebufferImageTimeout; },
-        .not_ready => { return error.VulkanAcquireFramebufferImageNotReady; },
+        .error_out_of_host_memory => {
+            return error.VulkanHostOutOfMemory;
+        },
+        .error_out_of_device_memory => {
+            return error.VulkanDeviceOutOfMemory;
+        },
+        .error_device_lost => {
+            return error.VulkanDeviceLost;
+        },
+        .error_surface_lost_khr => {
+            return error.VulkanSurfaceLost;
+        },
+        .error_full_screen_exclusive_mode_lost_ext => {
+            return error.VulkanFullScreenExclusiveModeLost;
+        },
+        .timeout => {
+            return error.VulkanAcquireFramebufferImageTimeout;
+        },
+        .not_ready => {
+            return error.VulkanAcquireFramebufferImageNotReady;
+        },
         else => {
             return error.VulkanQueuePresentUnknown;
-        }
+        },
     }
 
     previous_frame = current_frame;
@@ -2567,7 +2297,7 @@ fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
                 .store_op = .store,
                 .stencil_load_op = .dont_care,
                 .stencil_store_op = .dont_care,
-                .initial_layout = .@"undefined",
+                .initial_layout = .undefined,
                 .final_layout = .present_src_khr,
                 .flags = .{},
             },
@@ -2612,11 +2342,11 @@ fn createDescriptorPool(app: GraphicsContext) !vk.DescriptorPool {
     const image_count: u32 = @intCast(u32, app.swapchain_image_views.len);
     const descriptor_pool_sizes = [_]vk.DescriptorPoolSize{
         .{
-            .@"type" = .sampler,
+            .type = .sampler,
             .descriptor_count = image_count,
         },
         .{
-            .@"type" = .sampled_image,
+            .type = .sampled_image,
             .descriptor_count = image_count,
         },
     };
@@ -2644,11 +2374,7 @@ fn createDescriptorSetLayouts(allocator: std.mem.Allocator, app: GraphicsContext
             .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &descriptor_set_layout_bindings[0]),
             .flags = .{},
         };
-        descriptor_set_layouts[0] = try app.device_dispatch.createDescriptorSetLayout(
-            app.logical_device, 
-            &descriptor_set_layout_create_info, 
-            null
-        );
+        descriptor_set_layouts[0] = try app.device_dispatch.createDescriptorSetLayout(app.logical_device, &descriptor_set_layout_create_info, null);
 
         // We can copy the same descriptor set layout for each swapchain image
         var x: u32 = 1;
@@ -2659,11 +2385,7 @@ fn createDescriptorSetLayouts(allocator: std.mem.Allocator, app: GraphicsContext
     return descriptor_set_layouts;
 }
 
-fn createDescriptorSets(
-    allocator: std.mem.Allocator, 
-    app: GraphicsContext, 
-    descriptor_set_layouts: []vk.DescriptorSetLayout
-) ![]vk.DescriptorSet {
+fn createDescriptorSets(allocator: std.mem.Allocator, app: GraphicsContext, descriptor_set_layouts: []vk.DescriptorSetLayout) ![]vk.DescriptorSet {
     const swapchain_image_count: u32 = @intCast(u32, app.swapchain_image_views.len);
 
     // 1. Allocate DescriptorSets from DescriptorPool
@@ -2674,11 +2396,7 @@ fn createDescriptorSets(
             .descriptor_set_count = swapchain_image_count,
             .p_set_layouts = descriptor_set_layouts.ptr,
         };
-        try app.device_dispatch.allocateDescriptorSets(
-            app.logical_device, 
-            &descriptor_set_allocator_info, 
-            @ptrCast([*]vk.DescriptorSet, descriptor_sets.ptr)
-        );
+        try app.device_dispatch.allocateDescriptorSets(app.logical_device, &descriptor_set_allocator_info, @ptrCast([*]vk.DescriptorSet, descriptor_sets.ptr));
     }
 
     // 2. Create Sampler that will be written to DescriptorSet
@@ -2728,7 +2446,7 @@ fn createDescriptorSets(
 }
 
 fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.DescriptorSetLayout) !vk.PipelineLayout {
-    const push_constant = vk.PushConstantRange {
+    const push_constant = vk.PushConstantRange{
         .stage_flags = .{ .fragment_bit = true },
         .offset = 0,
         .size = @sizeOf(PushConstant),
@@ -2743,11 +2461,7 @@ fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.Descr
     return try app.device_dispatch.createPipelineLayout(app.logical_device, &pipeline_layout_create_info, null);
 }
 
-fn createGraphicsPipeline(
-    app: GraphicsContext, 
-    pipeline_layout: vk.PipelineLayout, 
-    render_pass: vk.RenderPass
-) !vk.Pipeline {
+fn createGraphicsPipeline(app: GraphicsContext, pipeline_layout: vk.PipelineLayout, render_pass: vk.RenderPass) !vk.Pipeline {
     const vertex_input_attribute_descriptions = [_]vk.VertexInputAttributeDescription{
         vk.VertexInputAttributeDescription{ // inPosition
             .binding = 0,
@@ -2868,7 +2582,7 @@ fn createGraphicsPipeline(
 
     const color_blend_attachment = vk.PipelineColorBlendAttachmentState{
         .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-        .blend_enable = if(enable_blending) vk.TRUE else vk.FALSE,
+        .blend_enable = if (enable_blending) vk.TRUE else vk.FALSE,
         .alpha_blend_op = .add,
         .color_blend_op = .add,
         .dst_alpha_blend_factor = .one,
@@ -2888,7 +2602,7 @@ fn createGraphicsPipeline(
     };
 
     const dynamic_states = [_]vk.DynamicState{ .viewport, .scissor };
-    const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo {
+    const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo{
         .dynamic_state_count = 2,
         .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
         .flags = .{},
@@ -2917,14 +2631,7 @@ fn createGraphicsPipeline(
     };
 
     var graphics_pipeline: vk.Pipeline = undefined;
-    _ = try app.device_dispatch.createGraphicsPipelines(
-        app.logical_device, 
-        .null_handle, 
-        1, 
-        &pipeline_create_infos, 
-        null, 
-        @ptrCast([*]vk.Pipeline, &graphics_pipeline)
-    );
+    _ = try app.device_dispatch.createGraphicsPipelines(app.logical_device, .null_handle, 1, &pipeline_create_infos, null, @ptrCast([*]vk.Pipeline, &graphics_pipeline));
 
     return graphics_pipeline;
 }
@@ -2959,7 +2666,7 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
     var framebuffers = try allocator.alloc(vk.Framebuffer, app.swapchain_image_views.len);
     var i: u32 = 0;
     while (i < app.swapchain_image_views.len) : (i += 1) {
-        // We reuse framebuffer_create_info for each framebuffer we create, 
+        // We reuse framebuffer_create_info for each framebuffer we create,
         // we only need to update the swapchain_image_view that is attached
         framebuffer_create_info.p_attachments = @ptrCast([*]vk.ImageView, &app.swapchain_image_views[i]);
         framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
@@ -2990,9 +2697,9 @@ fn createVertexShaderModule(app: GraphicsContext) !vk.ShaderModule {
 }
 
 fn selectSurfaceFormat(
-    allocator: std.mem.Allocator, 
-    app: GraphicsContext, 
-    color_space: vk.ColorSpaceKHR, 
+    allocator: std.mem.Allocator,
+    app: GraphicsContext,
+    color_space: vk.ColorSpaceKHR,
     surface_format: vk.Format,
 ) !?vk.SurfaceFormatKHR {
     var format_count: u32 = undefined;
@@ -3000,7 +2707,7 @@ fn selectSurfaceFormat(
         return error.FailedToGetSurfaceFormats;
     }
 
-    if(format_count == 0) {
+    if (format_count == 0) {
         // NOTE: This should not happen. As per spec:
         //       "The number of format pairs supported must be greater than or equal to 1"
         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceFormatsKHR.html
@@ -3015,12 +2722,12 @@ fn selectSurfaceFormat(
         return error.FailedToGetSurfaceFormats;
     }
 
-    for(formats) |format| {
-        if(format.format == surface_format and format.color_space == color_space) {
+    for (formats) |format| {
+        if (format.format == surface_format and format.color_space == color_space) {
             return format;
         }
     }
-    return null;     
+    return null;
 }
 
 //
@@ -3039,7 +2746,7 @@ fn writeScreenshot() void {
     defer output_image.deinit();
     std.mem.copy(img.color.Rgba32, output_image.pixels.rgba32, source_image);
     const screenshot_path = "./screenshot.png";
-    output_image.writeToFilePath(screenshot_path, .{.png = .{}}) catch |err| {
+    output_image.writeToFilePath(screenshot_path, .{ .png = .{} }) catch |err| {
         std.log.err("Failed to write image to file. Error: {}", .{err});
         return;
     };
@@ -3049,7 +2756,7 @@ fn writeScreenshot() void {
 }
 
 fn screencopyFrameListener(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, record_buffer: *ScreenRecordBuffer) void {
-    switch(event) {
+    switch (event) {
         .buffer => |buffer| {
             screen_capture_info.width = buffer.width;
             screen_capture_info.height = buffer.height;
@@ -3079,12 +2786,11 @@ fn screencopyFrameListener(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyF
         },
         .failed => {
             std.log.err("Failed in Screencopy Frame", .{});
-        }
+        },
     }
 }
 
 fn initVideoFilters() !void {
-
     video_filter_graph = libav.avfilter_graph_alloc() orelse return error.FailedToAllocateGraphFilter;
     _ = libav.av_opt_set(video_filter_graph, "scale_sws_opts", "flags=fast_bilinear:src_range=1:dst_range=1", 0);
 
@@ -3107,30 +2813,30 @@ fn initVideoFilters() !void {
     var code = libav.avfilter_graph_create_filter(
         @ptrCast([*c][*c]libav.AVFilterContext, &video_filter_source_context),
         source,
-        "Source", 
+        "Source",
         buffer_filter_config,
         null,
         video_filter_graph,
     );
-    if(code < 0) {
+    if (code < 0) {
         std.log.err("Failed to create video source filter", .{});
         return error.CreateVideoSourceFilterFailed;
     }
-    
+
     code = libav.avfilter_graph_create_filter(
         @ptrCast([*c][*c]libav.AVFilterContext, &video_filter_sink_context),
         sink,
-        "Sink", 
+        "Sink",
         null,
         null,
         video_filter_graph,
     );
-    if(code < 0) {
+    if (code < 0) {
         std.log.err("Failed to create video sink filter", .{});
         return error.CreateVideoSinkFilterFailed;
     }
 
-    const supported_pixel_formats = [2]libav.AVPixelFormat {
+    const supported_pixel_formats = [2]libav.AVPixelFormat{
         libav.AV_PIX_FMT_YUV420P,
         libav.AV_PIX_FMT_NONE,
     };
@@ -3142,7 +2848,7 @@ fn initVideoFilters() !void {
         @sizeOf(libav.AVPixelFormat),
         libav.AV_OPT_SEARCH_CHILDREN,
     );
-    if(code < 0) {
+    if (code < 0) {
         std.log.err("Failed to set pix_fmt option", .{});
         return error.SetPixFmtOptionFailed;
     }
@@ -3161,26 +2867,26 @@ fn initVideoFilters() !void {
 
     code = libav.avfilter_graph_parse_ptr(
         video_filter_graph,
-        "null", 
-        @ptrCast([*c][*c]libav.AVFilterInOut, &inputs), 
-        @ptrCast([*c][*c]libav.AVFilterInOut, &outputs), 
+        "null",
+        @ptrCast([*c][*c]libav.AVFilterInOut, &inputs),
+        @ptrCast([*c][*c]libav.AVFilterInOut, &outputs),
         null,
     );
-    if(code < 0) {
+    if (code < 0) {
         std.log.err("Failed to parse graph filter", .{});
         return error.ParseGraphFilterFailed;
     }
 
-    if(hw_device_context) |context| {
+    if (hw_device_context) |context| {
         std.debug.assert(false);
         var i: usize = 0;
-        while(i < video_filter_graph.nb_filters) : (i += 1) {
+        while (i < video_filter_graph.nb_filters) : (i += 1) {
             video_filter_graph.filters[i][0].hw_device_ctx = libav.av_buffer_ref(context);
         }
     }
 
     code = libav.avfilter_graph_config(video_filter_graph, null);
-    if(code < 0) {
+    if (code < 0) {
         std.log.err("Failed to configure graph filter", .{});
         return error.ConfigureGraphFilterFailed;
     }
@@ -3203,7 +2909,7 @@ fn writeVideoFrame(current_frame_index: u32) !void {
     //
     // Prepare frame
     //
-    const stride = [1]i32{ 4 * @intCast(i32, screen_capture_info.width) };
+    const stride = [1]i32{4 * @intCast(i32, screen_capture_info.width)};
     video_frame = libav.av_frame_alloc() orelse return error.AllocateFrameFailed;
 
     video_frame.data[0] = shared_memory_map.ptr;
@@ -3215,7 +2921,7 @@ fn writeVideoFrame(current_frame_index: u32) !void {
     video_frame.pts = current_frame_index;
 
     var code = libav.av_buffersrc_add_frame_flags(video_filter_source_context, video_frame, 0);
-    if(code < 0) {
+    if (code < 0) {
         std.log.err("Failed to add frame to source", .{});
         return;
     }
@@ -3223,18 +2929,18 @@ fn writeVideoFrame(current_frame_index: u32) !void {
     while (true) {
         var filtered_frame: *libav.AVFrame = libav.av_frame_alloc() orelse return error.AllocateFilteredFrameFailed;
         code = libav.av_buffersink_get_frame(
-            video_filter_sink_context, 
+            video_filter_sink_context,
             @ptrCast([*]libav.AVFrame, filtered_frame),
         );
-        if(code < 0) {
+        if (code < 0) {
             //
             // End of stream
             //
-            if(code == libav.AVERROR_EOF) return;
+            if (code == libav.AVERROR_EOF) return;
             //
             // No error, just no frames to read
             //
-            if(code == EAGAIN) break;
+            if (code == EAGAIN) break;
             //
             // An actual error
             //
@@ -3257,16 +2963,16 @@ fn writeVideoFrame(current_frame_index: u32) !void {
 
 fn encodeFrame(filtered_frame: ?*libav.AVFrame, packet: *libav.AVPacket) !void {
     var code = libav.avcodec_send_frame(video_codec_context, filtered_frame);
-    if(code < 0) {
+    if (code < 0) {
         std.log.err("Failed to send frame for encoding", .{});
         return error.EncodeFrameFailed;
     }
 
-    while(code >= 0) {
+    while (code >= 0) {
         code = libav.avcodec_receive_packet(video_codec_context, packet);
-        if(code == EAGAIN or code == libav.AVERROR_EOF)
+        if (code == EAGAIN or code == libav.AVERROR_EOF)
             return;
-        if(code < 0) {
+        if (code < 0) {
             std.log.err("Failed to recieve encoded frame (packet)", .{});
             return error.ReceivePacketFailed;
         }
@@ -3277,13 +2983,12 @@ fn encodeFrame(filtered_frame: ?*libav.AVFrame, packet: *libav.AVPacket) !void {
         packet.stream_index = video_stream.index;
 
         code = libav.av_interleaved_write_frame(format_context, packet);
-        if(code != 0) {
+        if (code != 0) {
             std.log.warn("Interleaved write frame failed", .{});
         }
         libav.av_packet_unref(packet);
     }
 }
-
 
 const ScreenCaptureInfo = struct {
     width: u32,
@@ -3297,7 +3002,6 @@ const ScreenCaptureInfo = struct {
 //
 
 fn printVulkanMemoryHeap(memory_properties: vk.PhysicalDeviceMemoryProperties, heap_index: u32, comptime indent_level: u32) void {
-
     const heap_count: u32 = memory_properties.memory_heap_count;
     std.debug.assert(heap_index <= heap_count);
     const base_indent = "  " ** indent_level;
@@ -3315,7 +3019,7 @@ fn printVulkanMemoryHeap(memory_properties: vk.PhysicalDeviceMemoryProperties, h
 
     var memory_type_i: u32 = 0;
     while (memory_type_i < memory_type_count) : (memory_type_i += 1) {
-        if(memory_properties.memory_types[memory_type_i].heap_index == heap_index) {
+        if (memory_properties.memory_types[memory_type_i].heap_index == heap_index) {
             print(base_indent ++ "    Memory Index #{}\n", .{memory_type_i});
             const memory_flags = memory_properties.memory_types[memory_type_i].property_flags;
             print(base_indent ++ "      Device Local:     {}\n", .{memory_flags.device_local_bit});
@@ -3339,7 +3043,7 @@ fn printVulkanMemoryHeaps(memory_properties: vk.PhysicalDeviceMemoryProperties, 
 fn printVulkanQueueFamilies(queue_families: []vk.QueueFamilyProperties, comptime indent_level: u32) void {
     const print = std.debug.print;
     const base_indent = "  " ** indent_level;
-    for(queue_families) |queue_family, queue_family_i| {
+    for (queue_families) |queue_family, queue_family_i| {
         print(base_indent ++ "Queue family index #{d}\n", .{queue_family_i});
         printVulkanQueueFamily(queue_family, indent_level + 1);
     }
