@@ -5,6 +5,9 @@
 
 const std = @import("std");
 
+const heap_alignment = 8;
+pub const IndexUntyped = u16;
+
 pub fn Index(comptime Type: type) type {
     return packed struct(u16) {
         const alignment = @alignOf(Type);
@@ -34,7 +37,38 @@ pub fn SliceIndex(comptime Type: type) type {
     };
 }
 
-const heap_alignment = 8;
+pub fn Cluster(comptime Type: type) type {
+    comptime std.debug.assert(@alignOf(Type) == 8);
+    return packed struct(u32) {
+        base_index: Index(Type),
+        capacity: u8,
+        count: u8,
+
+        pub inline fn write(self: @This(), value: *@This()) Index(Type) {
+            // TODO: Is memcpy faster?
+            @ptrCast(*Type, heap_memory[self.base_index.index + (@sizeOf(Type) * self.count)]).* = value.*;
+            const index: u16 = self.base_index.index + self.count;
+            self.count += 1;
+            return .{ .index = index };
+        }
+
+        pub inline fn at(self: @This(), index: u8) Type {
+            return .{ .index = self.index + index }.get();
+        }
+
+        pub inline fn atPtr(self: @This(), index: u8) *Type {
+            return .{ .index = self.index + index }.getPtr();
+        }
+
+        pub inline fn atIndex(self: @This(), index: u8) Index(Type) {
+            return .{ .index = self.index + index };
+        }
+
+        pub inline fn isSpace(self: @This()) bool {
+            return (self.count < self.capacity);
+        }
+    };
+}
 
 var heap_memory: [*]align(8) u8 = undefined;
 var heap_index: u16 = undefined;
@@ -56,6 +90,30 @@ pub inline fn usedBytesCount() u16 {
     return heap_index;
 }
 
+pub inline fn reserve(comptime Type: type, count: u16, comptime options: WriteOptions) SliceIndex(Type) {
+    if (!options.check_alignment) std.debug.assert(@alignOf(Type) == heap_alignment);
+    const result_index = heap_index;
+    const allocation_size = @sizeOf(Type) * count;
+    heap_index += @sizeOf(Type) * count;
+    if (options.check_alignment) {
+        heap_index += @mod(heap_alignment - @mod(allocation_size, heap_alignment), heap_alignment);
+    }
+    std.debug.assert(heap_index % heap_alignment == 0);
+    return .{ .index = result_index, .count = count };
+}
+
+pub fn allocateCluster(comptime Type: type, capacity: u8) Cluster(type) {
+    // TODO: Test if Clusters will work for non-aligned types
+    //       For now be safe and disable
+    comptime std.debug.assert(@alignOf(Type) == heap_alignment);
+    const slice = reserve(Type, capacity, .{ .check_alignment = (@alignOf(type) == heap_alignment) });
+    return .{
+        .base_index = slice.index,
+        .capacity = capacity,
+        .count = 0,
+    };
+}
+
 pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
     std.debug.assert(@alignOf(Type) <= heap_alignment);
     const alignment_padding = comptime heap_alignment - @alignOf(Type);
@@ -71,17 +129,33 @@ pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
     return .{ .index = result_index };
 }
 
-pub inline fn writeSlice(comptime Type: type, slice: []const Type) SliceIndex(Type) {
+pub const WriteOptions = struct {
+    check_alignment: bool = false,
+};
+
+pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime options: WriteOptions) SliceIndex(Type) {
+    const type_size = @sizeOf(Type);
+    if (!options.check_alignment) {
+        std.debug.assert(@alignOf(Type) == heap_alignment);
+        const bytes_count = type_size * slice.len;
+        @memcpy(
+            @ptrCast([*]u8, &heap_memory[heap_index]),
+            @ptrCast([*]const u8, slice.ptr),
+            bytes_count,
+        );
+        const result_index = heap_index;
+        heap_index += bytes_count;
+        return result_index;
+    }
     comptime std.debug.assert(@alignOf(Type) <= heap_alignment);
     std.debug.assert(slice.len <= std.math.maxInt(u16));
-    const type_size = @sizeOf(Type);
-    const type_align = @alignOf(Type);
+    const allocation_size = type_size * slice.len;
     // TODO: This is a hefty calculation for this function
-    const alignment_padding: u16 = @mod(heap_alignment - @mod(type_align * slice.len, heap_alignment), heap_alignment);
+    const alignment_padding: u16 = @mod(heap_alignment - @mod(allocation_size, heap_alignment), heap_alignment);
     @memcpy(
         @ptrCast([*]u8, &heap_memory[heap_index]),
         @ptrCast([*]const u8, slice.ptr),
-        type_size * slice.len,
+        allocation_size,
     );
     const result_index = heap_index;
     heap_index += @intCast(u16, type_size * slice.len) + alignment_padding;
@@ -138,16 +212,18 @@ test "mini_heap write slices" {
 
     try init();
 
+    const write_options = WriteOptions{ .check_alignment = true };
+
     const string1: []const u8 = "1234567";
-    const string1_index = writeSlice(u8, string1);
+    const string1_index = writeSlice(u8, string1, write_options);
     try expect(usedBytesCount() == heap_alignment * 1);
 
     const string2 = "12345678";
-    const string2_index = writeSlice(u8, string2);
+    const string2_index = writeSlice(u8, string2, write_options);
     try expect(usedBytesCount() == heap_alignment * 2);
 
     const string3 = "123456789";
-    const string3_index = writeSlice(u8, string3);
+    const string3_index = writeSlice(u8, string3, write_options);
     try expect(usedBytesCount() == heap_alignment * 4);
 
     const indexed_string_1 = string1_index.get();
