@@ -13,6 +13,7 @@ const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 const QuadFaceWriter = graphics.QuadFaceWriter;
 const QuadFaceWriterPool = graphics.QuadFaceWriterPool;
+const gui = @import("gui.zig");
 
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
@@ -809,7 +810,7 @@ fn draw() !void {
                 .width = 2.0,
                 .height = window_decoration_height,
             };
-            faces[0] = graphics.generateQuadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
+            faces[0] = graphics.quadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
         }
         {
             //
@@ -836,8 +837,8 @@ fn draw() !void {
                 .width = screen_icon_dimensions.width,
                 .height = screen_icon_dimensions.height,
             };
-            faces[1] = graphics.generateQuadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
-            faces[2] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
+            faces[1] = graphics.quadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
+            faces[2] = graphics.quadTextured(graphics.GenericVertex, extent, texture_extent, .top_left);
 
             // TODO: Update on screen size change
             const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
@@ -869,10 +870,28 @@ fn draw() !void {
                 .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
                 .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
             };
-            faces[face_index] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
+            faces[face_index] = graphics.quadTextured(graphics.GenericVertex, extent, texture_extent, .top_left);
         }
     }
-    vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count);
+
+    {
+        const position = geometry.Coordinates2D(f32){
+            .x = 0.0,
+            .y = 0.0,
+        };
+        const dimensions = geometry.Dimensions2D(f32){
+            .width = 0.2,
+            .height = 0.2,
+        };
+        const color = graphics.RGB(f32){
+            .r = 0.3,
+            .g = 0.6,
+            .b = 0.2,
+        };
+        try gui.button.draw(graphics.GenericVertex, &face_writer, &position, &dimensions, .{ .color = color });
+    }
+
+    vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count) + face_writer.used;
     if (draw_window_decorations_requested) {
         vertex_buffer_quad_count += 3;
     }
@@ -1542,7 +1561,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const required_alignment = @alignOf(graphics.GenericVertex);
         const vertices_addr = @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &mapped_device_memory[vertices_range_index_begin]));
         background_quad = @ptrCast(*graphics.QuadFace(graphics.GenericVertex), @alignCast(required_alignment, &vertices_addr[0]));
-        background_quad.* = graphics.generateQuadColored(graphics.GenericVertex, full_screen_extent, background_color, .top_left);
+        background_quad.* = graphics.quadColored(graphics.GenericVertex, full_screen_extent, background_color, .top_left);
         const vertices_quad_size: u32 = vertices_range_size / @sizeOf(graphics.GenericVertex);
         quad_face_writer_pool = QuadFaceWriterPool(graphics.GenericVertex).initialize(vertices_addr, vertices_quad_size);
     }

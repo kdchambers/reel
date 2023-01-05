@@ -52,7 +52,7 @@ pub fn generateQuad(
     };
 }
 
-pub fn generateTexturedQuad(
+pub fn quadTextured(
     comptime VertexType: type,
     extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
     texture_extent: geometry.Extent2D(TypeOfField(VertexType, "tx")),
@@ -72,7 +72,7 @@ pub fn generateTexturedQuad(
     return base_quad;
 }
 
-pub fn generateQuadColored(
+pub fn quadColored(
     comptime VertexType: type,
     extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
     quad_color: RGBA(f32),

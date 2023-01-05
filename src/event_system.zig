@@ -51,7 +51,6 @@ pub fn MouseEventSystem(comptime event_handler: anytype) type {
         //
         // 16 Clusters of capacity 64 elements = Max of 1024
         //
-
         var binding_cluster_buffer: [16]mini_heap.Cluster(EventBinding, 64) = undefined;
         var binding_cluster_buffer_count: u32 = 0;
 
