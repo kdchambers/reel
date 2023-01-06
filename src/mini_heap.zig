@@ -21,6 +21,27 @@ pub fn Index(comptime Type: type) type {
         pub inline fn getPtr(self: @This()) *Type {
             return @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.index]));
         }
+
+        pub inline fn toIndexAligned(self: @This()) IndexAligned(Type) {
+            return .{ .index = @intCast(u14, @divExact(self.index, 8)) };
+        }
+    };
+}
+
+// Same as Index, but we can divide by 8 to save space (Must be on a 8 byte boundry)
+pub fn IndexAligned(comptime Type: type) type {
+    return packed struct(u14) {
+        const alignment = @alignOf(Type);
+
+        index: u14,
+
+        pub inline fn get(self: @This()) Type {
+            return @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.index * 8])).*;
+        }
+
+        pub inline fn getPtr(self: @This()) *Type {
+            return @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.index * 8]));
+        }
     };
 }
 
@@ -32,40 +53,57 @@ pub fn SliceIndex(comptime Type: type) type {
         count: u16,
 
         pub inline fn get(self: @This()) []Type {
-            return @ptrCast([*]Type, @alignCast(alignment, &heap_memory[self.index]))[0..self.count];
+            const index = self.index.index;
+            return @ptrCast([*]Type, @alignCast(alignment, &heap_memory[index]))[0..self.count];
         }
     };
 }
 
 pub fn Cluster(comptime Type: type) type {
-    comptime std.debug.assert(@alignOf(Type) == 8);
     return packed struct(u32) {
+        const alignment = @alignOf(Type);
+
         base_index: Index(Type),
         capacity: u8,
-        count: u8,
+        len: u8,
 
-        pub inline fn write(self: @This(), value: *@This()) Index(Type) {
+        pub inline fn reserve(self: *@This()) Index(Type) {
+            const index = self.base_index.index + self.len;
+            self.len += 1;
+            return .{ .index = index };
+        }
+
+        pub inline fn write(self: *@This(), value: *const Type) Index(Type) {
             // TODO: Is memcpy faster?
-            @ptrCast(*Type, heap_memory[self.base_index.index + (@sizeOf(Type) * self.count)]).* = value.*;
-            const index: u16 = self.base_index.index + self.count;
-            self.count += 1;
+            @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.base_index.index + (@sizeOf(Type) * self.len)])).* = value.*;
+            const index: u16 = self.base_index.index + self.len;
+            self.len += 1;
             return .{ .index = index };
         }
 
         pub inline fn at(self: @This(), index: u8) Type {
-            return .{ .index = self.index + index }.get();
+            return @ptrCast([*]Type, @alignCast(alignment, &heap_memory[self.base_index.index]))[index];
         }
 
         pub inline fn atPtr(self: @This(), index: u8) *Type {
-            return .{ .index = self.index + index }.getPtr();
+            const misalignment = (self.base_index.index + (index * @sizeOf(Type))) % alignment;
+            if (misalignment != 0) {
+                std.log.err("Base index: {d} Type: {s}, alignment: {d}, index: {d} is misaligned", .{
+                    self.base_index.index,
+                    @typeName(Type),
+                    alignment,
+                    index,
+                });
+            }
+            return @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.base_index.index + (index * @sizeOf(Type))]));
         }
 
         pub inline fn atIndex(self: @This(), index: u8) Index(Type) {
-            return .{ .index = self.index + index };
+            return Index(Type){ .index = self.base_index.index + index };
         }
 
         pub inline fn isSpace(self: @This()) bool {
-            return (self.count < self.capacity);
+            return (self.len < self.capacity);
         }
     };
 }
@@ -91,38 +129,46 @@ pub inline fn usedBytesCount() u16 {
 }
 
 pub inline fn reserve(comptime Type: type, count: u16, comptime options: WriteOptions) SliceIndex(Type) {
-    if (!options.check_alignment) std.debug.assert(@alignOf(Type) == heap_alignment);
+    const allocation_size = @sizeOf(Type) * @intCast(u16, count);
+    const misalignment = allocation_size % heap_alignment;
+    //
+    // Even if `check_alignment` is false, we still want to check alignment in debug mode
+    //
+    std.debug.assert(misalignment == 0);
     const result_index = heap_index;
-    const allocation_size = @sizeOf(Type) * count;
-    heap_index += @sizeOf(Type) * count;
+    heap_index += allocation_size;
     if (options.check_alignment) {
-        heap_index += @mod(heap_alignment - @mod(allocation_size, heap_alignment), heap_alignment);
+        const alignment_padding = heap_alignment - misalignment;
+        heap_index += alignment_padding;
     }
     std.debug.assert(heap_index % heap_alignment == 0);
     return .{ .index = result_index, .count = count };
 }
 
-pub fn allocateCluster(comptime Type: type, capacity: u8) Cluster(type) {
-    // TODO: Test if Clusters will work for non-aligned types
-    //       For now be safe and disable
-    comptime std.debug.assert(@alignOf(Type) == heap_alignment);
-    const slice = reserve(Type, capacity, .{ .check_alignment = (@alignOf(type) == heap_alignment) });
+pub fn allocateCluster(comptime Type: type, capacity: u8) Cluster(Type) {
+    const is_aligned = ((@alignOf(Type) * @intCast(usize, capacity)) % heap_alignment) == 0;
+    // TODO: Do proper tests for non-aligned types, for now be safe and disable
+    if (!is_aligned) {
+        std.log.err("cluster allocation of {s} x {d} is not aligned", .{
+            @typeName(Type),
+            capacity,
+        });
+        std.debug.assert(is_aligned);
+    }
+    const slice = reserve(Type, capacity, .{ .check_alignment = false });
     return .{
-        .base_index = slice.index,
+        .base_index = .{ .index = slice.index },
         .capacity = capacity,
-        .count = 0,
+        .len = 0,
     };
 }
 
 pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
     std.debug.assert(@alignOf(Type) <= heap_alignment);
-    const alignment_padding = comptime heap_alignment - @alignOf(Type);
+    const type_align = @alignOf(Type);
+    const alignment_padding = comptime heap_alignment - type_align;
     const type_size = @sizeOf(Type);
-    @memcpy(
-        @ptrCast([*]u8, &heap_memory[heap_index]),
-        @ptrCast([*]const u8, value),
-        type_size,
-    );
+    @ptrCast(*Type, @alignCast(type_align, &heap_memory[heap_index])).* = value.*;
     const result_index = heap_index;
     heap_index += type_size + alignment_padding;
     std.debug.assert(heap_index % heap_alignment == 0);
