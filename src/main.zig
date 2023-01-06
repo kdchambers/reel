@@ -251,6 +251,7 @@ const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericVerte
 const memory_size = indices_range_size + vertices_range_size;
 
 var quad_face_writer_pool: QuadFaceWriterPool = undefined;
+var face_writer: QuadFaceWriter = undefined;
 
 const validation_layers = if (enable_validation_layers)
     [1][*:0]const u8{"VK_LAYER_KHRONOS_validation"}
@@ -271,7 +272,8 @@ var is_shutdown_requested: bool = false;
 ///   4. Number of vertices to be drawn has changed
 var is_record_requested: bool = true;
 
-var vertex_buffer: []graphics.QuadFace = undefined;
+var quad_buffer: []graphics.QuadFace = undefined;
+var quad_butter_count: u32 = 0;
 
 var current_frame: u32 = 0;
 var previous_frame: u32 = 0;
@@ -284,8 +286,6 @@ var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
 
 var mouse_coordinates = geometry.Coordinates2D(f64){ .x = 0.0, .y = 0.0 };
 var is_mouse_in_screen = false;
-
-var vertex_buffer_quad_count: u32 = 0;
 
 var texture_image_view: vk.ImageView = undefined;
 var texture_image: vk.Image = undefined;
@@ -631,11 +631,28 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             try recreateSwapchain(allocator, app);
         }
 
-        if(example_button_opt) |example_button| {
+        if (example_button_opt) |example_button| {
             const state = example_button.state.getPtr();
-            if(state.hover_enter) {
-                std.log.info("Button hovered!", .{});
-                is_shutdown_requested = true;
+            if (state.hover_enter) {
+                //
+                // TODO: Reset all state values on loop start
+                //
+                state.hover_enter = false;
+                example_button.setColor(.{
+                    .r = 1.0,
+                    .g = 0.0,
+                    .b = 0.0,
+                    .a = 1.0,
+                });
+            }
+            if (state.hover_exit) {
+                state.hover_exit = false;
+                example_button.setColor(.{
+                    .r = 0.0,
+                    .g = 1.0,
+                    .b = 0.0,
+                    .a = 1.0,
+                });
             }
         }
 
@@ -652,7 +669,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             // Even though we're running at a constant loop, we don't always need to re-record command buffers
             if (is_record_requested) {
                 is_record_requested = false;
-                try recordRenderPass(app.*, vertex_buffer_quad_count * 6);
+                try recordRenderPass(app.*, quad_butter_count * 6);
             }
 
             try renderFrame(allocator, app);
@@ -757,13 +774,23 @@ fn draw() !void {
     const outer_margin_pixels: u32 = 20;
     const inner_margin_pixels: u32 = 10;
 
+    mini_heap.reset();
+    event_system.init();
+
+    face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
+    std.debug.assert(face_writer.used == 0);
+    gui.init(
+        &face_writer,
+        quad_buffer,
+    );
+
     const dimensions_pixels = geometry.Dimensions2D(u32){
         .width = icon_dimensions.width,
         .height = icon_dimensions.height,
     };
 
     if (draw_window_decorations_requested and screen_dimensions.height <= window_decorations.height_pixels) {
-        vertex_buffer_quad_count = 0;
+        quad_butter_count = 0;
         return;
     }
 
@@ -776,7 +803,7 @@ fn draw() !void {
     const insufficient_vertical_space = (available_screen_dimensions.height < (dimensions_pixels.height + outer_margin_pixels * 2));
 
     if (insufficient_horizontal_space or insufficient_vertical_space) {
-        vertex_buffer_quad_count = 0;
+        quad_butter_count = 0;
         return;
     }
 
@@ -813,8 +840,6 @@ fn draw() !void {
     const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.width);
     const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
 
-    var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
-    std.debug.assert(face_writer.used == 0);
     if (draw_window_decorations_requested) {
         var faces = try face_writer.allocate(3);
         const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
@@ -905,10 +930,10 @@ fn draw() !void {
             .b = 0.2,
             .a = 1.0,
         };
-        example_button_opt = try gui.button.draw(&face_writer, extent, color);
+        example_button_opt = try gui.button.draw(extent, color);
     }
 
-    vertex_buffer_quad_count = 1 + face_writer.used;
+    quad_butter_count = 1 + face_writer.used;
 }
 
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
@@ -1574,9 +1599,10 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         // TODO: Cleanup alignCasts
         const required_alignment = @alignOf(graphics.GenericVertex);
         const vertices_addr = @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &mapped_device_memory[vertices_range_index_begin]));
-        background_quad = @ptrCast(*graphics.QuadFace, @alignCast(required_alignment, &vertices_addr[0]));
-        background_quad.* = graphics.quadColored(full_screen_extent, background_color, .top_left);
         const vertices_quad_size: u32 = vertices_range_size / @sizeOf(graphics.GenericVertex);
+        quad_buffer = @ptrCast([*]graphics.QuadFace, @alignCast(required_alignment, &vertices_addr[0]))[0..vertices_quad_size];
+        background_quad = @ptrCast(*graphics.QuadFace, &quad_buffer[0]);
+        background_quad.* = graphics.quadColored(full_screen_extent, background_color, .top_left);
         quad_face_writer_pool = QuadFaceWriterPool.initialize(vertices_addr, vertices_quad_size);
     }
 

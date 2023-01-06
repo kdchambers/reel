@@ -120,6 +120,10 @@ pub fn deinit() void {
     std.heap.page_allocator.free(heap_memory[0..std.math.maxInt(u16)]);
 }
 
+pub inline fn reset() void {
+    heap_index = 0;
+}
+
 pub inline fn freeBytesCount() u16 {
     return heap_memory.len - heap_index;
 }

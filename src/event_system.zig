@@ -12,7 +12,6 @@ const IndexAligned = mini_heap.IndexAligned;
 const MouseEventEntry = packed struct(u32) {
     hover_enabled: bool,
     hover_active: bool,
-    // NOTE: You could use two u14s for position
     extent: mini_heap.IndexAligned(geometry.Extent2D(f32)),
     state: mini_heap.Index(HoverZoneState),
 };
