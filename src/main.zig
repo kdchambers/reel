@@ -9,6 +9,8 @@ const img = @import("zigimg");
 const shaders = @import("shaders");
 const fontana = @import("fontana");
 
+const mini_heap = @import("mini_heap.zig");
+const event_system = @import("event_system.zig");
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 const QuadFaceWriter = graphics.QuadFaceWriter;
@@ -248,7 +250,7 @@ const vertices_range_size = max_texture_quads_per_render * @sizeOf(graphics.Gene
 const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericVertex);
 const memory_size = indices_range_size + vertices_range_size;
 
-var quad_face_writer_pool: QuadFaceWriterPool(graphics.GenericVertex) = undefined;
+var quad_face_writer_pool: QuadFaceWriterPool = undefined;
 
 const validation_layers = if (enable_validation_layers)
     [1][*:0]const u8{"VK_LAYER_KHRONOS_validation"}
@@ -269,7 +271,7 @@ var is_shutdown_requested: bool = false;
 ///   4. Number of vertices to be drawn has changed
 var is_record_requested: bool = true;
 
-var vertex_buffer: []graphics.QuadFace(graphics.GenericVertex) = undefined;
+var vertex_buffer: []graphics.QuadFace = undefined;
 
 var current_frame: u32 = 0;
 var previous_frame: u32 = 0;
@@ -297,7 +299,7 @@ var draw_window_decorations_requested: bool = true;
 /// Pointer to quad that will be reused to control the background color of the application
 /// An alternative method, would be to use the clear_colors parameter when recording a render pass
 /// However, this allows us to avoid re-recording commands buffers, etc
-var background_quad: *graphics.QuadFace(graphics.GenericVertex) = undefined;
+var background_quad: *graphics.QuadFace = undefined;
 
 const texture_size_bytes = texture_layer_dimensions.width * texture_layer_dimensions.height * @sizeOf(graphics.RGBA(f32));
 
@@ -310,8 +312,10 @@ var frame_duration_awake_ns: u64 = 0;
 
 /// When clicked, terminate the application
 var exit_button_extent: geometry.Extent2D(u16) = undefined;
-var exit_button_background_quad: *graphics.QuadFace(graphics.GenericVertex) = undefined;
+var exit_button_background_quad: *graphics.QuadFace = undefined;
 var exit_button_hovered: bool = false;
+
+var screen_scale: geometry.ScaleFactor2D(f64) = undefined;
 
 var vkGetInstanceProcAddr: *const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = undefined;
 
@@ -414,11 +418,16 @@ const PushConstant = packed struct {
     frame: f32,
 };
 
+var example_button_opt: ?gui.button.Handle = null;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
     var allocator = gpa.allocator();
+
+    try mini_heap.init();
+    event_system.init();
 
     var graphics_context: GraphicsContext = undefined;
 
@@ -622,6 +631,14 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             try recreateSwapchain(allocator, app);
         }
 
+        if(example_button_opt) |example_button| {
+            const state = example_button.state.getPtr();
+            if(state.hover_enter) {
+                std.log.info("Button hovered!", .{});
+                is_shutdown_requested = true;
+            }
+        }
+
         if (is_draw_required) {
             is_draw_required = false;
             try draw();
@@ -797,6 +814,7 @@ fn draw() !void {
     const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
+    std.debug.assert(face_writer.used == 0);
     if (draw_window_decorations_requested) {
         var faces = try face_writer.allocate(3);
         const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
@@ -810,7 +828,7 @@ fn draw() !void {
                 .width = 2.0,
                 .height = window_decoration_height,
             };
-            faces[0] = graphics.quadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
+            faces[0] = graphics.quadColored(extent, window_decorations.color, .top_left);
         }
         {
             //
@@ -837,8 +855,8 @@ fn draw() !void {
                 .width = screen_icon_dimensions.width,
                 .height = screen_icon_dimensions.height,
             };
-            faces[1] = graphics.quadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
-            faces[2] = graphics.quadTextured(graphics.GenericVertex, extent, texture_extent, .top_left);
+            faces[1] = graphics.quadColored(extent, window_decorations.color, .top_left);
+            faces[2] = graphics.quadTextured(extent, texture_extent, .top_left);
 
             // TODO: Update on screen size change
             const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
@@ -870,31 +888,27 @@ fn draw() !void {
                 .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
                 .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
             };
-            faces[face_index] = graphics.quadTextured(graphics.GenericVertex, extent, texture_extent, .top_left);
+            faces[face_index] = graphics.quadTextured(extent, texture_extent, .top_left);
         }
     }
 
     {
-        const position = geometry.Coordinates2D(f32){
+        const extent = geometry.Extent2D(f32){
             .x = 0.0,
             .y = 0.0,
-        };
-        const dimensions = geometry.Dimensions2D(f32){
             .width = 0.2,
             .height = 0.2,
         };
-        const color = graphics.RGB(f32){
+        const color = graphics.RGBA(f32){
             .r = 0.3,
             .g = 0.6,
             .b = 0.2,
+            .a = 1.0,
         };
-        try gui.button.draw(graphics.GenericVertex, &face_writer, &position, &dimensions, .{ .color = color });
+        example_button_opt = try gui.button.draw(&face_writer, extent, color);
     }
 
-    vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count) + face_writer.used;
-    if (draw_window_decorations_requested) {
-        vertex_buffer_quad_count += 3;
-    }
+    vertex_buffer_quad_count = 1 + face_writer.used;
 }
 
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
@@ -1560,10 +1574,10 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         // TODO: Cleanup alignCasts
         const required_alignment = @alignOf(graphics.GenericVertex);
         const vertices_addr = @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &mapped_device_memory[vertices_range_index_begin]));
-        background_quad = @ptrCast(*graphics.QuadFace(graphics.GenericVertex), @alignCast(required_alignment, &vertices_addr[0]));
-        background_quad.* = graphics.quadColored(graphics.GenericVertex, full_screen_extent, background_color, .top_left);
+        background_quad = @ptrCast(*graphics.QuadFace, @alignCast(required_alignment, &vertices_addr[0]));
+        background_quad.* = graphics.quadColored(full_screen_extent, background_color, .top_left);
         const vertices_quad_size: u32 = vertices_range_size / @sizeOf(graphics.GenericVertex);
-        quad_face_writer_pool = QuadFaceWriterPool(graphics.GenericVertex).initialize(vertices_addr, vertices_quad_size);
+        quad_face_writer_pool = QuadFaceWriterPool.initialize(vertices_addr, vertices_quad_size);
     }
 
     {
@@ -1705,10 +1719,12 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
             if (configure.width > 0 and configure.width != screen_dimensions.width) {
                 framebuffer_resized = true;
                 screen_dimensions.width = @intCast(u16, configure.width);
+                screen_scale.horizontal = 2.0 / @intToFloat(f64, screen_dimensions.width);
             }
             if (configure.height > 0 and configure.height != screen_dimensions.height) {
                 framebuffer_resized = true;
                 screen_dimensions.height = @intCast(u16, configure.height);
+                screen_scale.vertical = 2.0 / @intToFloat(f64, screen_dimensions.height);
             }
         },
         .close => close_requested.* = true,
@@ -1763,6 +1779,11 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
         .motion => |motion| {
             mouse_coordinates.x = motion.surface_x.toDouble();
             mouse_coordinates.y = motion.surface_y.toDouble();
+
+            event_system.handleMouseMovement(&.{
+                .x = -1.0 + (mouse_coordinates.x * screen_scale.horizontal),
+                .y = -1.0 + (mouse_coordinates.y * screen_scale.vertical),
+            });
 
             if (@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
                 return;

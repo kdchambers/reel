@@ -29,3 +29,10 @@ pub fn Extent2D(comptime BaseType: type) type {
         }
     };
 }
+
+pub fn ScaleFactor2D(comptime BaseType: type) type {
+    return struct {
+        horizontal: BaseType,
+        vertical: BaseType,
+    };
+}

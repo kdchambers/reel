@@ -4,6 +4,26 @@
 const std = @import("std");
 const geometry = @import("geometry.zig");
 
+pub inline fn quadTextured(
+    extent: geometry.Extent2D(f32),
+    texture_extent: geometry.Extent2D(f32),
+    comptime anchor_point: AnchorPoint,
+) QuadFaceConfig(GenericVertex) {
+    return quadTexturedConfig(GenericVertex, extent, texture_extent, anchor_point);
+}
+
+pub inline fn quadColored(
+    extent: geometry.Extent2D(f32),
+    quad_color: RGBA(f32),
+    comptime anchor_point: AnchorPoint,
+) QuadFaceConfig(GenericVertex) {
+    return quadColoredConfig(GenericVertex, extent, quad_color, anchor_point);
+}
+
+pub const QuadFaceWriter = QuadFaceWriterConfig(GenericVertex);
+pub const QuadFaceWriterPool = QuadFaceWriterPoolConfig(GenericVertex);
+pub const QuadFace = [4]GenericVertex;
+
 pub fn TypeOfField(comptime t: anytype, comptime field_name: []const u8) type {
     for (@typeInfo(t).Struct.fields) |field| {
         if (std.mem.eql(u8, field.name, field_name)) {
@@ -21,11 +41,11 @@ pub const AnchorPoint = enum {
     bottom_right,
 };
 
-pub fn generateQuad(
+fn generateQuad(
     comptime VertexType: type,
     extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
     comptime anchor_point: AnchorPoint,
-) QuadFace(VertexType) {
+) QuadFaceConfig(VertexType) {
     std.debug.assert(TypeOfField(VertexType, "x") == TypeOfField(VertexType, "y"));
     return switch (anchor_point) {
         .top_left => [_]VertexType{
@@ -52,12 +72,12 @@ pub fn generateQuad(
     };
 }
 
-pub fn quadTextured(
+fn quadTexturedConfig(
     comptime VertexType: type,
     extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
     texture_extent: geometry.Extent2D(TypeOfField(VertexType, "tx")),
     comptime anchor_point: AnchorPoint,
-) QuadFace(VertexType) {
+) QuadFaceConfig(VertexType) {
     std.debug.assert(TypeOfField(VertexType, "x") == TypeOfField(VertexType, "y"));
     std.debug.assert(TypeOfField(VertexType, "tx") == TypeOfField(VertexType, "ty"));
     var base_quad = generateQuad(VertexType, extent, anchor_point);
@@ -72,12 +92,12 @@ pub fn quadTextured(
     return base_quad;
 }
 
-pub fn quadColored(
+fn quadColoredConfig(
     comptime VertexType: type,
     extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
     quad_color: RGBA(f32),
     comptime anchor_point: AnchorPoint,
-) QuadFace(VertexType) {
+) QuadFaceConfig(VertexType) {
     std.debug.assert(TypeOfField(VertexType, "x") == TypeOfField(VertexType, "y"));
     var base_quad = generateQuad(VertexType, extent, anchor_point);
     base_quad[0].color = quad_color;
@@ -87,7 +107,7 @@ pub fn quadColored(
     return base_quad;
 }
 
-pub const GenericVertex = packed struct {
+pub const GenericVertex = extern struct {
     x: f32 = 1.0,
     y: f32 = 1.0,
     // This default value references the last pixel in our texture which
@@ -102,12 +122,12 @@ pub const GenericVertex = packed struct {
         .a = 1.0,
     },
 
-    pub fn nullFace() QuadFace(GenericVertex) {
+    pub fn nullFace() QuadFaceConfig(GenericVertex) {
         return .{ .{}, .{}, .{}, .{} };
     }
 };
 
-pub fn QuadFace(comptime VertexType: type) type {
+fn QuadFaceConfig(comptime VertexType: type) type {
     return [4]VertexType;
 }
 
@@ -159,36 +179,36 @@ pub fn RGBA(comptime BaseType: type) type {
 }
 
 /// Used to allocate QuadFaceWriters that share backing memory
-pub fn QuadFaceWriterPool(comptime VertexType: type) type {
+fn QuadFaceWriterPoolConfig(comptime VertexType: type) type {
     return struct {
-        memory_ptr: [*]QuadFace(VertexType),
+        memory_ptr: [*]QuadFaceConfig(VertexType),
         memory_quad_range: u32,
 
         pub fn initialize(start: [*]align(@alignOf(VertexType)) u8, memory_quad_range: u32) @This() {
             return .{
-                .memory_ptr = @ptrCast([*]QuadFace(VertexType), start),
+                .memory_ptr = @ptrCast([*]QuadFaceConfig(VertexType), start),
                 .memory_quad_range = memory_quad_range,
             };
         }
 
-        pub fn create(self: *@This(), quad_index: u16, quad_size: u16) QuadFaceWriter(VertexType) {
+        pub fn create(self: *@This(), quad_index: u16, quad_size: u16) QuadFaceWriterConfig(VertexType) {
             std.debug.assert((quad_index + quad_size) <= self.memory_quad_range);
-            return QuadFaceWriter(VertexType).initialize(self.memory_ptr, quad_index, quad_size);
+            return QuadFaceWriterConfig(VertexType).initialize(self.memory_ptr, quad_index, quad_size);
         }
     };
 }
 
-pub fn QuadFaceWriter(comptime VertexType: type) type {
+fn QuadFaceWriterConfig(comptime VertexType: type) type {
     return struct {
-        memory_ptr: [*]QuadFace(VertexType),
+        memory_ptr: [*]QuadFaceConfig(VertexType),
 
         quad_index: u32,
         capacity: u32,
         used: u32 = 0,
 
-        pub fn initialize(base: [*]QuadFace(VertexType), quad_index: u32, quad_size: u32) @This() {
+        pub fn initialize(base: [*]QuadFaceConfig(VertexType), quad_index: u32, quad_size: u32) @This() {
             return .{
-                .memory_ptr = @ptrCast([*]QuadFace(VertexType), &base[quad_index]),
+                .memory_ptr = @ptrCast([*]QuadFaceConfig(VertexType), &base[quad_index]),
                 .quad_index = quad_index,
                 .capacity = quad_size,
                 .used = 0,
@@ -208,13 +228,13 @@ pub fn QuadFaceWriter(comptime VertexType: type) type {
             self.used = 0;
         }
 
-        pub fn create(self: *@This()) !*QuadFace(VertexType) {
+        pub fn create(self: *@This()) !*QuadFaceConfig(VertexType) {
             if (self.used == self.capacity) return error.OutOfMemory;
             defer self.used += 1;
             return &self.memory_ptr[self.used];
         }
 
-        pub fn allocate(self: *@This(), amount: u32) ![]QuadFace(VertexType) {
+        pub fn allocate(self: *@This(), amount: u32) ![]QuadFaceConfig(VertexType) {
             if ((self.used + amount) > self.capacity) return error.OutOfMemory;
             defer self.used += amount;
             return self.memory_ptr[self.used .. self.used + amount];
