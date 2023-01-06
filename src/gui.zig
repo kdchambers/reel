@@ -24,6 +24,39 @@ pub fn init(
     face_writer = fw;
 }
 
+pub const image_button = struct {
+    pub const Handle = packed struct(u64) {
+        background_face_index: u16,
+        image_face_index: u16,
+        state: Index(HoverZoneState),
+        reserved: u16 = undefined,
+
+        pub fn setBackgroundColor(self: @This(), color: graphics.RGBA(f32)) void {
+            const index = face_writer.quad_index + self.background_face_index;
+            face_buffer[index][0].color = color;
+            face_buffer[index][1].color = color;
+            face_buffer[index][2].color = color;
+            face_buffer[index][3].color = color;
+        }
+    };
+
+    pub fn draw(
+        extent: geometry.Extent2D(f32),
+        background_color: graphics.RGBA(f32),
+        texture_extent: geometry.Extent2D(f32),
+    ) !Handle {
+        const face_index = @intCast(u16, face_writer.used);
+        (try face_writer.create()).* = graphics.quadColored(extent, background_color, .bottom_left);
+        (try face_writer.create()).* = graphics.quadTextured(extent, texture_extent, .bottom_left);
+        const state_index = event_system.addMouseEvent(extent, true);
+        return Handle{
+            .background_face_index = face_index,
+            .image_face_index = face_index,
+            .state = state_index,
+        };
+    }
+};
+
 pub const button = struct {
     pub const Handle = packed struct(u32) {
         face_index: u16,

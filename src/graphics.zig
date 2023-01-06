@@ -107,6 +107,20 @@ fn quadColoredConfig(
     return base_quad;
 }
 
+pub const TextureVertex = extern struct {
+    x: u16,
+    y: u16,
+    u: u16,
+    v: u16,
+};
+
+pub const ColorVertex = extern struct {
+    x: u16,
+    y: u16,
+    color: RGBA(u8),
+};
+
+// 8 * 4 = 32 bytes
 pub const GenericVertex = extern struct {
     x: f32 = 1.0,
     y: f32 = 1.0,
