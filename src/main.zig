@@ -9,7 +9,6 @@ const img = @import("zigimg");
 const shaders = @import("shaders");
 const fontana = @import("fontana");
 
-const mini_heap = @import("mini_heap.zig");
 const event_system = @import("event_system.zig");
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
@@ -426,8 +425,10 @@ pub fn main() !void {
 
     var allocator = gpa.allocator();
 
-    try mini_heap.init();
-    event_system.init();
+    event_system.init() catch |err| {
+        std.log.err("Failed to initialize the event system. Error: {}", .{err});
+        return error.InitializeEventSystemFailed;
+    };
 
     var graphics_context: GraphicsContext = undefined;
 
@@ -771,8 +772,7 @@ fn draw() !void {
     const outer_margin_pixels: u32 = 20;
     const inner_margin_pixels: u32 = 10;
 
-    mini_heap.reset();
-    event_system.init();
+    event_system.reset();
 
     face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
     std.debug.assert(face_writer.used == 0);

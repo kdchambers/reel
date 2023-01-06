@@ -64,7 +64,14 @@ fn ClusterBuffer(comptime Type: type, comptime buffer_count: usize, comptime buf
     };
 }
 
-pub fn init() void {
+pub fn init() !void {
+    try mini_heap.init();
+    event_cluster_buffer.init();
+    state_cluster_buffer.init();
+}
+
+pub fn reset() void {
+    mini_heap.reset();
     event_cluster_buffer.init();
     state_cluster_buffer.init();
 }
