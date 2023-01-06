@@ -69,6 +69,14 @@ pub fn init() void {
     state_cluster_buffer.init();
 }
 
+/// Clears all globally stored State entries so that no values are set
+pub fn clearState() void {
+    var buffer_i: usize = 0;
+    while (buffer_i < event_cluster_buffer.len) : (buffer_i += 1) {
+        state_cluster_buffer.buffers[buffer_i].setZero();
+    }
+}
+
 //
 // 16 Clusters of capacity 64 elements = Max of 1024
 //

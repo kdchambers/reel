@@ -610,6 +610,8 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     while (!is_shutdown_requested) {
         frame_count += 1;
 
+        event_system.clearState();
+
         const frame_start_ns = std.time.nanoTimestamp();
 
         // NOTE: Running this at a high `input_fps` (E.g 60) seems to put a lot of strain on
@@ -634,10 +636,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         if (example_button_opt) |example_button| {
             const state = example_button.state.getPtr();
             if (state.hover_enter) {
-                //
-                // TODO: Reset all state values on loop start
-                //
-                state.hover_enter = false;
                 example_button.setColor(.{
                     .r = 1.0,
                     .g = 0.0,
@@ -646,7 +644,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 });
             }
             if (state.hover_exit) {
-                state.hover_exit = false;
                 example_button.setColor(.{
                     .r = 0.0,
                     .g = 1.0,

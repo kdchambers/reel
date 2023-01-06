@@ -73,6 +73,14 @@ pub fn Cluster(comptime Type: type) type {
             return .{ .index = index };
         }
 
+        pub inline fn setZero(self: @This()) void {
+            @memset(
+                @ptrCast([*]u8, &heap_memory[self.base_index.index]),
+                0,
+                @sizeOf(Type) * @intCast(usize, self.capacity),
+            );
+        }
+
         pub inline fn write(self: *@This(), value: *const Type) Index(Type) {
             // TODO: Is memcpy faster?
             @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.base_index.index + (@sizeOf(Type) * self.len)])).* = value.*;
