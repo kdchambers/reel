@@ -29,24 +29,6 @@ const clib = @cImport({
     @cInclude("dlfcn.h");
 });
 
-// ====== Contents ======
-//
-//  1. Options
-//  2. Globals
-//  3. Core Types + Functions
-//  4. Wayland Types + Functions
-//  5. Vulkan Code
-//  6. Vulkan Util / Wrapper Functions
-//  7. Screen Recording Functions
-//  8. Print Functions
-//  9. Util + Misc
-//
-// ======================
-
-//
-//   1. Options
-//
-
 /// Change this to force the log level. Otherwise it is determined by release mode
 pub const log_level: std.log.Level = .info;
 
@@ -178,6 +160,9 @@ var exit_button_hovered: bool = false;
 
 var screen_scale: geometry.ScaleFactor2D(f64) = undefined;
 
+var test_button_color_normal = graphics.RGBA(f32){ .r = 0.1, .g = 0.8, .b = 0.7, .a = 1.0 };
+var test_button_color_hover = graphics.RGBA(f32){ .r = 0.8, .g = 0.7, .b = 0.2, .a = 1.0 };
+
 //
 // Screen Recording
 //
@@ -199,7 +184,7 @@ var frame_index: u32 = 0;
 var screen_record_buffers = [1]ScreenRecordBuffer{.{}} ** 10;
 
 //
-//   3. Core Types + Functions
+// Core Types + Functions
 //
 
 const ScreenPixelBaseType = u16;
@@ -222,7 +207,11 @@ const ScreenCaptureInfo = struct {
     format: wl.Shm.Format,
 };
 
-var example_button_opt: ?gui.button.Handle = null;
+var example_button_opt: ?gui.Button = null;
+var image_button_opt: ?gui.ImageButton = null;
+var add_icon_opt: ?renderer.ImageHandle = null;
+
+var image_button_background_color = graphics.RGBA(f32){ .r = 0.3, .g = 0.3, .b = 0.3, .a = 1.0 };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -281,6 +270,17 @@ pub fn main() !void {
         );
     }
 
+    const max_quad_count = @intCast(u16, graphics_context.quad_face_writer_pool.memory_quad_range);
+    face_writer = graphics_context.quad_face_writer_pool.create(0, max_quad_count);
+
+    gui.init(
+        &face_writer,
+        face_writer.memory_ptr[0..face_writer.capacity],
+        &mouse_coordinates,
+        &screen_dimensions,
+        &is_mouse_in_screen,
+    );
+
     try appLoop(allocator, &graphics_context);
 
     cleanup(allocator, &graphics_context);
@@ -329,39 +329,18 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
 
         if (example_button_opt) |example_button| {
-            const state = example_button.state.getPtr();
+            const state = example_button.state();
             if (state.hover_enter) {
-                example_button.setColor(.{
-                    .r = 1.0,
-                    .g = 0.0,
-                    .b = 0.0,
-                    .a = 1.0,
-                });
-                var icon_image = try img.Image.fromFilePath(allocator, icon_path_list[0]);
-                defer icon_image.deinit();
-
-                _ = try renderer.addImage(
-                    allocator,
-                    @intCast(u32, icon_image.width),
-                    @intCast(u32, icon_image.height),
-                    @ptrCast([*]graphics.RGBA(u8), icon_image.pixels.rgba32.ptr),
-                );
-
-                std.log.info("Image added", .{});
+                example_button.setColor(test_button_color_hover);
+                std.log.info("Hover enter", .{});
             }
-            if (state.hover_exit) {
-                example_button.setColor(.{
-                    .r = 0.0,
-                    .g = 1.0,
-                    .b = 0.0,
-                    .a = 1.0,
-                });
-            }
+            if (state.hover_exit)
+                example_button.setColor(test_button_color_normal);
         }
 
         if (is_draw_required) {
             is_draw_required = false;
-            try draw(app);
+            try draw(allocator, app);
             is_render_requested = true;
             is_record_requested = true;
         }
@@ -471,19 +450,8 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
 }
 
-/// Our example draw function
-/// This will run anytime the screen is resized
-fn draw(app: *GraphicsContext) !void {
-    event_system.reset();
-
-    const max_quad_count = @intCast(u16, app.quad_face_writer_pool.memory_quad_range);
-    face_writer = app.quad_face_writer_pool.create(0, max_quad_count);
-    std.debug.assert(face_writer.used == 0);
-    gui.init(
-        &face_writer,
-        face_writer.memory_ptr[0..face_writer.capacity],
-    );
-
+// TODO:
+fn drawDecorations() void {
     if (draw_window_decorations_requested) {
         var faces = try face_writer.allocate(3);
         const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
@@ -538,28 +506,64 @@ fn draw(app: *GraphicsContext) !void {
             exit_button_background_quad = &faces[1];
         }
     }
+}
 
-    {
+/// Our example draw function
+/// This will run anytime the screen is resized
+fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
+    face_writer.used = 0;
+
+    if (example_button_opt == null) {
+        example_button_opt = try gui.Button.create();
+    }
+
+    if (image_button_opt == null) {
+        image_button_opt = try gui.ImageButton.create();
+
+        var icon = try img.Image.fromFilePath(allocator, icon_path_list[0]);
+        defer icon.deinit();
+
+        add_icon_opt = try renderer.addTexture(
+            app,
+            allocator,
+            @intCast(u32, icon.width),
+            @intCast(u32, icon.height),
+            @ptrCast([*]graphics.RGBA(u8), icon.pixels.rgba32.ptr),
+        );
+    }
+
+    if (image_button_opt) |*image_button| {
+        if (add_icon_opt) |add_icon| {
+            std.log.info("Drawing image button", .{});
+            const width_pixels = @intToFloat(f32, add_icon.width());
+            const height_pixels = @intToFloat(f32, add_icon.height());
+            const extent = geometry.Extent2D(f32){
+                .x = 0.4,
+                .y = 0.0,
+                .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
+                .height = @floatCast(f32, height_pixels * screen_scale.vertical),
+            };
+            try image_button.draw(extent, image_button_background_color, add_icon.extent());
+        }
+    }
+
+    if (example_button_opt) |*example_button| {
+        const width_pixels: f32 = 120;
+        const height_pixels: f32 = 40;
         const extent = geometry.Extent2D(f32){
             .x = 0.0,
             .y = 0.0,
-            .width = 0.2,
-            .height = 0.2,
+            .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
+            .height = @floatCast(f32, height_pixels * screen_scale.vertical),
         };
-        const color = graphics.RGBA(f32){
-            .r = 0.3,
-            .g = 0.6,
-            .b = 0.2,
-            .a = 1.0,
-        };
-        example_button_opt = try gui.button.draw(extent, color);
+        try example_button.draw(extent, test_button_color_normal);
     }
 
     quad_butter_count = 1 + face_writer.used;
 }
 
 //
-//   4. Wayland Types + Functions
+// Wayland Types + Functions
 //
 
 const WaylandClient = struct {
@@ -693,6 +697,11 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 .x = -1.0 + (mouse_coordinates.x * screen_scale.horizontal),
                 .y = -1.0 + (mouse_coordinates.y * screen_scale.vertical),
             });
+
+            if (!draw_window_decorations_requested)
+                return;
+
+            std.debug.assert(false);
 
             if (@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
                 return;
@@ -888,7 +897,7 @@ fn waylandSetup() !void {
 }
 
 //
-//   7. Screen Recording Functions
+// Screen Recording Functions
 //
 
 fn writeScreenshot() void {

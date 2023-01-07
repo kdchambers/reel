@@ -90,16 +90,42 @@ pub fn clearState() void {
 var event_cluster_buffer: ClusterBuffer(MouseEventEntry, 16, 64) = undefined;
 var state_cluster_buffer: ClusterBuffer(HoverZoneState, 16, 64) = undefined;
 
+pub inline fn reserveState() Index(HoverZoneState) {
+    return state_cluster_buffer.reserve();
+}
+
+const MouseEventOptions = packed struct(u32) {
+    enable_hover: bool,
+    start_active: bool,
+    reserved: u30 = 0,
+};
+
+pub fn bindStateToMouseEvent(
+    state_index: Index(HoverZoneState),
+    extent: geometry.Extent2D(f32),
+    options: MouseEventOptions,
+) void {
+    const extent_index = mini_heap.write(geometry.Extent2D(f32), &extent);
+    const event = MouseEventEntry{
+        .extent = extent_index.toIndexAligned(),
+        .state = state_index,
+        .hover_active = options.start_active,
+        .hover_enabled = options.enable_hover,
+    };
+    _ = event_cluster_buffer.write(event);
+}
+
 pub fn addMouseEvent(
     extent: geometry.Extent2D(f32),
     enable_hover: bool,
+    start_active: bool,
 ) Index(HoverZoneState) {
     const extent_index = mini_heap.write(geometry.Extent2D(f32), &extent);
     const state_index = state_cluster_buffer.reserve();
     const event = MouseEventEntry{
         .extent = extent_index.toIndexAligned(),
         .state = state_index,
-        .hover_active = false,
+        .hover_active = start_active,
         .hover_enabled = enable_hover,
     };
     _ = event_cluster_buffer.write(event);
@@ -113,7 +139,6 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
         var cluster_i: u8 = 0;
         while (cluster_i < cluster.len) : (cluster_i += 1) {
             const entry = cluster.atPtr(cluster_i);
-            std.debug.assert(entry.hover_enabled);
             if (entry.hover_enabled) {
                 const extent: geometry.Extent2D(f32) = entry.extent.get();
                 const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
