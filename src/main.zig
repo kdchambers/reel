@@ -18,7 +18,6 @@ const renderer = @import("renderer.zig");
 
 const texture_layer_dimensions = renderer.texture_layer_dimensions;
 const GraphicsContext = renderer.GraphicsContext;
-const IconType = renderer.IconType;
 
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
@@ -29,10 +28,6 @@ const wlr = wayland.client.zwlr;
 const clib = @cImport({
     @cInclude("dlfcn.h");
 });
-
-// const c = @cImport({
-//     @cInclude("stdio.h");
-// });
 
 // ====== Contents ======
 //
@@ -89,21 +84,34 @@ const output_file_path = "screencast.mp4";
 //   2. Globals
 //
 
-// TODO: dup
-const icon_texture_row_count: u32 = 4;
-const icon_texture_column_count: u32 = 3;
+/// Color to use for icon images
+const icon_color = graphics.RGB(f32).fromInt(200, 200, 200);
 
-// TODO: dup
+pub const IconType = enum {
+    add,
+    arrow_back,
+    check_circle,
+    close,
+    delete,
+    favorite,
+    home,
+    logout,
+    menu,
+    search,
+    settings,
+    star,
+};
+
 /// Icon dimensions in pixels
 const icon_dimensions = geometry.Dimensions2D(u32){
     .width = 48,
     .height = 48,
 };
 
-const icon_count = 12;
+const icon_texture_row_count = 4;
 
 /// Returns the normalized coordinates of the icon in the texture image
-fn iconTextureLookup(icon_type: renderer.IconType) geometry.Coordinates2D(f32) {
+fn iconTextureLookup(icon_type: IconType) geometry.Coordinates2D(f32) {
     const icon_type_index = @enumToInt(icon_type);
     const x: u32 = icon_type_index % icon_texture_row_count;
     const y: u32 = icon_type_index / icon_texture_row_count;
@@ -114,6 +122,23 @@ fn iconTextureLookup(icon_type: renderer.IconType) geometry.Coordinates2D(f32) {
         .y = @intToFloat(f32, y_pixel) / @intToFloat(f32, texture_layer_dimensions.height),
     };
 }
+
+const asset_path_icon = "assets/icons/";
+
+const icon_path_list = [_][]const u8{
+    asset_path_icon ++ "add.png",
+    asset_path_icon ++ "arrow_back.png",
+    asset_path_icon ++ "check_circle.png",
+    asset_path_icon ++ "close.png",
+    asset_path_icon ++ "delete.png",
+    asset_path_icon ++ "favorite.png",
+    asset_path_icon ++ "home.png",
+    asset_path_icon ++ "logout.png",
+    asset_path_icon ++ "menu.png",
+    asset_path_icon ++ "search.png",
+    asset_path_icon ++ "settings.png",
+    asset_path_icon ++ "star.png",
+};
 
 var face_writer: QuadFaceWriter = undefined;
 
@@ -198,7 +223,6 @@ const ScreenCaptureInfo = struct {
 };
 
 var example_button_opt: ?gui.button.Handle = null;
-var image_button_opt: ?gui.image_button.Handle = null;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -313,32 +337,23 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                     .b = 0.0,
                     .a = 1.0,
                 });
+                var icon_image = try img.Image.fromFilePath(allocator, icon_path_list[0]);
+                defer icon_image.deinit();
+
+                _ = try renderer.addImage(
+                    allocator,
+                    @intCast(u32, icon_image.width),
+                    @intCast(u32, icon_image.height),
+                    @ptrCast([*]graphics.RGBA(u8), icon_image.pixels.rgba32.ptr),
+                );
+
+                std.log.info("Image added", .{});
             }
             if (state.hover_exit) {
                 example_button.setColor(.{
                     .r = 0.0,
                     .g = 1.0,
                     .b = 0.0,
-                    .a = 1.0,
-                });
-            }
-        }
-
-        if (image_button_opt) |button| {
-            const state = button.state.getPtr();
-            if (state.hover_enter) {
-                button.setBackgroundColor(.{
-                    .r = 0.1,
-                    .g = 0.1,
-                    .b = 0.1,
-                    .a = 1.0,
-                });
-            }
-            if (state.hover_exit) {
-                button.setBackgroundColor(.{
-                    .r = 0.2,
-                    .g = 0.2,
-                    .b = 0.2,
                     .a = 1.0,
                 });
             }
@@ -459,9 +474,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(app: *GraphicsContext) !void {
-    const outer_margin_pixels: u32 = 20;
-    const inner_margin_pixels: u32 = 10;
-
     event_system.reset();
 
     const max_quad_count = @intCast(u16, app.quad_face_writer_pool.memory_quad_range);
@@ -469,64 +481,8 @@ fn draw(app: *GraphicsContext) !void {
     std.debug.assert(face_writer.used == 0);
     gui.init(
         &face_writer,
-        face_writer.memory_ptr[0..face_writer.used],
+        face_writer.memory_ptr[0..face_writer.capacity],
     );
-
-    const dimensions_pixels = geometry.Dimensions2D(u32){
-        .width = icon_dimensions.width,
-        .height = icon_dimensions.height,
-    };
-
-    if (draw_window_decorations_requested and screen_dimensions.height <= window_decorations.height_pixels) {
-        quad_butter_count = 0;
-        return;
-    }
-
-    const available_screen_dimensions = if (draw_window_decorations_requested)
-        geometry.Dimensions2D(u16){ .height = screen_dimensions.height - window_decorations.height_pixels, .width = screen_dimensions.width }
-    else
-        screen_dimensions;
-
-    const insufficient_horizontal_space = (available_screen_dimensions.width < (dimensions_pixels.width + outer_margin_pixels * 2));
-    const insufficient_vertical_space = (available_screen_dimensions.height < (dimensions_pixels.height + outer_margin_pixels * 2));
-
-    if (insufficient_horizontal_space or insufficient_vertical_space) {
-        quad_butter_count = 0;
-        return;
-    }
-
-    var horizonal_quad_space_pixels = (available_screen_dimensions.width - (outer_margin_pixels * 2)) - dimensions_pixels.width;
-    var horizonal_count: u32 = 1;
-
-    {
-        const required_space = dimensions_pixels.width + inner_margin_pixels;
-        while (horizonal_quad_space_pixels >= required_space) {
-            horizonal_count += 1;
-            horizonal_quad_space_pixels -= required_space;
-        }
-    }
-
-    var vertical_quad_space_pixels: u32 = (available_screen_dimensions.height - (outer_margin_pixels * 2)) - dimensions_pixels.height;
-    var vertical_count: u32 = 1;
-
-    {
-        const required_space = dimensions_pixels.height + inner_margin_pixels;
-        while (vertical_quad_space_pixels >= required_space) {
-            vertical_count += 1;
-            vertical_quad_space_pixels -= required_space;
-        }
-    }
-
-    const y_offset_window_decorations: u32 = if (draw_window_decorations_requested) window_decorations.height_pixels else 0;
-
-    const x_begin_pixels = outer_margin_pixels + (horizonal_quad_space_pixels / 2);
-    const y_begin_pixels = y_offset_window_decorations + outer_margin_pixels + (vertical_quad_space_pixels / 2);
-
-    const x_begin = -1.0 + (@intToFloat(f32, x_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.width));
-    const y_begin = -1.0 + (@intToFloat(f32, y_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.height));
-
-    const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.width);
-    const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
 
     if (draw_window_decorations_requested) {
         var faces = try face_writer.allocate(3);
@@ -582,28 +538,6 @@ fn draw(app: *GraphicsContext) !void {
             exit_button_background_quad = &faces[1];
         }
     }
-    var faces = try face_writer.allocate(horizonal_count * vertical_count);
-    var horizonal_i: u32 = 0;
-    while (horizonal_i < horizonal_count) : (horizonal_i += 1) {
-        var vertical_i: u32 = 0;
-        while (vertical_i < vertical_count) : (vertical_i += 1) {
-            const extent = geometry.Extent2D(f32){
-                .x = x_begin + (stride_horizonal * @intToFloat(f32, horizonal_i)),
-                .y = y_begin + (stride_vertical * @intToFloat(f32, vertical_i)),
-                .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, screen_dimensions.width)) * 2.0,
-                .height = (@intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height)) * 2.0,
-            };
-            const face_index = horizonal_i + (vertical_i * horizonal_count);
-            const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_count));
-            const texture_extent = geometry.Extent2D(f32){
-                .x = texture_coordinates.x,
-                .y = texture_coordinates.y,
-                .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
-                .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
-            };
-            faces[face_index] = graphics.quadTextured(extent, texture_extent, .top_left);
-        }
-    }
 
     {
         const extent = geometry.Extent2D(f32){
@@ -619,29 +553,6 @@ fn draw(app: *GraphicsContext) !void {
             .a = 1.0,
         };
         example_button_opt = try gui.button.draw(extent, color);
-    }
-
-    {
-        const texture_coordinates = iconTextureLookup(.star);
-        const texture_extent = geometry.Extent2D(f32){
-            .x = texture_coordinates.x,
-            .y = texture_coordinates.y,
-            .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
-            .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
-        };
-        const extent = geometry.Extent2D(f32){
-            .x = 0.4,
-            .y = 0.0,
-            .width = 0.2,
-            .height = 0.2,
-        };
-        const color = graphics.RGBA(f32){
-            .r = 0.2,
-            .g = 0.2,
-            .b = 0.2,
-            .a = 1.0,
-        };
-        image_button_opt = try gui.image_button.draw(extent, color, texture_extent);
     }
 
     quad_butter_count = 1 + face_writer.used;

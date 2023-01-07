@@ -9,6 +9,7 @@ const shaders = @import("shaders");
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 const img = @import("zigimg");
+const Atlas = @import("Atlas.zig");
 
 const clib = @cImport({
     @cInclude("dlfcn.h");
@@ -68,9 +69,6 @@ const max_texture_quads_per_render: u32 = 1024;
 /// Enables transparency on the selected surface
 const transparancy_enabled = true;
 
-/// Color to use for icon images
-const icon_color = graphics.RGB(f32).fromInt(200, 200, 200);
-
 /// The transparency of the selected surface
 /// Valid values between 0.0 (no transparency) and 1.0 (full)
 /// Ignored if `transparancy_enabled` is false
@@ -115,47 +113,6 @@ const full_texture_extent = geometry.Extent2D(TextureNormalizedBaseType){
     .height = 1.0,
 };
 
-const asset_path_icon = "assets/icons/";
-
-pub const IconType = enum {
-    add,
-    arrow_back,
-    check_circle,
-    close,
-    delete,
-    favorite,
-    home,
-    logout,
-    menu,
-    search,
-    settings,
-    star,
-};
-
-const icon_texture_row_count: u32 = 4;
-const icon_texture_column_count: u32 = 3;
-
-/// Icon dimensions in pixels
-const icon_dimensions = geometry.Dimensions2D(u32){
-    .width = 48,
-    .height = 48,
-};
-
-const icon_path_list = [_][]const u8{
-    asset_path_icon ++ "add.png",
-    asset_path_icon ++ "arrow_back.png",
-    asset_path_icon ++ "check_circle.png",
-    asset_path_icon ++ "close.png",
-    asset_path_icon ++ "delete.png",
-    asset_path_icon ++ "favorite.png",
-    asset_path_icon ++ "home.png",
-    asset_path_icon ++ "logout.png",
-    asset_path_icon ++ "menu.png",
-    asset_path_icon ++ "search.png",
-    asset_path_icon ++ "settings.png",
-    asset_path_icon ++ "star.png",
-};
-
 var texture_image_view: vk.ImageView = undefined;
 var texture_image: vk.Image = undefined;
 var texture_vertices_buffer: vk.Buffer = undefined;
@@ -169,6 +126,8 @@ var quad_buffer: []graphics.QuadFace = undefined;
 
 var current_frame: u32 = 0;
 var previous_frame: u32 = 0;
+
+var texture_atlas: Atlas = undefined;
 
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
 
@@ -222,14 +181,14 @@ pub const GraphicsContext = struct {
 };
 
 // Has a precision of 2^12 = 4096
-// const ImageIndex = packed struct(u64) {
-//     texture_array_index: u8,
-//     x: u12,
-//     y: u12,
-//     width: u12,
-//     height: u12,
-//     reserved: u10,
-// };
+pub const ImageHandle = packed struct(u64) {
+    texture_array_index: u8,
+    x: u12,
+    y: u12,
+    width: u12,
+    height: u12,
+    reserved: u8,
+};
 
 // pub fn addImage(width: u16, height: u16, pixels: [*]rgba(f32)) !ImageIndex {
 //     //
@@ -240,6 +199,30 @@ pub const GraphicsContext = struct {
 // pub fn renderFrame() !void {}
 // pub fn resizeSwapchain() !void {}
 // pub fn deinit() !void {}
+
+pub fn addImage(allocator: std.mem.Allocator, width: u32, height: u32, pixels: [*]graphics.RGBA(u8)) !ImageHandle {
+    const dst_extent = try texture_atlas.reserve(allocator, width, height);
+    var src_y: u32 = 0;
+    while (src_y < height) : (src_y += 1) {
+        var src_x: u32 = 0;
+        while (src_x < width) : (src_x += 1) {
+            const src_index = src_x + (src_y * width);
+            const dst_index = dst_extent.x + src_x + ((dst_extent.y + src_y) * texture_layer_dimensions.width);
+            texture_memory_map[src_index].r = @intToFloat(f32, pixels[dst_index].r) / 255;
+            texture_memory_map[src_index].g = @intToFloat(f32, pixels[dst_index].g) / 255;
+            texture_memory_map[src_index].b = @intToFloat(f32, pixels[dst_index].b) / 255;
+            texture_memory_map[src_index].a = @intToFloat(f32, pixels[dst_index].a) / 255;
+        }
+    }
+    return ImageHandle{
+        .texture_array_index = 0,
+        .x = @intCast(u12, dst_extent.x),
+        .y = @intCast(u12, dst_extent.y),
+        .width = @intCast(u12, dst_extent.width),
+        .height = @intCast(u12, dst_extent.height),
+        .reserved = 0,
+    };
+}
 
 const ScreenPixelBaseType = u16;
 const ScreenNormalizedBaseType = f32;
@@ -986,6 +969,8 @@ fn createFramebuffers(
 }
 
 pub fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
+    texture_atlas.deinit(allocator);
+
     cleanupSwapchain(allocator, app);
 
     allocator.free(app.images_available);
@@ -1064,6 +1049,10 @@ pub fn setup(
     wayland_display: *Display,
     wayland_surface: *Surface,
 ) !void {
+
+    // TODO: Don't hardcode
+    texture_atlas = try Atlas.init(allocator, 512);
+
     if (clib.dlopen("libvulkan.so.1", clib.RTLD_NOW)) |vulkan_loader| {
         const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
         if (vk_get_instance_proc_addr_fn_opt) |vk_get_instance_proc_addr_fn| {
@@ -1378,61 +1367,6 @@ pub fn setup(
         texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(16, mapped_memory_ptr));
     }
 
-    // TODO: This could be done on another thread
-    for (icon_path_list) |icon_path, icon_path_i| {
-        // TODO: Create an  arena / allocator of a fixed size that can be reused here.
-        var icon_image = try img.Image.fromFilePath(allocator, icon_path);
-        defer icon_image.deinit();
-
-        const icon_type = @intToEnum(IconType, icon_path_i);
-
-        if (icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
-            std.log.err("Icon image for icon '{}' has unexpected dimensions. Icon assets may have gotten corrupted", .{
-                icon_type,
-            });
-            return error.AssetIconsDimensionsMismatch;
-        }
-
-        const source_pixels = switch (icon_image.pixels) {
-            .rgba32 => |pixels| pixels,
-            else => {
-                std.log.err("Icon images are expected to be in rgba32. Icon '{}' may have gotten corrupted", .{
-                    icon_type,
-                });
-                return error.AssetIconsFormatInvalid;
-            },
-        };
-
-        if (source_pixels.len != (icon_image.width * icon_image.height)) {
-            std.log.err("Loaded image for icon '{}' has an unexpected number of pixels. This is a bug in the application", .{
-                icon_type,
-            });
-            return error.AssetIconsMalformed;
-        }
-
-        std.debug.assert(source_pixels.len == icon_image.width * icon_image.height);
-
-        const x = @intCast(u32, icon_path_i) % icon_texture_row_count;
-        const y = @intCast(u32, icon_path_i) / icon_texture_row_count;
-        const dst_offset_coords = geometry.Coordinates2D(u32){
-            .x = x * icon_dimensions.width,
-            .y = y * icon_dimensions.height,
-        };
-        var src_y: u32 = 0;
-        while (src_y < icon_dimensions.height) : (src_y += 1) {
-            var src_x: u32 = 0;
-            while (src_x < icon_dimensions.width) : (src_x += 1) {
-                const src_index = src_x + (src_y * icon_dimensions.width);
-                const dst_index = (dst_offset_coords.x + src_x) + ((dst_offset_coords.y + src_y) * texture_layer_dimensions.width);
-
-                texture_memory_map[dst_index].r = icon_color.r;
-                texture_memory_map[dst_index].g = icon_color.g;
-                texture_memory_map[dst_index].b = icon_color.b;
-                texture_memory_map[dst_index].a = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
-            }
-        }
-    }
-
     // Not sure if this is a hack, but because we multiply the texture sample by the
     // color in the fragment shader, we need pixel in the texture that we known will return 1.0
     // Here we're setting the last pixel to 1.0, which corresponds to a texture mapping of 1.0, 1.0
@@ -1635,7 +1569,7 @@ pub fn setup(
         app.background_quad = @ptrCast(*graphics.QuadFace, &quad_buffer[0]);
         app.background_quad.* = graphics.quadColored(full_screen_extent, background_color, .top_left);
         app.quad_face_writer_pool = QuadFaceWriterPool.initialize(
-            @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &vertices_addr[@sizeOf(graphics.GenericVertex)])),
+            @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &vertices_addr[@sizeOf(graphics.GenericVertex) * 4])),
             vertices_quad_size,
         );
     }
