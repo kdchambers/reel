@@ -31,6 +31,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .createSemaphore = true,
     .createFence = true,
     .createImageView = true,
+    .destroyImage = true,
     .destroyImageView = true,
     .destroySemaphore = true,
     .destroyFence = true,

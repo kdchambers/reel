@@ -115,8 +115,12 @@ const full_texture_extent = geometry.Extent2D(TextureNormalizedBaseType){
 
 var texture_image_view: vk.ImageView = undefined;
 var texture_image: vk.Image = undefined;
-var texture_vertices_buffer: vk.Buffer = undefined;
-var texture_indices_buffer: vk.Buffer = undefined;
+var vertices_buffer: vk.Buffer = undefined;
+var indices_buffer: vk.Buffer = undefined;
+
+var multisampled_image: vk.Image = undefined;
+var multisampled_image_view: vk.ImageView = undefined;
+var multisampled_image_memory: vk.DeviceMemory = undefined;
 
 var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
 
@@ -175,6 +179,9 @@ pub const GraphicsContext = struct {
     inflight_fences: []vk.Fence,
     sampler: vk.Sampler,
 
+    antialias_sample_count: vk.SampleCountFlags,
+    selected_memory_index: u32,
+
     vertices_buffer: []graphics.GenericVertex,
     indices_buffer: []u16,
 };
@@ -226,6 +233,15 @@ pub fn recreateSwapchain(
         vk.TRUE,
         std.math.maxInt(u64),
     );
+
+    //
+    // Destroy and recreate multisampled image
+    //
+    app.device_dispatch.destroyImage(app.logical_device, multisampled_image, null);
+    app.device_dispatch.destroyImageView(app.logical_device, multisampled_image_view, null);
+    app.device_dispatch.freeMemory(app.logical_device, multisampled_image_memory, null);
+
+    try createMultiSampledImage(app, screen_dimensions.width, screen_dimensions.height, app.selected_memory_index);
 
     for (app.swapchain_image_views) |image_view| {
         app.device_dispatch.destroyImageView(app.logical_device, image_view, null);
@@ -280,7 +296,7 @@ pub fn recreateSwapchain(
         app.framebuffers = try allocator.realloc(app.framebuffers, app.swapchain_image_views.len);
         var framebuffer_create_info = vk.FramebufferCreateInfo{
             .render_pass = app.render_pass,
-            .attachment_count = 1,
+            .attachment_count = 2,
             // We assign to `p_attachments` below in the loop
             .p_attachments = undefined,
             .width = screen_dimensions.width,
@@ -288,10 +304,13 @@ pub fn recreateSwapchain(
             .layers = 1,
             .flags = .{},
         };
+        var attachment_buffer = [2]vk.ImageView{ multisampled_image_view, undefined };
         var i: u32 = 0;
         while (i < app.swapchain_image_views.len) : (i += 1) {
-            // We reuse framebuffer_create_info for each framebuffer we create, only we need to update the swapchain_image_view that is attached
-            framebuffer_create_info.p_attachments = @ptrCast([*]vk.ImageView, &app.swapchain_image_views[i]);
+            // We reuse framebuffer_create_info for each framebuffer we create,
+            // only updating the swapchain_image_view that is attached
+            attachment_buffer[1] = app.swapchain_image_views[i];
+            framebuffer_create_info.p_attachments = &attachment_buffer;
             app.framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
         }
     }
@@ -326,8 +345,13 @@ pub fn recordRenderPass(
     try app.device_dispatch.resetCommandPool(app.logical_device, app.command_pool, .{});
 
     const clear_color = graphics.RGBA(f32){ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 };
-    const clear_colors = [1]vk.ClearValue{
-        vk.ClearValue{
+    const clear_colors = [2]vk.ClearValue{
+        .{
+            .color = vk.ClearColorValue{
+                .float_32 = @bitCast([4]f32, clear_color),
+            },
+        },
+        .{
             .color = vk.ClearColorValue{
                 .float_32 = @bitCast([4]f32, clear_color),
             },
@@ -350,7 +374,7 @@ pub fn recordRenderPass(
                 },
                 .extent = app.swapchain_extent,
             },
-            .clear_value_count = 1,
+            .clear_value_count = clear_colors.len,
             .p_clear_values = &clear_colors,
         }, .@"inline");
 
@@ -385,8 +409,8 @@ pub fn recordRenderPass(
             app.device_dispatch.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissors));
         }
 
-        app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &[1]vk.Buffer{texture_vertices_buffer}, &[1]vk.DeviceSize{0});
-        app.device_dispatch.cmdBindIndexBuffer(command_buffer, texture_indices_buffer, 0, .uint16);
+        app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &[1]vk.Buffer{vertices_buffer}, &[1]vk.DeviceSize{0});
+        app.device_dispatch.cmdBindIndexBuffer(command_buffer, indices_buffer, 0, .uint16);
         app.device_dispatch.cmdBindDescriptorSets(
             command_buffer,
             .graphics,
@@ -783,12 +807,29 @@ fn createSwapchainImageViews(app: GraphicsContext) !void {
 
 fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
     return try app.device_dispatch.createRenderPass(app.logical_device, &vk.RenderPassCreateInfo{
-        .attachment_count = 1,
-        .p_attachments = &[1]vk.AttachmentDescription{
+        .attachment_count = 2,
+        .p_attachments = &[2]vk.AttachmentDescription{
+            //
+            // [0] Multisampled Image
+            //
+            .{
+                .format = app.surface_format.format,
+                .samples = app.antialias_sample_count,
+                .load_op = .clear,
+                .store_op = .dont_care,
+                .stencil_load_op = .dont_care,
+                .stencil_store_op = .dont_care,
+                .initial_layout = .undefined,
+                .final_layout = .color_attachment_optimal,
+                .flags = .{},
+            },
+            //
+            // [1] Swapchain
+            //
             .{
                 .format = app.surface_format.format,
                 .samples = .{ .@"1_bit" = true },
-                .load_op = .clear,
+                .load_op = .dont_care,
                 .store_op = .store,
                 .stencil_load_op = .dont_care,
                 .stencil_store_op = .dont_care,
@@ -804,29 +845,43 @@ fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
                 .color_attachment_count = 1,
                 .p_color_attachments = &[1]vk.AttachmentReference{
                     vk.AttachmentReference{
-                        .attachment = 0,
+                        .attachment = 0, // multisampled
                         .layout = .color_attachment_optimal,
                     },
                 },
                 .input_attachment_count = 0,
                 .p_input_attachments = undefined,
-                .p_resolve_attachments = null,
+                .p_resolve_attachments = &[1]vk.AttachmentReference{
+                    vk.AttachmentReference{
+                        .attachment = 1, // swapchain
+                        .layout = .color_attachment_optimal,
+                    },
+                },
                 .p_depth_stencil_attachment = null,
                 .preserve_attachment_count = 0,
                 .p_preserve_attachments = undefined,
                 .flags = .{},
             },
         },
-        .dependency_count = 1,
-        .p_dependencies = &[1]vk.SubpassDependency{
+        .dependency_count = 2,
+        .p_dependencies = &[2]vk.SubpassDependency{
             .{
                 .src_subpass = vk.SUBPASS_EXTERNAL,
                 .dst_subpass = 0,
-                .src_stage_mask = .{ .color_attachment_output_bit = true },
+                .src_stage_mask = .{ .bottom_of_pipe_bit = true },
                 .dst_stage_mask = .{ .color_attachment_output_bit = true },
-                .src_access_mask = .{},
+                .src_access_mask = .{ .memory_read_bit = true },
                 .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
-                .dependency_flags = .{},
+                .dependency_flags = .{ .by_region_bit = true },
+            },
+            .{
+                .src_subpass = 0,
+                .dst_subpass = vk.SUBPASS_EXTERNAL,
+                .src_stage_mask = .{ .color_attachment_output_bit = true },
+                .dst_stage_mask = .{ .bottom_of_pipe_bit = true },
+                .src_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
+                .dst_access_mask = .{ .memory_read_bit = true },
+                .dependency_flags = .{ .by_region_bit = true },
             },
         },
         .flags = .{},
@@ -1072,7 +1127,7 @@ fn createGraphicsPipeline(
 
     const multisampling = vk.PipelineMultisampleStateCreateInfo{
         .sample_shading_enable = vk.FALSE,
-        .rasterization_samples = .{ .@"1_bit" = true },
+        .rasterization_samples = app.antialias_sample_count,
         .min_sample_shading = 0.0,
         .p_sample_mask = null,
         .alpha_to_coverage_enable = vk.FALSE,
@@ -1131,7 +1186,14 @@ fn createGraphicsPipeline(
     };
 
     var graphics_pipeline: vk.Pipeline = undefined;
-    _ = try app.device_dispatch.createGraphicsPipelines(app.logical_device, .null_handle, 1, &pipeline_create_infos, null, @ptrCast([*]vk.Pipeline, &graphics_pipeline));
+    _ = try app.device_dispatch.createGraphicsPipelines(
+        app.logical_device,
+        .null_handle,
+        1,
+        &pipeline_create_infos,
+        null,
+        @ptrCast([*]vk.Pipeline, &graphics_pipeline),
+    );
 
     return graphics_pipeline;
 }
@@ -1159,7 +1221,7 @@ fn createFramebuffers(
     std.debug.assert(app.swapchain_image_views.len > 0);
     var framebuffer_create_info = vk.FramebufferCreateInfo{
         .render_pass = app.render_pass,
-        .attachment_count = 1,
+        .attachment_count = 2,
         .p_attachments = undefined,
         .width = screen_dimensions.width,
         .height = screen_dimensions.height,
@@ -1168,11 +1230,13 @@ fn createFramebuffers(
     };
 
     var framebuffers = try allocator.alloc(vk.Framebuffer, app.swapchain_image_views.len);
+    var attachment_buffer = [2]vk.ImageView{ multisampled_image_view, undefined };
     var i: u32 = 0;
     while (i < app.swapchain_image_views.len) : (i += 1) {
         // We reuse framebuffer_create_info for each framebuffer we create,
-        // we only need to update the swapchain_image_view that is attached
-        framebuffer_create_info.p_attachments = @ptrCast([*]vk.ImageView, &app.swapchain_image_views[i]);
+        // only updating the swapchain_image_view that is attached
+        attachment_buffer[1] = app.swapchain_image_views[i];
+        framebuffer_create_info.p_attachments = &attachment_buffer;
         framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
     }
     return framebuffers;
@@ -1249,6 +1313,53 @@ fn selectSurfaceFormat(
 
 pub const Surface = opaque {};
 pub const Display = opaque {};
+
+pub fn createMultiSampledImage(app: *GraphicsContext, width: u32, height: u32, memory_heap_index: u32) !void {
+    const image_create_info = vk.ImageCreateInfo{
+        .flags = .{},
+        .image_type = .@"2d",
+        .format = .b8g8r8a8_unorm,
+        .tiling = .optimal,
+        .extent = vk.Extent3D{
+            .width = width,
+            .height = height,
+            .depth = 1,
+        },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .initial_layout = .undefined,
+        .usage = .{ .transient_attachment_bit = true, .color_attachment_bit = true },
+        .samples = app.antialias_sample_count,
+        .sharing_mode = .exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+    };
+    multisampled_image = try app.device_dispatch.createImage(app.logical_device, &image_create_info, null);
+
+    const multisampled_image_requirements = app.device_dispatch.getImageMemoryRequirements(app.logical_device, multisampled_image);
+
+    multisampled_image_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
+        .allocation_size = multisampled_image_requirements.size,
+        .memory_type_index = memory_heap_index,
+    }, null);
+
+    try app.device_dispatch.bindImageMemory(app.logical_device, multisampled_image, multisampled_image_memory, 0);
+
+    multisampled_image_view = try app.device_dispatch.createImageView(app.logical_device, &vk.ImageViewCreateInfo{
+        .flags = .{},
+        .image = multisampled_image,
+        .view_type = .@"2d_array",
+        .format = .b8g8r8a8_unorm,
+        .subresource_range = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+    }, null);
+}
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -1413,6 +1524,39 @@ pub fn init(
         app.physical_device = physical_device;
     } else return error.NoSuitablePhysicalDevice;
 
+    app.antialias_sample_count = blk: {
+        const physical_device_properties = app.instance_dispatch.getPhysicalDeviceProperties(app.physical_device);
+        const sample_counts = physical_device_properties.limits.framebuffer_color_sample_counts;
+
+        std.log.info("Framebuffer color sample counts:", .{});
+        std.log.info("1 bit: {}", .{sample_counts.@"1_bit"});
+        std.log.info("2 bit: {}", .{sample_counts.@"2_bit"});
+        std.log.info("4 bit: {}", .{sample_counts.@"4_bit"});
+        std.log.info("8 bit: {}", .{sample_counts.@"8_bit"});
+        std.log.info("16 bit: {}", .{sample_counts.@"16_bit"});
+        std.log.info("32 bit: {}", .{sample_counts.@"32_bit"});
+        std.log.info("64 bit: {}", .{sample_counts.@"64_bit"});
+
+        //
+        // Choose the highest sample rate from 16 bit
+        // Ignore 32 & 64 bit options
+        //
+
+        if (sample_counts.@"16_bit")
+            break :blk .{ .@"16_bit" = true };
+
+        if (sample_counts.@"8_bit")
+            break :blk .{ .@"8_bit" = true };
+
+        if (sample_counts.@"4_bit")
+            break :blk .{ .@"4_bit" = true };
+
+        if (sample_counts.@"2_bit")
+            break :blk .{ .@"2_bit" = true };
+
+        break :blk .{ .@"1_bit" = true };
+    };
+
     {
         const device_create_info = vk.DeviceCreateInfo{
             .queue_create_info_count = 1,
@@ -1510,6 +1654,9 @@ pub fn init(
         return error.NoValidVulkanMemoryTypes;
     };
 
+    // TODO:
+    app.selected_memory_index = mesh_memory_index;
+
     {
         const image_create_info = vk.ImageCreateInfo{
             .flags = .{},
@@ -1595,7 +1742,7 @@ pub fn init(
         .image_color_space = app.surface_format.color_space,
         .image_extent = app.swapchain_extent,
         .image_array_layers = 1,
-        .image_usage = .{ .color_attachment_bit = true },
+        .image_usage = .{ .color_attachment_bit = true, .transfer_src_bit = true },
         .image_sharing_mode = .exclusive,
         // NOTE: Only valid when `image_sharing_mode` is CONCURRENT
         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkSwapchainCreateInfoKHR.html
@@ -1628,6 +1775,8 @@ pub fn init(
 
     app.swapchain_image_views = try allocator.alloc(vk.ImageView, app.swapchain_images.len);
     try createSwapchainImageViews(app.*);
+
+    try createMultiSampledImage(app, app.swapchain_extent.width, app.swapchain_extent.height, mesh_memory_index);
 
     app.command_pool = try app.device_dispatch.createCommandPool(app.logical_device, &vk.CommandPoolCreateInfo{
         .queue_family_index = app.graphics_present_queue_index,
@@ -1797,8 +1946,8 @@ pub fn init(
             .flags = .{},
         };
 
-        texture_vertices_buffer = try app.device_dispatch.createBuffer(app.logical_device, &buffer_create_info, null);
-        try app.device_dispatch.bindBufferMemory(app.logical_device, texture_vertices_buffer, mesh_memory, vertices_range_index_begin);
+        vertices_buffer = try app.device_dispatch.createBuffer(app.logical_device, &buffer_create_info, null);
+        try app.device_dispatch.bindBufferMemory(app.logical_device, vertices_buffer, mesh_memory, vertices_range_index_begin);
     }
 
     {
@@ -1813,8 +1962,8 @@ pub fn init(
             .flags = .{},
         };
 
-        texture_indices_buffer = try app.device_dispatch.createBuffer(app.logical_device, &buffer_create_info, null);
-        try app.device_dispatch.bindBufferMemory(app.logical_device, texture_indices_buffer, mesh_memory, indices_range_index_begin);
+        indices_buffer = try app.device_dispatch.createBuffer(app.logical_device, &buffer_create_info, null);
+        try app.device_dispatch.bindBufferMemory(app.logical_device, indices_buffer, mesh_memory, indices_range_index_begin);
     }
 
     mapped_device_memory = @ptrCast([*]u8, (try app.device_dispatch.mapMemory(app.logical_device, mesh_memory, 0, memory_size, .{})).?);
