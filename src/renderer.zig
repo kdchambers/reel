@@ -313,6 +313,8 @@ pub fn recordRenderPass(
     std.debug.assert(screen_dimensions.width == app.swapchain_extent.width);
     std.debug.assert(screen_dimensions.height == app.swapchain_extent.height);
 
+    std.log.info("Rendering: {d} indices", .{indices_count});
+
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
         1,
@@ -1059,7 +1061,7 @@ fn createGraphicsPipeline(
         .rasterizer_discard_enable = vk.FALSE,
         .polygon_mode = .fill,
         .line_width = 1.0,
-        .cull_mode = .{ .back_bit = true },
+        .cull_mode = .{},
         .front_face = .clockwise,
         .depth_bias_enable = vk.FALSE,
         .depth_bias_constant_factor = 0.0,
