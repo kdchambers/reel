@@ -24,6 +24,16 @@ pub const HoverZoneState = packed struct(u8) {
     right_click_press: bool,
     right_click_release: bool,
     reserved: u2,
+
+    pub fn clear(self: *@This()) void {
+        self.hover_enter = false;
+        self.hover_exit = false;
+        self.left_click_press = false;
+        self.left_click_release = false;
+        self.right_click_press = false;
+        self.right_click_release = false;
+        self.reserved = 0;
+    }
 };
 
 fn ClusterBuffer(comptime Type: type, comptime buffer_count: usize, comptime buffer_capacity: usize) type {

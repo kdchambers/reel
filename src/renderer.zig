@@ -9,7 +9,9 @@ const shaders = @import("shaders");
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 const img = @import("zigimg");
-const Atlas = @import("Atlas.zig");
+
+// TODO: Fontana shouldn't be referenced here
+const Atlas = @import("fontana").Atlas;
 
 const clib = @cImport({
     @cInclude("dlfcn.h");
@@ -127,7 +129,7 @@ var quad_buffer: []graphics.QuadFace = undefined;
 var current_frame: u32 = 0;
 var previous_frame: u32 = 0;
 
-var texture_atlas: Atlas = undefined;
+var texture_atlas: *Atlas = undefined;
 
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
 
@@ -209,12 +211,6 @@ pub const ImageHandle = packed struct(u64) {
         };
     }
 };
-
-// pub fn init() !void {}
-// pub fn drawFrame() !void {}
-// pub fn renderFrame() !void {}
-// pub fn resizeSwapchain() !void {}
-// pub fn deinit() !void {}
 
 const ScreenPixelBaseType = u16;
 const ScreenNormalizedBaseType = f32;
@@ -435,6 +431,26 @@ pub fn waitGPU(app: *GraphicsContext) !void {
         vk.TRUE,
         std.math.maxInt(u64),
     );
+}
+
+pub const Texture = struct {
+    pixels: [*]graphics.RGBA(f32),
+    width: u32,
+    height: u32,
+};
+
+pub fn textureGet(app: *GraphicsContext) !Texture {
+    try transitionTextureToGeneral(app);
+    const pixel_count = @intCast(u32, texture_layer_dimensions.width) * texture_layer_dimensions.height;
+    return Texture{
+        .pixels = texture_memory_map[0..pixel_count],
+        .width = texture_layer_dimensions.width,
+        .height = texture_layer_dimensions.height,
+    };
+}
+
+pub fn textureCommit(app: *GraphicsContext) !void {
+    try transitionTextureToOptimal(app);
 }
 
 fn transitionTextureToGeneral(app: *GraphicsContext) !void {
@@ -1180,9 +1196,7 @@ fn createFramebuffers(
     return framebuffers;
 }
 
-pub fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
-    texture_atlas.deinit(allocator);
-
+pub fn deinit(allocator: std.mem.Allocator, app: *GraphicsContext) void {
     cleanupSwapchain(allocator, app);
 
     allocator.free(app.images_available);
@@ -1254,16 +1268,15 @@ fn selectSurfaceFormat(
 pub const Surface = opaque {};
 pub const Display = opaque {};
 
-pub fn setup(
+pub fn init(
     allocator: std.mem.Allocator,
     app: *GraphicsContext,
     screen_dimensions: geometry.Dimensions2D(u16),
     wayland_display: *Display,
     wayland_surface: *Surface,
+    atlas: *Atlas,
 ) !void {
-
-    // TODO: Don't hardcode
-    texture_atlas = try Atlas.init(allocator, 512);
+    texture_atlas = atlas;
 
     if (clib.dlopen("libvulkan.so.1", clib.RTLD_NOW)) |vulkan_loader| {
         const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));

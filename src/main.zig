@@ -6,15 +6,23 @@ const builtin = @import("builtin");
 const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
 const img = @import("zigimg");
+
 const fontana = @import("fontana");
+const Atlas = fontana.Atlas;
+const Font = fontana.Font(.freetype_harfbuzz);
 
 const event_system = @import("event_system.zig");
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 const QuadFaceWriter = graphics.QuadFaceWriter;
 const QuadFaceWriterPool = graphics.QuadFaceWriterPool;
-const gui = @import("gui.zig");
+const widget = @import("widgets.zig");
 const renderer = @import("renderer.zig");
+
+const gui = @import("app_interface.zig");
+
+const Button = widget.Button;
+const ImageButton = widget.ImageButton;
 
 const texture_layer_dimensions = renderer.texture_layer_dimensions;
 const GraphicsContext = renderer.GraphicsContext;
@@ -61,10 +69,6 @@ const window_decorations = struct {
 const input_fps: u32 = 15;
 
 const output_file_path = "screencast.mp4";
-
-//
-//   2. Globals
-//
 
 /// Color to use for icon images
 const icon_color = graphics.RGB(f32).fromInt(200, 200, 200);
@@ -164,6 +168,17 @@ var test_button_color_normal = graphics.RGBA(f32){ .r = 0.1, .g = 0.8, .b = 0.7,
 var test_button_color_hover = graphics.RGBA(f32){ .r = 0.8, .g = 0.7, .b = 0.2, .a = 1.0 };
 
 //
+// Text Rendering
+//
+
+var texture_atlas: Atlas = undefined;
+var font: Font = undefined;
+var pen: Font.Pen = undefined;
+const asset_path_font = "assets/Roboto-Light.ttf";
+// const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:";
+const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDVWXYZ1234567890!.";
+
+//
 // Screen Recording
 //
 
@@ -182,10 +197,6 @@ var recording_frame_index: u32 = 0;
 var frame_index: u32 = 0;
 
 var screen_record_buffers = [1]ScreenRecordBuffer{.{}} ** 10;
-
-//
-// Core Types + Functions
-//
 
 const ScreenPixelBaseType = u16;
 const ScreenNormalizedBaseType = f32;
@@ -207,8 +218,8 @@ const ScreenCaptureInfo = struct {
     format: wl.Shm.Format,
 };
 
-var example_button_opt: ?gui.Button = null;
-var image_button_opt: ?gui.ImageButton = null;
+var example_button_opt: ?Button = null;
+var image_button_opt: ?ImageButton = null;
 var add_icon_opt: ?renderer.ImageHandle = null;
 
 var image_button_background_color = graphics.RGBA(f32){ .r = 0.3, .g = 0.3, .b = 0.3, .a = 1.0 };
@@ -219,6 +230,12 @@ pub fn main() !void {
 
     var allocator = gpa.allocator();
 
+    font = try Font.initFromFile(allocator, asset_path_font);
+    defer font.deinit(allocator);
+
+    texture_atlas = try Atlas.init(allocator, 512);
+    defer texture_atlas.deinit(allocator);
+
     event_system.init() catch |err| {
         std.log.err("Failed to initialize the event system. Error: {}", .{err});
         return error.InitializeEventSystemFailed;
@@ -227,13 +244,36 @@ pub fn main() !void {
     var graphics_context: GraphicsContext = undefined;
 
     try waylandSetup();
-    try renderer.setup(
+
+    try renderer.init(
         allocator,
         &graphics_context,
         screen_dimensions,
         @ptrCast(*renderer.Display, wayland_client.display),
         @ptrCast(*renderer.Surface, wayland_client.surface),
+        &texture_atlas,
     );
+    defer renderer.deinit(allocator, &graphics_context);
+
+    {
+        const PixelType = graphics.RGBA(f32);
+        const points_per_pixel = 100;
+        const font_size = fontana.Size{ .point = 12 };
+        var loaded_texture = try renderer.textureGet(&graphics_context);
+        std.debug.assert(loaded_texture.width == loaded_texture.height);
+        pen = try font.createPen(
+            PixelType,
+            allocator,
+            font_size,
+            points_per_pixel,
+            atlas_codepoints,
+            loaded_texture.width,
+            loaded_texture.pixels,
+            &texture_atlas,
+        );
+        try renderer.textureCommit(&graphics_context);
+    }
+    defer pen.deinit(allocator);
 
     const shm_name = "/wl_shm_2345";
     const fd = std.c.shm_open(
@@ -273,7 +313,7 @@ pub fn main() !void {
     const max_quad_count = @intCast(u16, graphics_context.quad_face_writer_pool.memory_quad_range);
     face_writer = graphics_context.quad_face_writer_pool.create(0, max_quad_count);
 
-    gui.init(
+    widget.init(
         &face_writer,
         face_writer.memory_ptr[0..face_writer.capacity],
         &mouse_coordinates,
@@ -283,17 +323,10 @@ pub fn main() !void {
 
     try appLoop(allocator, &graphics_context);
 
-    cleanup(allocator, &graphics_context);
-
     if (write_screenshot_thread_opt) |write_screenshot_thread| {
         std.log.info("Waiting for screenshot writer thread to complete", .{});
         write_screenshot_thread.join();
     }
-}
-
-// TODO:
-fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
-    renderer.cleanup(allocator, app);
 }
 
 fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
@@ -305,7 +338,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     while (!is_shutdown_requested) {
         frame_count += 1;
 
-        event_system.clearState();
+        // event_system.clearState();
 
         const frame_start_ns = std.time.nanoTimestamp();
 
@@ -329,13 +362,15 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
 
         if (example_button_opt) |example_button| {
-            const state = example_button.state();
+            var state = example_button.state();
             if (state.hover_enter) {
                 example_button.setColor(test_button_color_hover);
                 std.log.info("Hover enter", .{});
             }
             if (state.hover_exit)
                 example_button.setColor(test_button_color_normal);
+
+            state.clear();
         }
 
         if (is_draw_required) {
@@ -513,12 +548,14 @@ fn drawDecorations() void {
 fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     face_writer.used = 0;
 
+    try gui.drawBottomBar(&face_writer, screen_scale, &pen);
+
     if (example_button_opt == null) {
-        example_button_opt = try gui.Button.create();
+        example_button_opt = try Button.create();
     }
 
     if (image_button_opt == null) {
-        image_button_opt = try gui.ImageButton.create();
+        image_button_opt = try ImageButton.create();
 
         var icon = try img.Image.fromFilePath(allocator, icon_path_list[0]);
         defer icon.deinit();
