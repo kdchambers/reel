@@ -4,6 +4,155 @@
 const std = @import("std");
 const geometry = @import("geometry.zig");
 
+pub const FaceWriter = struct {
+    vertices: []GenericVertex,
+    indices: []u16,
+    vertices_used: u16,
+    indices_used: u16,
+
+    pub fn init(vertex_buffer: []GenericVertex, index_buffer: []u16) FaceWriter {
+        return .{
+            .vertices = vertex_buffer,
+            .indices = index_buffer,
+            .vertices_used = 0,
+            .indices_used = 0,
+        };
+    }
+
+    pub fn create(self: *@This(), comptime Type: type) !*Type {
+        if (Type == QuadFace)
+            return self.createQuadFace();
+
+        if (Type == TriangleFace)
+            return self.createTriangleFace();
+
+        @compileError("No other types supported");
+    }
+
+    pub fn allocate(self: *@This(), comptime Type: type, amount: u32) ![]Type {
+        if (Type == QuadFace)
+            return self.allocateQuadFace(amount);
+
+        if (Type == TriangleFace)
+            return self.allocateTriangleFace(amount);
+
+        @compileError("No other types supported");
+    }
+
+    pub inline fn reset(self: *@This()) void {
+        self.vertices_used = 0;
+        self.indices_used = 0;
+    }
+
+    inline fn createQuadFace(self: *@This()) !*QuadFace {
+        const vertices_used = self.vertices_used;
+        const indices_used = self.indices_used;
+
+        if (vertices_used + 4 > self.vertices.len)
+            return error.OutOfMemory;
+
+        if (indices_used + 6 > self.indices.len)
+            return error.OutOfMemory;
+
+        self.indices[indices_used + 0] = vertices_used + 0; // Top left
+        self.indices[indices_used + 1] = vertices_used + 1; // Top right
+        self.indices[indices_used + 2] = vertices_used + 2; // Bottom right
+        self.indices[indices_used + 3] = vertices_used + 0; // Top left
+        self.indices[indices_used + 4] = vertices_used + 2; // Bottom right
+        self.indices[indices_used + 5] = vertices_used + 3; // Bottom left
+
+        self.vertices_used += 4;
+        self.indices_used += 6;
+
+        return @ptrCast(*QuadFace, &self.vertices[vertices_used]);
+    }
+
+    inline fn allocateQuadFaces(self: *@This(), amount: u32) ![]QuadFace {
+        const vertices_used = self.vertices_used;
+        const indices_used = self.indices_used;
+
+        const vertices_required = 4 * amount;
+        const indices_required = 6 * amount;
+
+        if (vertices_used + vertices_required > self.vertices.len)
+            return error.OutOfMemory;
+
+        if (indices_used + indices_required > self.indices.len)
+            return error.OutOfMemory;
+
+        var j: usize = 0;
+        while (j < amount) : (j += 1) {
+            const i = indices_used + (j * 6);
+            const v = vertices_used + (j * 4);
+            self.indices[i + 0] = v + 0; // Top left
+            self.indices[i + 1] = v + 1; // Top right
+            self.indices[i + 2] = v + 2; // Bottom right
+            self.indices[i + 3] = v + 0; // Top left
+            self.indices[i + 4] = v + 2; // Bottom right
+            self.indices[i + 5] = v + 3; // Bottom left
+        }
+
+        self.vertex_used += 4 * amount;
+        self.indices_used += 6 * amount;
+
+        return @ptrCast([*]QuadFace, &self.vertices[vertices_used])[0..amount];
+    }
+
+    inline fn allocateTriangleFace(self: *@This(), amount: u32) !*TriangleFace {
+        const vertices_used = self.vertices_used;
+        const indices_used = self.indices_used;
+
+        const vertices_required = 3 * amount;
+        const indices_required = 3 * amount;
+
+        if (vertices_used + vertices_required > self.vertices.len)
+            return error.OutOfMemory;
+
+        if (indices_used + indices_required > self.indices.len)
+            return error.OutOfMemory;
+
+        var j: usize = 0;
+        while (j < amount) : (j += 1) {
+            const i = indices_used + (j * 3);
+            const v = vertices_used + (j * 3);
+            self.indices[i + 0] = v + 0;
+            self.indices[i + 1] = v + 1;
+            self.indices[i + 2] = v + 2;
+        }
+
+        self.vertex_used += 3 * amount;
+        self.indices_used += 3 * amount;
+
+        return @ptrCast([*]TriangleFace, &self.vertices[vertices_used])[0..amount];
+    }
+
+    inline fn createTriangleFace(self: *@This()) !*TriangleFace {
+        const vertices_used = self.vertices_used;
+        const indices_used = self.indices_used;
+
+        if (vertices_used + 3 > self.vertices.len)
+            return error.OutOfMemory;
+
+        if (indices_used + 3 > self.indices.len)
+            return error.OutOfMemory;
+
+        self.indices[indices_used + 0] = vertices_used + 0;
+        self.indices[indices_used + 1] = vertices_used + 1;
+        self.indices[indices_used + 2] = vertices_used + 2;
+
+        self.vertex_used += 3;
+        self.indices_used += 3;
+
+        return @ptrCast(*TriangleFace, &self.vertices[vertices_used]);
+    }
+};
+
+pub const TriangleFace = TriangleConfig(GenericVertex);
+
+fn TriangleConfig(comptime VertexType: type) type {
+    return [3]VertexType;
+}
+
 pub inline fn quadTextured(
     extent: geometry.Extent2D(f32),
     texture_extent: geometry.Extent2D(f32),
@@ -20,8 +169,6 @@ pub inline fn quadColored(
     return quadColoredConfig(GenericVertex, extent, quad_color, anchor_point);
 }
 
-pub const QuadFaceWriter = QuadFaceWriterConfig(GenericVertex);
-pub const QuadFaceWriterPool = QuadFaceWriterPoolConfig(GenericVertex);
 pub const QuadFace = [4]GenericVertex;
 
 pub fn TypeOfField(comptime t: anytype, comptime field_name: []const u8) type {
@@ -189,69 +336,5 @@ pub fn RGBA(comptime BaseType: type) type {
         g: BaseType,
         b: BaseType,
         a: BaseType,
-    };
-}
-
-/// Used to allocate QuadFaceWriters that share backing memory
-fn QuadFaceWriterPoolConfig(comptime VertexType: type) type {
-    return struct {
-        memory_ptr: [*]QuadFaceConfig(VertexType),
-        memory_quad_range: u32,
-
-        pub fn initialize(start: [*]align(@alignOf(VertexType)) u8, memory_quad_range: u32) @This() {
-            return .{
-                .memory_ptr = @ptrCast([*]QuadFaceConfig(VertexType), start),
-                .memory_quad_range = memory_quad_range,
-            };
-        }
-
-        pub fn create(self: *@This(), quad_index: u16, quad_size: u16) QuadFaceWriterConfig(VertexType) {
-            std.debug.assert((quad_index + quad_size) <= self.memory_quad_range);
-            return QuadFaceWriterConfig(VertexType).initialize(self.memory_ptr, quad_index, quad_size);
-        }
-    };
-}
-
-fn QuadFaceWriterConfig(comptime VertexType: type) type {
-    return struct {
-        memory_ptr: [*]QuadFaceConfig(VertexType),
-
-        quad_index: u32,
-        capacity: u32,
-        used: u32 = 0,
-
-        pub fn initialize(base: [*]QuadFaceConfig(VertexType), quad_index: u32, quad_size: u32) @This() {
-            return .{
-                .memory_ptr = @ptrCast([*]QuadFaceConfig(VertexType), &base[quad_index]),
-                .quad_index = quad_index,
-                .capacity = quad_size,
-                .used = 0,
-            };
-        }
-
-        pub fn indexFromBase(self: @This()) u32 {
-            return self.quad_index + self.used;
-        }
-
-        pub fn remaining(self: *@This()) u32 {
-            std.debug.assert(self.capacity >= self.used);
-            return @intCast(u32, self.capacity - self.used);
-        }
-
-        pub fn reset(self: *@This()) void {
-            self.used = 0;
-        }
-
-        pub fn create(self: *@This()) !*QuadFaceConfig(VertexType) {
-            if (self.used == self.capacity) return error.OutOfMemory;
-            defer self.used += 1;
-            return &self.memory_ptr[self.used];
-        }
-
-        pub fn allocate(self: *@This(), amount: u32) ![]QuadFaceConfig(VertexType) {
-            if ((self.used + amount) > self.capacity) return error.OutOfMemory;
-            defer self.used += amount;
-            return self.memory_ptr[self.used .. self.used + amount];
-        }
     };
 }

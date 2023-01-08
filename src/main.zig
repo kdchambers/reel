@@ -13,9 +13,11 @@ const Font = fontana.Font(.freetype_harfbuzz);
 
 const event_system = @import("event_system.zig");
 const geometry = @import("geometry.zig");
+
 const graphics = @import("graphics.zig");
-const QuadFaceWriter = graphics.QuadFaceWriter;
-const QuadFaceWriterPool = graphics.QuadFaceWriterPool;
+const QuadFace = graphics.QuadFace;
+const FaceWriter = graphics.FaceWriter;
+
 const widget = @import("widgets.zig");
 const renderer = @import("renderer.zig");
 
@@ -126,7 +128,7 @@ const icon_path_list = [_][]const u8{
     asset_path_icon ++ "star.png",
 };
 
-var face_writer: QuadFaceWriter = undefined;
+var face_writer: FaceWriter = undefined;
 
 var is_draw_required: bool = true;
 var is_render_requested: bool = true;
@@ -138,8 +140,6 @@ var is_shutdown_requested: bool = false;
 ///   3. Push constants need to be updated
 ///   4. Number of vertices to be drawn has changed
 var is_record_requested: bool = true;
-
-var quad_butter_count: u32 = 0;
 
 var framebuffer_resized: bool = true;
 
@@ -310,12 +310,11 @@ pub fn main() !void {
         );
     }
 
-    const max_quad_count = @intCast(u16, graphics_context.quad_face_writer_pool.memory_quad_range);
-    face_writer = graphics_context.quad_face_writer_pool.create(0, max_quad_count);
+    face_writer = FaceWriter.init(graphics_context.vertices_buffer, graphics_context.indices_buffer);
 
     widget.init(
         &face_writer,
-        face_writer.memory_ptr[0..face_writer.capacity],
+        face_writer.vertices,
         &mouse_coordinates,
         &screen_dimensions,
         &is_mouse_in_screen,
@@ -337,8 +336,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     while (!is_shutdown_requested) {
         frame_count += 1;
-
-        // event_system.clearState();
 
         const frame_start_ns = std.time.nanoTimestamp();
 
@@ -386,7 +383,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             // Even though we're running at a constant loop, we don't always need to re-record command buffers
             if (is_record_requested) {
                 is_record_requested = false;
-                try renderer.recordRenderPass(app.*, quad_butter_count * 6, screen_dimensions);
+                try renderer.recordRenderPass(app.*, face_writer.indices_used, screen_dimensions);
             }
 
             try renderer.renderFrame(allocator, app, screen_dimensions);
@@ -488,7 +485,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 // TODO:
 fn drawDecorations() void {
     if (draw_window_decorations_requested) {
-        var faces = try face_writer.allocate(3);
+        var faces = try face_writer.allocate(3, QuadFace);
         const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
         {
             //
@@ -546,7 +543,17 @@ fn drawDecorations() void {
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
-    face_writer.used = 0;
+    face_writer.reset();
+
+    {
+        const extent = geometry.Extent2D(f32){
+            .x = -0.5,
+            .y = -0.2,
+            .width = @floatCast(f32, 200 * screen_scale.horizontal),
+            .height = @floatCast(f32, 60 * screen_scale.vertical),
+        };
+        try widget.drawRoundRect(extent, image_button_background_color, screen_scale, 10);
+    }
 
     try gui.drawBottomBar(&face_writer, screen_scale, &pen);
 
@@ -593,10 +600,14 @@ fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
             .height = @floatCast(f32, height_pixels * screen_scale.vertical),
         };
-        try example_button.draw(extent, test_button_color_normal);
+        try example_button.draw(
+            extent,
+            test_button_color_normal,
+            "start",
+            &pen,
+            screen_scale,
+        );
     }
-
-    quad_butter_count = 1 + face_writer.used;
 }
 
 //

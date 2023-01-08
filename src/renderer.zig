@@ -17,8 +17,6 @@ const clib = @cImport({
     @cInclude("dlfcn.h");
 });
 
-const QuadFaceWriterPool = graphics.QuadFaceWriterPool;
-
 var vkGetInstanceProcAddr: *const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = undefined;
 
 /// Enable Vulkan validation layers
@@ -177,12 +175,8 @@ pub const GraphicsContext = struct {
     inflight_fences: []vk.Fence,
     sampler: vk.Sampler,
 
-    quad_face_writer_pool: QuadFaceWriterPool,
-
-    /// Pointer to quad that will be reused to control the background color of the application
-    /// An alternative method, would be to use the clear_colors parameter when recording a render pass
-    /// However, this allows us to avoid re-recording commands buffers, etc
-    background_quad: *graphics.QuadFace,
+    vertices_buffer: []graphics.GenericVertex,
+    indices_buffer: []u16,
 };
 
 // Has a precision of 2^12 = 4096
@@ -744,27 +738,13 @@ pub fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext, screen_d
             try recreateSwapchain(allocator, app, screen_dimensions);
             return;
         },
-        .error_out_of_host_memory => {
-            return error.VulkanHostOutOfMemory;
-        },
-        .error_out_of_device_memory => {
-            return error.VulkanDeviceOutOfMemory;
-        },
-        .error_device_lost => {
-            return error.VulkanDeviceLost;
-        },
-        .error_surface_lost_khr => {
-            return error.VulkanSurfaceLost;
-        },
-        .error_full_screen_exclusive_mode_lost_ext => {
-            return error.VulkanFullScreenExclusiveModeLost;
-        },
-        .timeout => {
-            return error.VulkanAcquireFramebufferImageTimeout;
-        },
-        .not_ready => {
-            return error.VulkanAcquireFramebufferImageNotReady;
-        },
+        .error_out_of_host_memory => return error.VulkanHostOutOfMemory,
+        .error_out_of_device_memory => return error.VulkanDeviceOutOfMemory,
+        .error_device_lost => return error.VulkanDeviceLost,
+        .error_surface_lost_khr => return error.VulkanSurfaceLost,
+        .error_full_screen_exclusive_mode_lost_ext => return error.VulkanFullScreenExclusiveModeLost,
+        .timeout => return error.VulkanAcquireFramebufferImageTimeout,
+        .not_ready => return error.VulkanAcquireFramebufferImageNotReady,
         else => {
             return error.VulkanQueuePresentUnknown;
         },
@@ -1647,8 +1627,6 @@ pub fn init(
     app.swapchain_image_views = try allocator.alloc(vk.ImageView, app.swapchain_images.len);
     try createSwapchainImageViews(app.*);
 
-    std.log.info("Swapchain images: {d}", .{app.swapchain_images.len});
-
     app.command_pool = try app.device_dispatch.createCommandPool(app.logical_device, &vk.CommandPoolCreateInfo{
         .queue_family_index = app.graphics_present_queue_index,
         .flags = .{},
@@ -1840,32 +1818,11 @@ pub fn init(
     mapped_device_memory = @ptrCast([*]u8, (try app.device_dispatch.mapMemory(app.logical_device, mesh_memory, 0, memory_size, .{})).?);
 
     {
-        // TODO: Cleanup alignCasts
-        const required_alignment = @alignOf(graphics.GenericVertex);
-        const vertices_addr = @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &mapped_device_memory[vertices_range_index_begin]));
-        const vertices_quad_size: u32 = vertices_range_size / @sizeOf(graphics.GenericVertex);
-        quad_buffer = @ptrCast([*]graphics.QuadFace, @alignCast(required_alignment, &vertices_addr[0]))[0..vertices_quad_size];
-        app.background_quad = @ptrCast(*graphics.QuadFace, &quad_buffer[0]);
-        app.background_quad.* = graphics.quadColored(full_screen_extent, background_color, .top_left);
-        app.quad_face_writer_pool = QuadFaceWriterPool.initialize(
-            @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &vertices_addr[@sizeOf(graphics.GenericVertex) * 4])),
-            vertices_quad_size,
-        );
-    }
-
-    {
-        // We won't be reusing vertices except in making quads so we can pre-generate the entire indices buffer
-        var indices = @ptrCast([*]u16, @alignCast(16, &mapped_device_memory[indices_range_index_begin]));
-
-        var j: u32 = 0;
-        while (j < (indices_range_count / 6)) : (j += 1) {
-            indices[j * 6 + 0] = @intCast(u16, j * 4) + 0; // Top left
-            indices[j * 6 + 1] = @intCast(u16, j * 4) + 1; // Top right
-            indices[j * 6 + 2] = @intCast(u16, j * 4) + 2; // Bottom right
-            indices[j * 6 + 3] = @intCast(u16, j * 4) + 0; // Top left
-            indices[j * 6 + 4] = @intCast(u16, j * 4) + 2; // Bottom right
-            indices[j * 6 + 5] = @intCast(u16, j * 4) + 3; // Bottom left
-        }
+        const Vertex = graphics.GenericVertex;
+        const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &mapped_device_memory[vertices_range_index_begin]));
+        app.vertices_buffer = vertex_ptr[0..vertices_range_count];
+        const indices_ptr = @ptrCast([*]u16, @alignCast(16, &mapped_device_memory[indices_range_index_begin]));
+        app.indices_buffer = indices_ptr[0..indices_range_count];
     }
 
     app.images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
