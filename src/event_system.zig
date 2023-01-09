@@ -3,6 +3,9 @@
 
 const std = @import("std");
 
+const wayland = @import("wayland");
+const wl = wayland.client.wl;
+
 const mini_heap = @import("mini_heap.zig");
 const geometry = @import("geometry.zig");
 
@@ -23,7 +26,30 @@ pub const HoverZoneState = packed struct(u8) {
     left_click_release: bool,
     right_click_press: bool,
     right_click_release: bool,
-    reserved: u2,
+    pending_right_click_release: bool,
+    pending_left_click_release: bool,
+
+    pub const init = HoverZoneState{
+        .hover_enter = false,
+        .hover_exit = false,
+        .left_click_press = false,
+        .left_click_release = false,
+        .right_click_press = false,
+        .right_click_release = false,
+        .pending_right_click_release = false,
+        .pending_left_click_release = false,
+    };
+
+    pub fn reset(self: *@This()) void {
+        self.hover_enter = false;
+        self.hover_exit = false;
+        self.left_click_press = false;
+        self.left_click_release = false;
+        self.right_click_press = false;
+        self.right_click_release = false;
+        self.pending_left_click_release = false;
+        self.pending_right_click_release = false;
+    }
 
     pub fn clear(self: *@This()) void {
         self.hover_enter = false;
@@ -32,8 +58,22 @@ pub const HoverZoneState = packed struct(u8) {
         self.left_click_release = false;
         self.right_click_press = false;
         self.right_click_release = false;
-        self.reserved = 0;
+        //
+        // Don't clear pending_*_click_release as that's internal state
+        // required to determine when a full release event occurs
+        //
     }
+};
+
+/// Wayland uses linux' input-event-codes for keys and buttons. When a mouse button is
+/// clicked one of these will be sent with the event.
+/// https://wayland-book.com/seat/pointer.html
+/// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
+pub const MouseButton = enum(c_int) {
+    left = 0x110,
+    right = 0x111,
+    middle = 0x112,
+    _,
 };
 
 fn ClusterBuffer(comptime Type: type, comptime buffer_count: usize, comptime buffer_capacity: usize) type {
@@ -165,6 +205,47 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
                     //
                     entry.hover_active = false;
                     entry.state.getPtr().hover_exit = true;
+                }
+            }
+        }
+    }
+}
+
+pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: MouseButton, button_action: wl.Pointer.ButtonState) void {
+    var buffer_i: usize = 0;
+
+    while (buffer_i < event_cluster_buffer.len) : (buffer_i += 1) {
+        const cluster = &event_cluster_buffer.buffers[buffer_i];
+        var cluster_i: u8 = 0;
+        while (cluster_i < cluster.len) : (cluster_i += 1) {
+            const entry = cluster.atPtr(cluster_i);
+            if (entry.hover_enabled) {
+                const extent: geometry.Extent2D(f32) = entry.extent.get();
+                const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
+                    position.y <= extent.y and position.y >= (extent.y - extent.height));
+                if (is_within_extent) {
+                    var state = entry.state.getPtr();
+
+                    if (button_action == .pressed and button == .left) {
+                        state.left_click_press = true;
+                        state.pending_left_click_release = true;
+                    }
+
+                    if (button_action == .pressed and button == .right) {
+                        state.right_click_press = true;
+                        state.pending_right_click_release = true;
+                    }
+
+                    if (button_action == .released) {
+                        if (button == .left and state.pending_left_click_release) {
+                            state.left_click_release = true;
+                            state.pending_left_click_release = false;
+                        }
+                        if (button == .right and state.pending_right_click_release) {
+                            state.right_click_release = true;
+                            state.pending_right_click_release = false;
+                        }
+                    }
                 }
             }
         }
