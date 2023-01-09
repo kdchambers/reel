@@ -774,8 +774,20 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             is_mouse_in_screen = false;
         },
         .motion => |motion| {
-            mouse_coordinates.x = motion.surface_x.toDouble();
-            mouse_coordinates.y = motion.surface_y.toDouble();
+            if (!is_mouse_in_screen)
+                return;
+
+            const motion_mouse_x = motion.surface_x.toDouble();
+            const motion_mouse_y = motion.surface_y.toDouble();
+
+            if (@floatToInt(u16, motion_mouse_x) > screen_dimensions.width or motion_mouse_x < 0)
+                return;
+
+            if (@floatToInt(u16, motion_mouse_y) > screen_dimensions.height or motion_mouse_y < 0)
+                return;
+
+            mouse_coordinates.x = motion_mouse_x;
+            mouse_coordinates.y = motion_mouse_y;
 
             event_system.handleMouseMovement(&.{
                 .x = -1.0 + (mouse_coordinates.x * screen_scale.horizontal),
@@ -784,12 +796,6 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
 
             if (!draw_window_decorations_requested)
                 return;
-
-            std.debug.assert(false);
-
-            if (@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
-                return;
-            }
 
             const end_x = exit_button_extent.x + exit_button_extent.width;
             const end_y = exit_button_extent.y + exit_button_extent.height;
