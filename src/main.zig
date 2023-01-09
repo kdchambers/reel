@@ -5,6 +5,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
+const linux = std.os.linux;
+
 const img = @import("zigimg");
 
 const fontana = @import("fontana");
@@ -278,8 +280,8 @@ pub fn main() !void {
     const shm_name = "/wl_shm_2345";
     const fd = std.c.shm_open(
         shm_name,
-        std.os.linux.O.RDWR | std.os.linux.O.CREAT,
-        std.os.linux.O.EXCL,
+        linux.O.RDWR | linux.O.CREAT,
+        linux.O.EXCL,
     );
 
     if (fd < 0) {
@@ -296,7 +298,7 @@ pub fn main() !void {
 
     try std.os.ftruncate(fd, allocation_size_bytes);
 
-    shared_memory_map = try std.os.mmap(null, allocation_size_bytes, std.os.linux.PROT.READ | std.os.linux.PROT.WRITE, std.os.linux.MAP.SHARED, fd, 0);
+    shared_memory_map = try std.os.mmap(null, allocation_size_bytes, linux.PROT.READ | linux.PROT.WRITE, linux.MAP.SHARED, fd, 0);
     shared_memory_pool = try wl.Shm.createPool(wayland_client.shared_memory, fd, allocation_size_bytes);
 
     var buffer_index: usize = 0;
@@ -334,6 +336,9 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     std.log.info("Target milliseconds / frame: {d}", .{target_ms_per_frame});
 
+    var wayland_fd = wayland_client.display.getFd();
+    var wayland_duration_total_ns: u64 = 0;
+
     while (!is_shutdown_requested) {
         frame_count += 1;
 
@@ -344,11 +349,35 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         //       CPU usage of the compositor run 3 times that of this application in response
         //       to this call alone.
         // TODO: Find a more efficient way to interact with the compositor if possible
-        const code = wayland_client.display.roundtrip();
-        if (.SUCCESS != code) {
-            std.log.warn("wayland: Failed to do roundtrip to server. Error code: {d}", .{code});
-            break;
+
+        while (!wayland_client.display.prepareRead()) {
+            //
+            // Client event queue should be empty before calling `prepareRead`
+            // As a result this shouldn't happen but is just a safegaurd
+            //
+            _ = wayland_client.display.dispatchPending();
         }
+        //
+        // Flush Display write buffer -> Compositor
+        //
+        _ = wayland_client.display.flush();
+
+        const timeout_milliseconds = 5;
+        const ret = linux.poll(@ptrCast([*]linux.pollfd, &wayland_fd), 1, timeout_milliseconds);
+
+        if (ret != linux.POLL.IN) {
+            std.log.warn("wayland: read cancelled. Unexpected poll code: {}", .{ret});
+            wayland_client.display.cancelRead();
+        } else {
+            const errno = wayland_client.display.readEvents();
+            if (errno != .SUCCESS)
+                std.log.warn("wayland: failed reading events. Errno: {}", .{errno});
+        }
+
+        _ = wayland_client.display.dispatchPending();
+
+        const wayland_poll_end = std.time.nanoTimestamp();
+        wayland_duration_total_ns += @intCast(u64, wayland_poll_end - frame_start_ns);
 
         if (framebuffer_resized) {
             app.swapchain_extent.width = screen_dimensions.width;
@@ -475,6 +504,8 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.log.info("Slowest: {}", .{std.fmt.fmtDuration(slowest_frame_ns)});
     std.log.info("Fastest: {}", .{std.fmt.fmtDuration(fastest_frame_ns)});
     std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_awake_ns / frame_count))});
+    const wayland_duration_average_ns = wayland_duration_total_ns / frame_count;
+    std.log.info("Wayland poll average: {}", .{std.fmt.fmtDuration(wayland_duration_average_ns)});
     const runtime_seconds = @intToFloat(f64, frame_duration_total_ns) / std.time.ns_per_s;
     const screenshots_per_sec = @intToFloat(f64, screenshot_count) / runtime_seconds;
     std.log.info("Screenshot count: {d} ({d:.2} / sec)", .{ screenshot_count, screenshots_per_sec });
@@ -913,10 +944,8 @@ fn waylandSetup() !void {
     wayland_client.xdg_wm_base.setListener(*WaylandClient, xdgWmBaseListener, &wayland_client);
 
     wayland_client.surface = try wayland_client.compositor.createSurface();
-    // wayland_client.surface.setListener(*WaylandClient, surfaceListener, &wayland_client);
 
     wayland_client.xdg_surface = try wayland_client.xdg_wm_base.getXdgSurface(wayland_client.surface);
-
     wayland_client.xdg_surface.setListener(*wl.Surface, xdgSurfaceListener, wayland_client.surface);
 
     wayland_client.xdg_toplevel = try wayland_client.xdg_surface.getToplevel();
