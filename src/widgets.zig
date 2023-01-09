@@ -86,7 +86,13 @@ pub const ImageButton = packed struct(u32) {
         );
     }
 
-    pub inline fn state(self: @This()) *HoverZoneState {
+    pub inline fn state(self: @This()) HoverZoneState {
+        const state_copy = self.state_index.get();
+        self.state_index.getPtr().clear();
+        return state_copy;
+    }
+
+    pub inline fn statePtr(self: @This()) *HoverZoneState {
         return self.state_index.getPtr();
     }
 
@@ -142,7 +148,13 @@ pub const Button = packed struct(u64) {
         event_system.bindStateToMouseEvent(self.state_index, extent, bind_options);
     }
 
-    pub inline fn state(self: @This()) *HoverZoneState {
+    pub inline fn state(self: @This()) HoverZoneState {
+        const state_copy = self.state_index.get();
+        self.state_index.getPtr().clear();
+        return state_copy;
+    }
+
+    pub inline fn statePtr(self: @This()) *HoverZoneState {
         return self.state_index.getPtr();
     }
 
