@@ -344,7 +344,7 @@ pub fn recordRenderPass(
 
     try app.device_dispatch.resetCommandPool(app.logical_device, app.command_pool, .{});
 
-    const clear_color = graphics.RGBA(f32){ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 };
+    const clear_color = graphics.RGBA(f32){ .r = 0.12, .g = 0.12, .b = 0.12, .a = 1.0 };
     const clear_colors = [2]vk.ClearValue{
         .{
             .color = vk.ClearColorValue{
@@ -659,7 +659,7 @@ pub fn addTexture(
     );
     try transitionTextureToGeneral(app);
 
-    const dst_extent = try texture_atlas.reserve(allocator, width, height);
+    const dst_extent = try texture_atlas.reserve(geometry.Extent2D(u32), allocator, width, height);
     var src_y: u32 = 0;
     while (src_y < height) : (src_y += 1) {
         var src_x: u32 = 0;

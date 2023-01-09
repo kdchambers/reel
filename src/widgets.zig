@@ -20,28 +20,13 @@ const FaceWriter = graphics.FaceWriter;
 const QuadFace = graphics.QuadFace;
 const RGBA = graphics.RGBA;
 
-const fontana = @import("fontana");
-const Pen = fontana.Font(.freetype_harfbuzz).Pen;
-
 const TextWriterInterface = struct {
     quad_writer: *FaceWriter,
     pub fn write(
         self: *@This(),
-        fontana_screen_extent: fontana.geometry.Extent2D(f32),
-        fontana_texture_extent: fontana.geometry.Extent2D(f32),
+        screen_extent: geometry.Extent2D(f32),
+        texture_extent: geometry.Extent2D(f32),
     ) !void {
-        const screen_extent = Extent2D(f32){
-            .x = fontana_screen_extent.x,
-            .y = fontana_screen_extent.y,
-            .width = fontana_screen_extent.width,
-            .height = fontana_screen_extent.height,
-        };
-        const texture_extent = Extent2D(f32){
-            .x = fontana_texture_extent.x,
-            .y = fontana_texture_extent.y,
-            .width = fontana_texture_extent.width,
-            .height = fontana_texture_extent.height,
-        };
         (try self.quad_writer.create(QuadFace)).* = graphics.quadTextured(
             screen_extent,
             texture_extent,
@@ -113,15 +98,22 @@ pub const ImageButton = packed struct(u32) {
     }
 };
 
-pub const Button = packed struct(u32) {
+pub const Button = packed struct(u64) {
     vertex_index: u16,
+    vertex_count: u16,
     state_index: Index(HoverZoneState),
+    reserved: u16 = 0,
+
+    pub const DrawOptions = struct {
+        rounding_radius: ?f64,
+    };
 
     pub fn create() !Button {
         const state_index = event_system.reserveState();
         return Button{
             .vertex_index = std.math.maxInt(u16),
             .state_index = state_index,
+            .vertex_count = undefined,
         };
     }
 
@@ -130,26 +122,24 @@ pub const Button = packed struct(u32) {
         extent: Extent2D(f32),
         color: graphics.RGBA(f32),
         label: []const u8,
-        pen: *Pen,
+        pen: anytype,
         screen_scale: ScaleFactor2D(f64),
+        comptime options: DrawOptions,
     ) !void {
         self.vertex_index = @intCast(u16, face_writer_ref.vertices_used);
-        (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent, color, .bottom_left);
+        if (options.rounding_radius) |rounding_radius| {
+            try drawRoundRect(extent, color, screen_scale, rounding_radius);
+            self.vertex_count = @intCast(u16, face_writer_ref.vertices_used - self.vertex_index);
+        } else {
+            self.vertex_count = 4;
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent, color, .bottom_left);
+        }
+
         var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
-        try pen.write(
-            label,
-            .{ .x = extent.x, .y = extent.y },
-            .{ .horizontal = screen_scale.horizontal, .vertical = screen_scale.vertical },
-            &text_writer_interface,
-        );
-        event_system.bindStateToMouseEvent(
-            self.state_index,
-            extent,
-            .{
-                .enable_hover = true,
-                .start_active = false,
-            },
-        );
+        try pen.writeCentered(label, extent, screen_scale, &text_writer_interface);
+
+        const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+        event_system.bindStateToMouseEvent(self.state_index, extent, bind_options);
     }
 
     pub inline fn state(self: @This()) *HoverZoneState {
@@ -157,10 +147,11 @@ pub const Button = packed struct(u32) {
     }
 
     pub fn setColor(self: @This(), color: graphics.RGBA(f32)) void {
-        vertices_buffer_ref[self.vertex_index + 0].color = color;
-        vertices_buffer_ref[self.vertex_index + 1].color = color;
-        vertices_buffer_ref[self.vertex_index + 2].color = color;
-        vertices_buffer_ref[self.vertex_index + 3].color = color;
+        var i = self.vertex_index;
+        const end_index = self.vertex_index + self.vertex_count;
+        while (i < end_index) : (i += 1) {
+            vertices_buffer_ref[i].color = color;
+        }
     }
 };
 

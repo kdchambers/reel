@@ -104,7 +104,7 @@ pub inline fn reserveState() Index(HoverZoneState) {
     return state_cluster_buffer.reserve();
 }
 
-const MouseEventOptions = packed struct(u32) {
+pub const MouseEventOptions = packed struct(u32) {
     enable_hover: bool,
     start_active: bool,
     reserved: u30 = 0,

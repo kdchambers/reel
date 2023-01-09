@@ -6,15 +6,20 @@ const builtin = @import("builtin");
 const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
 const linux = std.os.linux;
-
 const img = @import("zigimg");
+
+const geometry = @import("geometry.zig");
 
 const fontana = @import("fontana");
 const Atlas = fontana.Atlas;
-const Font = fontana.Font(.freetype_harfbuzz);
+const Font = fontana.Font(.freetype_harfbuzz, .{
+    .Extent2DPixel = geometry.Extent2D(u32),
+    .Extent2DNative = geometry.Extent2D(f32),
+    .Coordinates2DNative = geometry.Coordinates2D(f32),
+    .Scale2D = geometry.ScaleFactor2D(f64),
+});
 
 const event_system = @import("event_system.zig");
-const geometry = @import("geometry.zig");
 
 const graphics = @import("graphics.zig");
 const QuadFace = graphics.QuadFace;
@@ -53,7 +58,7 @@ var screen_dimensions = geometry.Dimensions2D(ScreenPixelBaseType){
 };
 
 const application_name = "reel";
-const background_color = graphics.RGBA(f32).fromInt(u8, 35, 35, 35, 255);
+const background_color = graphics.RGBA(f32).fromInt(u8, 90, 90, 90, 255);
 
 const window_decorations = struct {
     const height_pixels = 40;
@@ -166,8 +171,8 @@ var exit_button_hovered: bool = false;
 
 var screen_scale: geometry.ScaleFactor2D(f64) = undefined;
 
-var test_button_color_normal = graphics.RGBA(f32){ .r = 0.1, .g = 0.8, .b = 0.7, .a = 1.0 };
-var test_button_color_hover = graphics.RGBA(f32){ .r = 0.8, .g = 0.7, .b = 0.2, .a = 1.0 };
+var test_button_color_normal = graphics.RGBA(f32){ .r = 0.2, .g = 0.2, .b = 0.4, .a = 1.0 };
+var test_button_color_hover = graphics.RGBA(f32){ .r = 0.25, .g = 0.23, .b = 0.42, .a = 1.0 };
 
 //
 // Text Rendering
@@ -177,8 +182,7 @@ var texture_atlas: Atlas = undefined;
 var font: Font = undefined;
 var pen: Font.Pen = undefined;
 const asset_path_font = "assets/Roboto-Light.ttf";
-// const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:";
-const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDVWXYZ1234567890!.";
+const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:";
 
 //
 // Screen Recording
@@ -260,7 +264,7 @@ pub fn main() !void {
     {
         const PixelType = graphics.RGBA(f32);
         const points_per_pixel = 100;
-        const font_size = fontana.Size{ .point = 12 };
+        const font_size = fontana.Size{ .point = 18.0 };
         var loaded_texture = try renderer.textureGet(&graphics_context);
         std.debug.assert(loaded_texture.width == loaded_texture.height);
         pen = try font.createPen(
@@ -623,7 +627,7 @@ fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     }
 
     if (example_button_opt) |*example_button| {
-        const width_pixels: f32 = 120;
+        const width_pixels: f32 = 200;
         const height_pixels: f32 = 40;
         const extent = geometry.Extent2D(f32){
             .x = 0.0,
@@ -637,6 +641,7 @@ fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             "start",
             &pen,
             screen_scale,
+            .{ .rounding_radius = 5 },
         );
     }
 }
