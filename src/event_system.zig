@@ -213,39 +213,38 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
 
 pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: MouseButton, button_action: wl.Pointer.ButtonState) void {
     var buffer_i: usize = 0;
-
     while (buffer_i < event_cluster_buffer.len) : (buffer_i += 1) {
         const cluster = &event_cluster_buffer.buffers[buffer_i];
         var cluster_i: u8 = 0;
         while (cluster_i < cluster.len) : (cluster_i += 1) {
             const entry = cluster.atPtr(cluster_i);
-            if (entry.hover_enabled) {
-                const extent: geometry.Extent2D(f32) = entry.extent.get();
-                const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
-                    position.y <= extent.y and position.y >= (extent.y - extent.height));
-                if (is_within_extent) {
-                    var state = entry.state.getPtr();
+            const extent: geometry.Extent2D(f32) = entry.extent.get();
+            const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
+                position.y <= extent.y and position.y >= (extent.y - extent.height));
 
-                    if (button_action == .pressed and button == .left) {
-                        state.left_click_press = true;
-                        state.pending_left_click_release = true;
-                    }
+            if (!is_within_extent)
+                continue;
 
-                    if (button_action == .pressed and button == .right) {
-                        state.right_click_press = true;
-                        state.pending_right_click_release = true;
-                    }
+            var state = entry.state.getPtr();
 
-                    if (button_action == .released) {
-                        if (button == .left and state.pending_left_click_release) {
-                            state.left_click_release = true;
-                            state.pending_left_click_release = false;
-                        }
-                        if (button == .right and state.pending_right_click_release) {
-                            state.right_click_release = true;
-                            state.pending_right_click_release = false;
-                        }
-                    }
+            if (button_action == .pressed and button == .left) {
+                state.left_click_press = true;
+                state.pending_left_click_release = true;
+            }
+
+            if (button_action == .pressed and button == .right) {
+                state.right_click_press = true;
+                state.pending_right_click_release = true;
+            }
+
+            if (button_action == .released) {
+                if (button == .left and state.pending_left_click_release) {
+                    state.left_click_release = true;
+                    state.pending_left_click_release = false;
+                }
+                if (button == .right and state.pending_right_click_release) {
+                    state.right_click_release = true;
+                    state.pending_right_click_release = false;
                 }
             }
         }
