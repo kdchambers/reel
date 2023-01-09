@@ -367,15 +367,24 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         _ = wayland_client.display.flush();
 
         const timeout_milliseconds = 5;
-        const ret = linux.poll(@ptrCast([*]linux.pollfd, &wayland_fd), 1, timeout_milliseconds);
+        var pollfd = linux.pollfd{
+            .fd = wayland_fd,
+            .events = linux.POLL.IN,
+            .revents = 0,
+        };
+        const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
 
-        if (ret != linux.POLL.IN) {
-            std.log.warn("wayland: read cancelled. Unexpected poll code: {}", .{ret});
-            wayland_client.display.cancelRead();
-        } else {
+        if (poll_code == 0)
+            std.log.warn("wayland: Input poll timed out", .{});
+
+        const input_available = (pollfd.revents & linux.POLL.IN) != 0;
+        if (poll_code > 0 and input_available) {
             const errno = wayland_client.display.readEvents();
             if (errno != .SUCCESS)
                 std.log.warn("wayland: failed reading events. Errno: {}", .{errno});
+        } else {
+            std.log.warn("wayland: read cancelled. Errno {}", .{linux.getErrno(poll_code)});
+            wayland_client.display.cancelRead();
         }
 
         _ = wayland_client.display.dispatchPending();
