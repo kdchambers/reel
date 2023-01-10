@@ -61,6 +61,7 @@ pub const ImageButton = packed struct(u32) {
 
     pub fn create() !ImageButton {
         const state_index = event_system.reserveState();
+        state_index.getPtr().reset();
         return ImageButton{
             .background_vertex_index = std.math.maxInt(u16),
             .state_index = state_index,
@@ -116,6 +117,7 @@ pub const Button = packed struct(u64) {
 
     pub fn create() !Button {
         const state_index = event_system.reserveState();
+        state_index.getPtr().reset();
         return Button{
             .vertex_index = std.math.maxInt(u16),
             .state_index = state_index,
