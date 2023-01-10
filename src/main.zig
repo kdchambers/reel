@@ -660,24 +660,9 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         if (screen_recorder.state.is_recording) {
             if (screen_recorder.nextFrameImage(frame_count - 1)) |frame_image| {
                 try screen_recorder.captureFrame(frame_count);
-                const crop_extent = geometry.Extent2D(u32){
-                    .x = 0,
-                    .y = 0,
-                    .width = preview_dimensions.width,
-                    .height = preview_dimensions.height,
-                };
-                std.debug.assert(frame_image.width == 1920);
-                try imageCrop(
-                    graphics.RGBA(u8),
-                    frame_image.width,
-                    crop_extent,
-                    frame_image.pixels,
-                    screen_preview_buffer.ptr,
-                );
-
                 var gpu_texture = try renderer.textureGet(app);
                 //
-                // Copy into reserved regions and covert from RGBA(u8) -> RGBA(f32)
+                // Resize and covert from RGBA(u8) -> RGBA(f32)
                 //
                 {
                     var y: usize = 0;
@@ -688,10 +673,27 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                             const dst_y = y + preview_reserved_texture_extent.y;
                             const dst_stride = 512;
                             const dst_index = dst_x + (dst_y * dst_stride);
-                            const src_index = x + (y * preview_dimensions.width);
-                            gpu_texture.pixels[dst_index].r = @intToFloat(f32, screen_preview_buffer[src_index].r) / 255;
-                            gpu_texture.pixels[dst_index].g = @intToFloat(f32, screen_preview_buffer[src_index].g) / 255;
-                            gpu_texture.pixels[dst_index].b = @intToFloat(f32, screen_preview_buffer[src_index].b) / 255;
+
+                            const src_index = (x * 4) + (y * 4 * frame_image.width);
+                            var r_total: u16 = 0;
+                            r_total += frame_image.pixels[src_index].r;
+                            r_total += frame_image.pixels[src_index + 1].r;
+                            r_total += frame_image.pixels[src_index + frame_image.width].r;
+                            r_total += frame_image.pixels[src_index + frame_image.width + 1].r;
+                            var g_total: u16 = 0;
+                            g_total += frame_image.pixels[src_index].g;
+                            g_total += frame_image.pixels[src_index + 1].g;
+                            g_total += frame_image.pixels[src_index + frame_image.width].g;
+                            g_total += frame_image.pixels[src_index + frame_image.width + 1].g;
+                            var b_total: u16 = 0;
+                            b_total += frame_image.pixels[src_index].b;
+                            b_total += frame_image.pixels[src_index + 1].b;
+                            b_total += frame_image.pixels[src_index + frame_image.width].b;
+                            b_total += frame_image.pixels[src_index + frame_image.width + 1].b;
+
+                            gpu_texture.pixels[dst_index].r = @intToFloat(f32, r_total) / (255 * 4);
+                            gpu_texture.pixels[dst_index].g = @intToFloat(f32, g_total) / (255 * 4);
+                            gpu_texture.pixels[dst_index].b = @intToFloat(f32, b_total) / (255 * 4);
                             gpu_texture.pixels[dst_index].a = 1.0;
                         }
                     }
