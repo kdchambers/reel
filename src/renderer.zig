@@ -131,7 +131,7 @@ var quad_buffer: []graphics.QuadFace = undefined;
 var current_frame: u32 = 0;
 var previous_frame: u32 = 0;
 
-var texture_atlas: *Atlas = undefined;
+pub var texture_atlas: *Atlas = undefined;
 
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
 
@@ -331,8 +331,6 @@ pub fn recordRenderPass(
     std.debug.assert(app.swapchain_images.len == app.command_buffers.len);
     std.debug.assert(screen_dimensions.width == app.swapchain_extent.width);
     std.debug.assert(screen_dimensions.height == app.swapchain_extent.height);
-
-    std.log.info("Rendering: {d} indices", .{indices_count});
 
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
@@ -1243,6 +1241,8 @@ fn createFramebuffers(
 }
 
 pub fn deinit(allocator: std.mem.Allocator, app: *GraphicsContext) void {
+    app.device_dispatch.deviceWaitIdle(app.logical_device) catch std.time.sleep(std.time.ns_per_ms * 20);
+
     cleanupSwapchain(allocator, app);
 
     allocator.free(app.images_available);
@@ -1539,7 +1539,7 @@ pub fn init(
 
         //
         // Choose the highest sample rate from 16 bit
-        // Ignore 32 & 64 bit options
+        // Ignore 32 and 64 bit options
         //
 
         if (sample_counts.@"16_bit")

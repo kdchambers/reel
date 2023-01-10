@@ -77,8 +77,6 @@ const window_decorations = struct {
 ///       However, `input_fps` can be used to limit / reduce the display refresh rate
 const input_fps: u32 = 15;
 
-const output_file_path = "screencast.mp4";
-
 /// Color to use for icon images
 const icon_color = graphics.RGB(f32).fromInt(200, 200, 200);
 
@@ -171,8 +169,313 @@ var exit_button_hovered: bool = false;
 
 var screen_scale: geometry.ScaleFactor2D(f64) = undefined;
 
-var test_button_color_normal = graphics.RGBA(f32){ .r = 0.2, .g = 0.2, .b = 0.4, .a = 1.0 };
-var test_button_color_hover = graphics.RGBA(f32){ .r = 0.25, .g = 0.23, .b = 0.42, .a = 1.0 };
+var record_button_color_normal = graphics.RGBA(f32){ .r = 0.2, .g = 0.2, .b = 0.4, .a = 1.0 };
+var record_button_color_hover = graphics.RGBA(f32){ .r = 0.25, .g = 0.23, .b = 0.42, .a = 1.0 };
+
+const WaylandAllocator = struct {
+    pub const Buffer = struct {
+        buffer: *wl.Buffer,
+        size: u32,
+        offset: u32,
+        ready: u64,
+    };
+
+    mapped_memory: []align(8) u8,
+    memory_pool: *wl.ShmPool,
+    used: u32,
+
+    pub fn init(initial_size: u64) !WaylandAllocator {
+        const shm_name = "/wl_shm_2345";
+        const fd = std.c.shm_open(
+            shm_name,
+            linux.O.RDWR | linux.O.CREAT,
+            linux.O.EXCL,
+        );
+
+        if (fd < 0) {
+            return error.OpenSharedMemoryFailed;
+        }
+        _ = std.c.shm_unlink(shm_name);
+
+        const alignment_padding_bytes: usize = initial_size % std.mem.page_size;
+        const allocation_size_bytes: usize = initial_size + (std.mem.page_size - alignment_padding_bytes);
+        std.debug.assert(allocation_size_bytes % std.mem.page_size == 0);
+        std.debug.assert(allocation_size_bytes <= std.math.maxInt(i32));
+
+        std.log.info("Allocating {} for frames", .{std.fmt.fmtIntSizeDec(allocation_size_bytes)});
+
+        try std.os.ftruncate(fd, allocation_size_bytes);
+
+        const shared_memory_map = try std.os.mmap(null, allocation_size_bytes, linux.PROT.READ | linux.PROT.WRITE, linux.MAP.SHARED, fd, 0);
+        const shared_memory_pool = try wl.Shm.createPool(wayland_client.shared_memory, fd, @intCast(i32, allocation_size_bytes));
+
+        return WaylandAllocator{
+            .mapped_memory = shared_memory_map[0..allocation_size_bytes],
+            .memory_pool = shared_memory_pool,
+            .used = 0,
+        };
+    }
+
+    pub fn create(self: *@This(), width: u32, height: u32, stride: u32, format: wl.Shm.Format) !Buffer {
+        std.debug.assert(width <= std.math.maxInt(i32));
+        std.debug.assert(height <= std.math.maxInt(i32));
+        std.debug.assert(stride <= std.math.maxInt(i32));
+        const buffer = try self.memory_pool.createBuffer(
+            @intCast(i32, self.used),
+            @intCast(i32, width),
+            @intCast(i32, height),
+            @intCast(i32, stride),
+            format,
+        );
+        const allocation_size: u32 = height * stride;
+        const offset: u32 = self.used;
+        self.used += allocation_size;
+        return Buffer{
+            .buffer = buffer,
+            .size = allocation_size,
+            .offset = offset,
+            .ready = 0,
+        };
+    }
+
+    pub fn mappedMemoryForBuffer(self: @This(), buffer: *Buffer) []u8 {
+        const index_start = buffer.offset;
+        const index_end = index_start + buffer.size;
+        return self.mapped_memory[index_start..index_end];
+    }
+};
+
+fn imageCrop(
+    comptime Pixel: type,
+    src_width: u32,
+    crop_extent: geometry.Extent2D(u32),
+    input_pixels: [*]const Pixel,
+    output_pixels: [*]Pixel,
+) !void {
+    var y: usize = crop_extent.y;
+    const y_end: usize = y + crop_extent.height;
+    const row_size: usize = crop_extent.width * @sizeOf(Pixel);
+    while (y < y_end) : (y += 1) {
+        std.debug.assert(y < crop_extent.y + crop_extent.height);
+        const src_index: usize = crop_extent.x + (y * src_width);
+        const dst_index: usize = crop_extent.width * y;
+        @memcpy(
+            @ptrCast([*]u8, &output_pixels[dst_index]),
+            @ptrCast([*]const u8, &input_pixels[src_index]),
+            row_size,
+        );
+    }
+}
+
+fn imageCopyExact(
+    comptime Pixel: type,
+    src_position: geometry.Coordinates2D(u32),
+    dst_position: geometry.Coordinates2D(u32),
+    dimensions: geometry.Dimensions2D(u32),
+    src_stride: u32,
+    dst_stride: u32,
+    input_pixels: [*]const Pixel,
+    output_pixels: [*]Pixel,
+) void {
+    var y: usize = 0;
+    const row_size: usize = dimensions.width * @sizeOf(Pixel);
+    while (y < dimensions.height) : (y += 1) {
+        const src_y = src_position.y + y;
+        const dst_y = dst_position.y + y;
+        const src_index = src_position.x + (src_y * src_stride);
+        const dst_index = dst_position.x + (dst_y * dst_stride);
+        @memcpy(
+            @ptrCast([*]u8, &output_pixels[dst_index]),
+            @ptrCast([*]const u8, &input_pixels[src_index]),
+            row_size,
+        );
+    }
+}
+
+const Recorder = struct {
+    const State = packed struct(u16) {
+        is_recording: bool,
+        init_done: bool,
+        init_failed: bool,
+        init_pending: bool,
+        reserved: u12 = 0,
+    };
+
+    const ScreenRecordBuffer = struct {
+        frame_index: u64 = std.math.maxInt(u64),
+        captured_frame: *wlr.ScreencopyFrameV1,
+        buffer: WaylandAllocator.Buffer,
+    };
+
+    const DisplayInfo = struct {
+        width: u32,
+        height: u32,
+        stride: u32,
+        format: wl.Shm.Format,
+    };
+
+    const FrameImage = struct {
+        pixels: [*]graphics.RGBA(u8),
+        width: u32,
+        height: u32,
+    };
+
+    state: State,
+    display_output: *wl.Output,
+    screencopy_manager: *wlr.ScreencopyManagerV1,
+    recording_buffers: [3]ScreenRecordBuffer,
+    wayland_allocator: WaylandAllocator,
+    display_info: DisplayInfo,
+    start_frame_index: u64,
+
+    pub fn isInitialized(self: *@This()) bool {
+        return (self.state.is_recording or self.state.init_pending or self.state.init_done or self.state.init_failed);
+    }
+
+    pub fn init(
+        recorder: *@This(),
+        display_output: *wl.Output,
+        screencopy_manager: *wlr.ScreencopyManagerV1,
+    ) !void {
+        recorder.state = .{
+            .is_recording = false,
+            .init_done = false,
+            .init_failed = false,
+            .init_pending = false,
+        };
+        recorder.display_output = display_output;
+        recorder.screencopy_manager = screencopy_manager;
+
+        //
+        // We need to know about the display (monitor) to complete initialization. This is done in the following
+        // callback and we set `init_pending` to true. Once `init_done` is set, the recorder will be ready
+        // to capture and store frames. `frame` will be destroyed in the callback so we don't need to retain a handle
+        //
+        const frame = try screencopy_manager.captureOutput(1, display_output);
+        frame.setListener(
+            *Recorder,
+            finishedInitializationCallback,
+            recorder,
+        );
+
+        recorder.state.init_pending = true;
+    }
+
+    pub fn captureFrame(self: *@This(), frame_index: u64) !void {
+        if (!self.state.is_recording)
+            return error.NotInitialized;
+
+        var buffer_ptr = blk: {
+            var i: usize = 0;
+            while (i < self.recording_buffers.len) : (i += 1) {
+                if (self.recording_buffers[i].frame_index == std.math.maxInt(u64)) {
+                    self.recording_buffers[i].frame_index = frame_index;
+                    break :blk &self.recording_buffers[i];
+                }
+            }
+            return error.NoOutputBuffers;
+        };
+        buffer_ptr.captured_frame = try self.screencopy_manager.captureOutput(1, self.display_output);
+        buffer_ptr.captured_frame.setListener(
+            *ScreenRecordBuffer,
+            frameCaptureCallback,
+            buffer_ptr,
+        );
+    }
+
+    fn finishedInitializationCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, recorder: *Recorder) void {
+        switch (event) {
+            .buffer => |buffer| {
+                recorder.state.init_failed = true;
+
+                defer frame.destroy();
+
+                recorder.display_info.width = buffer.width;
+                recorder.display_info.height = buffer.height;
+                recorder.display_info.stride = buffer.stride;
+                recorder.display_info.format = buffer.format;
+
+                const bytes_per_frame = buffer.stride * buffer.height;
+                const pool_size_bytes = bytes_per_frame * recorder.recording_buffers.len;
+
+                recorder.wayland_allocator = WaylandAllocator.init(pool_size_bytes) catch return;
+
+                comptime var i: usize = 0;
+                inline while (i < recorder.recording_buffers.len) : (i += 1) {
+                    var buffer_ptr = &recorder.recording_buffers[i];
+                    buffer_ptr.frame_index = std.math.maxInt(u64);
+                    buffer_ptr.buffer = recorder.wayland_allocator.create(
+                        buffer.width,
+                        buffer.height,
+                        buffer.stride,
+                        buffer.format,
+                    ) catch return;
+                }
+
+                recorder.start_frame_index = frame_count;
+
+                recorder.state.init_failed = false;
+                recorder.state.init_done = true;
+            },
+            else => {},
+        }
+    }
+
+    fn frameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, record_buffer: *ScreenRecordBuffer) void {
+        switch (event) {
+            .buffer_done => frame.copy(record_buffer.buffer.buffer),
+            .ready => record_buffer.buffer.ready = 1,
+            .failed => std.log.err("Frame capture failed", .{}),
+            else => {},
+        }
+    }
+
+    pub fn nextFrameImage(self: *@This(), ideal_frame_index: u64) ?FrameImage {
+        var closest_frame_index: i64 = -std.math.maxInt(i64);
+        var closest_buffer_index: usize = 0;
+        comptime var i: usize = 0;
+        inline while (i < self.recording_buffers.len) : (i += 1) {
+            const buffer_ptr = &self.recording_buffers[i];
+            const frame_index = buffer_ptr.frame_index;
+            if (frame_index != std.math.maxInt(u64)) {
+                if (frame_index <= ideal_frame_index and buffer_ptr.buffer.ready == 1) {
+                    closest_frame_index = @max(@intCast(i64, frame_index), closest_frame_index);
+                    closest_buffer_index = i;
+                }
+            }
+        }
+
+        if (closest_frame_index < 0) {
+            return null;
+        }
+
+        i = 0;
+        inline while (i < self.recording_buffers.len) : (i += 1) {
+            const buffer_ptr = &self.recording_buffers[i];
+            const frame_index = buffer_ptr.frame_index;
+            if (frame_index < closest_frame_index) {
+                buffer_ptr.frame_index = std.math.maxInt(u64);
+                buffer_ptr.captured_frame.destroy();
+            }
+        }
+
+        var buffer_ptr = &self.recording_buffers[closest_buffer_index];
+        var frame_image: FrameImage = undefined;
+        frame_image.width = self.display_info.width;
+        frame_image.height = self.display_info.height;
+
+        const buffer_memory = self.wayland_allocator.mappedMemoryForBuffer(&buffer_ptr.buffer);
+        std.debug.assert(buffer_memory.len == 1920 * 1080 * 4);
+        const alignment = @alignOf(graphics.RGBA(u8));
+        frame_image.pixels = @ptrCast([*]graphics.RGBA(u8), @alignCast(alignment, buffer_memory.ptr));
+
+        buffer_ptr.frame_index = std.math.maxInt(u64);
+
+        return frame_image;
+    }
+};
+
+var screen_recorder: Recorder = undefined;
 
 //
 // Text Rendering
@@ -184,25 +487,7 @@ var pen: Font.Pen = undefined;
 const asset_path_font = "assets/Roboto-Light.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:";
 
-//
-// Screen Recording
-//
-
-const screenshot_required_bytes: usize = 1920 * 1080 * 4;
-
-var screen_capture_info: ScreenCaptureInfo = undefined;
-var shared_memory_pool: *wl.ShmPool = undefined;
-var shared_memory_map: []align(std.mem.page_size) u8 = undefined;
-var write_screenshot_thread_opt: ?std.Thread = null;
-var screenshot_count: u32 = 0;
-
-var is_record_start_requested: bool = false;
-var is_record_stop_requested: bool = false;
-var is_recording: bool = false;
 var recording_frame_index: u32 = 0;
-var frame_index: u32 = 0;
-
-var screen_record_buffers = [1]ScreenRecordBuffer{.{}} ** 10;
 
 const ScreenPixelBaseType = u16;
 const ScreenNormalizedBaseType = f32;
@@ -210,21 +495,7 @@ const ScreenNormalizedBaseType = f32;
 const TexturePixelBaseType = u16;
 const TextureNormalizedBaseType = f32;
 
-const ScreenRecordBuffer = struct {
-    frame_index: u32 = std.math.maxInt(u32),
-    buffer_index: u32 = std.math.maxInt(u32),
-    captured_frame: *wlr.ScreencopyFrameV1 = undefined,
-    buffer: *wl.Buffer = undefined,
-};
-
-const ScreenCaptureInfo = struct {
-    width: u32,
-    height: u32,
-    stride: u32,
-    format: wl.Shm.Format,
-};
-
-var example_button_opt: ?Button = null;
+var record_button_opt: ?Button = null;
 var image_button_opt: ?ImageButton = null;
 var add_icon_opt: ?renderer.ImageHandle = null;
 
@@ -281,41 +552,6 @@ pub fn main() !void {
     }
     defer pen.deinit(allocator);
 
-    const shm_name = "/wl_shm_2345";
-    const fd = std.c.shm_open(
-        shm_name,
-        linux.O.RDWR | linux.O.CREAT,
-        linux.O.EXCL,
-    );
-
-    if (fd < 0) {
-        std.log.err("Failed to open shm. Error code {d}", .{fd});
-        return;
-    }
-    _ = std.c.shm_unlink(shm_name);
-
-    const required_bytes: usize = screenshot_required_bytes * screen_record_buffers.len;
-    const alignment_padding_bytes: usize = required_bytes % std.mem.page_size;
-    const allocation_size_bytes: usize = required_bytes + (std.mem.page_size - alignment_padding_bytes);
-
-    std.debug.assert(allocation_size_bytes % std.mem.page_size == 0);
-
-    try std.os.ftruncate(fd, allocation_size_bytes);
-
-    shared_memory_map = try std.os.mmap(null, allocation_size_bytes, linux.PROT.READ | linux.PROT.WRITE, linux.MAP.SHARED, fd, 0);
-    shared_memory_pool = try wl.Shm.createPool(wayland_client.shared_memory, fd, allocation_size_bytes);
-
-    var buffer_index: usize = 0;
-    while (buffer_index < screen_record_buffers.len) : (buffer_index += 1) {
-        screen_record_buffers[buffer_index].buffer = try shared_memory_pool.createBuffer(
-            @intCast(i32, buffer_index * screenshot_required_bytes),
-            1920,
-            1080,
-            1920 * 4,
-            .xbgr8888,
-        );
-    }
-
     face_writer = FaceWriter.init(graphics_context.vertices_buffer, graphics_context.indices_buffer);
 
     widget.init(
@@ -327,12 +563,16 @@ pub fn main() !void {
     );
 
     try appLoop(allocator, &graphics_context);
-
-    if (write_screenshot_thread_opt) |write_screenshot_thread| {
-        std.log.info("Waiting for screenshot writer thread to complete", .{});
-        write_screenshot_thread.join();
-    }
 }
+
+var screen_preview_buffer: []graphics.RGBA(u8) = undefined;
+const preview_dimensions = geometry.Dimensions2D(u32){
+    .width = @divExact(1920, 4),
+    .height = @divExact(1080, 4),
+};
+
+var preview_quad: *QuadFace = undefined;
+var preview_reserved_texture_extent: geometry.Extent2D(u32) = undefined;
 
 fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     const target_ms_per_frame: u32 = 1000 / input_fps;
@@ -342,6 +582,24 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     var wayland_fd = wayland_client.display.getFd();
     var wayland_duration_total_ns: u64 = 0;
+
+    screen_recorder.state.is_recording = false;
+    screen_recorder.state.init_done = false;
+    screen_recorder.state.init_pending = false;
+    screen_recorder.state.init_failed = false;
+
+    preview_reserved_texture_extent = try renderer.texture_atlas.reserve(
+        geometry.Extent2D(u32),
+        allocator,
+        preview_dimensions.width,
+        preview_dimensions.height,
+    );
+
+    screen_preview_buffer = try allocator.alloc(
+        graphics.RGBA(u8),
+        preview_dimensions.width * preview_dimensions.height,
+    );
+    defer allocator.free(screen_preview_buffer);
 
     while (!is_shutdown_requested) {
         frame_count += 1;
@@ -374,7 +632,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         };
         const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
 
-        if (poll_code == 0)
+        if (poll_code == 0 and builtin.mode == .Debug)
             std.log.warn("wayland: Input poll timed out", .{});
 
         const input_available = (pollfd.revents & linux.POLL.IN) != 0;
@@ -383,7 +641,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             if (errno != .SUCCESS)
                 std.log.warn("wayland: failed reading events. Errno: {}", .{errno});
         } else {
-            std.log.warn("wayland: read cancelled. Errno {}", .{linux.getErrno(poll_code)});
             wayland_client.display.cancelRead();
         }
 
@@ -400,16 +657,75 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             try renderer.recreateSwapchain(allocator, app, screen_dimensions);
         }
 
-        if (example_button_opt) |example_button| {
-            var state = example_button.state();
+        if (screen_recorder.state.is_recording) {
+            if (screen_recorder.nextFrameImage(frame_count - 1)) |frame_image| {
+                try screen_recorder.captureFrame(frame_count);
+                const crop_extent = geometry.Extent2D(u32){
+                    .x = 0,
+                    .y = 0,
+                    .width = preview_dimensions.width,
+                    .height = preview_dimensions.height,
+                };
+                std.debug.assert(frame_image.width == 1920);
+                try imageCrop(
+                    graphics.RGBA(u8),
+                    frame_image.width,
+                    crop_extent,
+                    frame_image.pixels,
+                    screen_preview_buffer.ptr,
+                );
+
+                var gpu_texture = try renderer.textureGet(app);
+                //
+                // Copy into reserved regions and covert from RGBA(u8) -> RGBA(f32)
+                //
+                {
+                    var y: usize = 0;
+                    while (y < preview_dimensions.height) : (y += 1) {
+                        var x: usize = 0;
+                        while (x < preview_dimensions.width) : (x += 1) {
+                            const dst_x = x + preview_reserved_texture_extent.x;
+                            const dst_y = y + preview_reserved_texture_extent.y;
+                            const dst_stride = 512;
+                            const dst_index = dst_x + (dst_y * dst_stride);
+                            const src_index = x + (y * preview_dimensions.width);
+                            gpu_texture.pixels[dst_index].r = @intToFloat(f32, screen_preview_buffer[src_index].r) / 255;
+                            gpu_texture.pixels[dst_index].g = @intToFloat(f32, screen_preview_buffer[src_index].g) / 255;
+                            gpu_texture.pixels[dst_index].b = @intToFloat(f32, screen_preview_buffer[src_index].b) / 255;
+                            gpu_texture.pixels[dst_index].a = 1.0;
+                        }
+                    }
+                }
+
+                try renderer.textureCommit(app);
+
+                is_draw_required = true;
+            }
+        }
+
+        if (screen_recorder.state.init_done) {
+            screen_recorder.state.is_recording = true;
+            screen_recorder.state.init_done = false;
+            try screen_recorder.captureFrame(frame_count);
+        }
+
+        if (record_button_opt) |record_button| {
+            const state = record_button.state();
             if (state.hover_enter) {
-                example_button.setColor(test_button_color_hover);
-                std.log.info("Hover enter", .{});
+                record_button.setColor(record_button_color_hover);
             }
             if (state.hover_exit)
-                example_button.setColor(test_button_color_normal);
+                record_button.setColor(record_button_color_normal);
 
-            state.clear();
+            if (state.left_click_release) {
+                if (!screen_recorder.isInitialized()) {
+                    std.log.info("Recording started", .{});
+                    try screen_recorder.init(
+                        wayland_client.output_opt.?,
+                        wayland_client.screencopy_manager,
+                    );
+                }
+            }
         }
 
         if (is_draw_required) {
@@ -429,33 +745,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             }
 
             try renderer.renderFrame(allocator, app, screen_dimensions);
-        }
-
-        if (is_recording) {
-            var buffer_index: usize = 0;
-            while (buffer_index < screen_record_buffers.len) : (buffer_index += 1) {
-                if (screen_record_buffers[buffer_index].frame_index == std.math.maxInt(u32))
-                    break;
-            }
-            if (buffer_index == screen_record_buffers.len) {
-                std.log.warn("No available buffers to record screen frame. Skipping", .{});
-            } else {
-                const output = wayland_client.output_opt.?;
-                const screen_frame_opt: ?*wlr.ScreencopyFrameV1 = wayland_client.screencopy_manager.captureOutput(1, output) catch |err| blk: {
-                    std.log.warn("Failed to capture wayland output. Error: {}", .{err});
-                    break :blk null;
-                };
-                if (screen_frame_opt) |screen_frame| {
-                    screen_record_buffers[buffer_index].buffer_index = @intCast(u32, buffer_index);
-                    screen_record_buffers[buffer_index].frame_index = recording_frame_index;
-                    screen_record_buffers[buffer_index].captured_frame = screen_frame;
-                    screen_record_buffers[buffer_index].captured_frame.setListener(
-                        *ScreenRecordBuffer,
-                        screencopyFrameListener,
-                        &screen_record_buffers[buffer_index],
-                    );
-                }
-            }
         }
 
         const frame_end_ns = std.time.nanoTimestamp();
@@ -482,34 +771,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
         const frame_completion_ns = std.time.nanoTimestamp();
         frame_duration_total_ns += @intCast(u64, frame_completion_ns - frame_start_ns);
-
-        frame_index += 1;
-
-        if (is_recording) {
-            recording_frame_index += 1;
-        }
-
-        //
-        // Recording functionality disabled
-        //
-
-        // const frame_start = input_fps * 5;
-        // const frame_end = frame_start + (input_fps * 5);
-        // if(frame_index == frame_start) {
-        //     is_recording = true;
-        //     recording_frame_index = 0;
-        //     std.log.info("Recording started", .{});
-        // }
-
-        // if(is_recording and frame_index >= frame_end) {
-        //     is_record_stop_requested = true;
-        // }
-
-        // if(is_record_stop_requested) {
-        //     std.log.info("Recording stopped", .{});
-        //     is_record_stop_requested = false;
-        //     is_recording = false;
-        // }
     }
 
     std.log.info("Run time: {d}", .{std.fmt.fmtDuration(frame_duration_total_ns)});
@@ -519,9 +780,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_awake_ns / frame_count))});
     const wayland_duration_average_ns = wayland_duration_total_ns / frame_count;
     std.log.info("Wayland poll average: {}", .{std.fmt.fmtDuration(wayland_duration_average_ns)});
-    const runtime_seconds = @intToFloat(f64, frame_duration_total_ns) / std.time.ns_per_s;
-    const screenshots_per_sec = @intToFloat(f64, screenshot_count) / runtime_seconds;
-    std.log.info("Screenshot count: {d} ({d:.2} / sec)", .{ screenshot_count, screenshots_per_sec });
 
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
 }
@@ -584,25 +842,88 @@ fn drawDecorations() void {
     }
 }
 
+fn drawScreenCapture(app: *GraphicsContext) !void {
+    _ = app;
+
+    const width: u32 = 1920;
+    const height: u32 = 1080;
+
+    if (screen_dimensions.width < @divExact(width, 4))
+        return;
+
+    const available_width = @intCast(i32, screen_dimensions.width) - 100;
+
+    var dividor: u32 = 2;
+    while (@divExact(width, dividor) > available_width)
+        dividor *= 2;
+
+    if (dividor > 4)
+        return;
+
+    const divided_width = @intToFloat(f64, @divExact(width, dividor));
+    const divided_height = @intToFloat(f64, @divExact(height, dividor));
+
+    const margin_top = 20 * screen_scale.vertical * 2.0;
+    const margin_left = 20 * screen_scale.horizontal * 2.0;
+
+    const extent = geometry.Extent2D(f32){
+        .x = @floatCast(f32, -1.0 + margin_left),
+        .y = @floatCast(f32, -1.0 + margin_top),
+        .width = @floatCast(f32, divided_width * screen_scale.horizontal),
+        .height = @floatCast(f32, divided_height * screen_scale.vertical),
+    };
+    const color = graphics.RGB(f32).fromInt(120, 120, 120);
+    (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, color.toRGBA(), .top_left);
+}
+
+fn drawTexture() !void {
+    const screen_extent = geometry.Extent2D(f32){
+        .x = -0.8,
+        .y = 0.8,
+        .width = @floatCast(f32, 512 * screen_scale.horizontal),
+        .height = @floatCast(f32, 512 * screen_scale.vertical),
+    };
+    const texture_extent = geometry.Extent2D(f32){
+        .x = 0.0,
+        .y = 0.0,
+        .width = 1.0,
+        .height = 1.0,
+    };
+    (try face_writer.create(QuadFace)).* = graphics.quadTextured(
+        screen_extent,
+        texture_extent,
+        .bottom_left,
+    );
+}
+
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     face_writer.reset();
 
-    {
-        const extent = geometry.Extent2D(f32){
-            .x = -0.5,
-            .y = -0.2,
-            .width = @floatCast(f32, 200 * screen_scale.horizontal),
-            .height = @floatCast(f32, 60 * screen_scale.vertical),
+    if (screen_recorder.state.is_recording) {
+        preview_quad = try face_writer.create(QuadFace);
+        const preview_extent = geometry.Extent2D(f32){
+            .x = -0.4,
+            .y = 0.0,
+            .width = @floatCast(f32, @intToFloat(f64, preview_dimensions.width) * screen_scale.horizontal),
+            .height = @floatCast(f32, @intToFloat(f64, preview_dimensions.height) * screen_scale.vertical),
         };
-        try widget.drawRoundRect(extent, image_button_background_color, screen_scale, 10);
+        const preview_texture_extent = geometry.Extent2D(f32){
+            .x = @intToFloat(f32, preview_reserved_texture_extent.x) / 512,
+            .y = @intToFloat(f32, preview_reserved_texture_extent.y) / 512,
+            .width = @intToFloat(f32, preview_reserved_texture_extent.width) / 512,
+            .height = @intToFloat(f32, preview_reserved_texture_extent.height) / 512,
+        };
+        preview_quad.* = graphics.quadTextured(
+            preview_extent,
+            preview_texture_extent,
+            .bottom_left,
+        );
     }
 
-    try gui.drawBottomBar(&face_writer, screen_scale, &pen);
-
-    if (example_button_opt == null) {
-        example_button_opt = try Button.create();
+    if (record_button_opt == null) {
+        record_button_opt = try Button.create();
     }
 
     if (image_button_opt == null) {
@@ -622,12 +943,11 @@ fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     if (image_button_opt) |*image_button| {
         if (add_icon_opt) |add_icon| {
-            std.log.info("Drawing image button", .{});
             const width_pixels = @intToFloat(f32, add_icon.width());
             const height_pixels = @intToFloat(f32, add_icon.height());
             const extent = geometry.Extent2D(f32){
                 .x = 0.4,
-                .y = 0.0,
+                .y = 0.8,
                 .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
                 .height = @floatCast(f32, height_pixels * screen_scale.vertical),
             };
@@ -635,19 +955,19 @@ fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
     }
 
-    if (example_button_opt) |*example_button| {
+    if (record_button_opt) |*record_button| {
         const width_pixels: f32 = 200;
         const height_pixels: f32 = 40;
         const extent = geometry.Extent2D(f32){
             .x = 0.0,
-            .y = 0.0,
+            .y = 0.8,
             .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
             .height = @floatCast(f32, height_pixels * screen_scale.vertical),
         };
-        try example_button.draw(
+        try record_button.draw(
             extent,
-            test_button_color_normal,
-            "start",
+            record_button_color_normal,
+            "Record",
             &pen,
             screen_scale,
             .{ .rounding_radius = 5 },
@@ -789,10 +1109,16 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             const motion_mouse_x = motion.surface_x.toDouble();
             const motion_mouse_y = motion.surface_y.toDouble();
 
-            if (@floatToInt(u16, motion_mouse_x) > screen_dimensions.width or motion_mouse_x < 0)
+            if (motion_mouse_x > std.math.maxInt(u16) or motion_mouse_y > std.math.maxInt(u16))
                 return;
 
-            if (@floatToInt(u16, motion_mouse_y) > screen_dimensions.height or motion_mouse_y < 0)
+            const pixel_x = @floatToInt(i32, @floor(motion_mouse_x));
+            const pixel_y = @floatToInt(i32, @floor(motion_mouse_y));
+
+            if (pixel_x > screen_dimensions.width or motion_mouse_x < 0)
+                return;
+
+            if (pixel_y > screen_dimensions.height or motion_mouse_y < 0)
                 return;
 
             mouse_coordinates.x = motion_mouse_x;
@@ -835,7 +1161,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 return;
             }
 
-            const mouse_button = @intToEnum(MouseButton, button.button);
+            const mouse_button = @intToEnum(event_system.MouseButton, button.button);
             {
                 const mouse_x = @floatToInt(u16, mouse_coordinates.x);
                 const mouse_y = @floatToInt(u16, mouse_coordinates.y);
@@ -843,6 +1169,15 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 if (mouse_x < 3 and mouse_y < 3) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_left);
                 }
+
+                event_system.handleMouseClick(
+                    &.{
+                        .x = -1.0 + (mouse_coordinates.x * screen_scale.horizontal),
+                        .y = -1.0 + (mouse_coordinates.y * screen_scale.vertical),
+                    },
+                    mouse_button,
+                    button.state,
+                );
 
                 const edge_threshold = 3;
                 const max_width = screen_dimensions.width - edge_threshold;
@@ -991,66 +1326,6 @@ fn waylandSetup() !void {
     wayland_client.cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_client.shared_memory);
     wayland_client.cursor = wayland_client.cursor_theme.getCursor(XCursor.left_ptr).?;
     wayland_client.xcursor = XCursor.left_ptr;
-}
-
-//
-// Screen Recording Functions
-//
-
-fn writeScreenshot() void {
-    const write_screenshot_start = std.time.nanoTimestamp();
-    const allocator = std.heap.c_allocator;
-    const pixel_count = screen_capture_info.width * screen_capture_info.height;
-    const source_image = @ptrCast([*]img.color.Rgba32, shared_memory_map.ptr)[0..pixel_count];
-    var output_image = img.Image.create(allocator, screen_capture_info.width, screen_capture_info.height, .rgba32) catch |err| {
-        std.log.err("Failed to create output image. Error {}", .{err});
-        return;
-    };
-    defer output_image.deinit();
-    std.mem.copy(img.color.Rgba32, output_image.pixels.rgba32, source_image);
-    const screenshot_path = "./screenshot.png";
-    output_image.writeToFilePath(screenshot_path, .{ .png = .{} }) catch |err| {
-        std.log.err("Failed to write image to file. Error: {}", .{err});
-        return;
-    };
-    const write_screenshot_end = std.time.nanoTimestamp();
-    const write_screenshot_duration = @intCast(u64, write_screenshot_end - write_screenshot_start);
-    std.log.info("Image written to file in {s}", .{std.fmt.fmtDuration(write_screenshot_duration)});
-}
-
-fn screencopyFrameListener(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, record_buffer: *ScreenRecordBuffer) void {
-    switch (event) {
-        .buffer => |buffer| {
-            screen_capture_info.width = buffer.width;
-            screen_capture_info.height = buffer.height;
-            screen_capture_info.stride = buffer.stride;
-            screen_capture_info.format = buffer.format;
-        },
-        .flags => |flags| {
-            _ = flags;
-        },
-        .ready => |ready| {
-            _ = ready;
-            // writeVideoFrame(record_buffer.frame_index) catch |err| {
-            //     std.log.err("Failed to write video frame. Error {}", .{err});
-            // };
-            record_buffer.captured_frame.destroy();
-            record_buffer.frame_index = std.math.maxInt(u32);
-        },
-        .damage => |damage| {
-            _ = damage;
-        },
-        .linux_dmabuf => |linux_dmabuf| {
-            _ = linux_dmabuf;
-        },
-        .buffer_done => |buffer_done| {
-            _ = buffer_done;
-            frame.copy(record_buffer.buffer);
-        },
-        .failed => {
-            std.log.err("Failed in Screencopy Frame", .{});
-        },
-    }
 }
 
 fn lerp(from: f32, to: f32, value: f32) f32 {
