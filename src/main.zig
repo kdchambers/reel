@@ -844,40 +844,6 @@ fn drawDecorations() void {
     }
 }
 
-fn drawScreenCapture(app: *GraphicsContext) !void {
-    _ = app;
-
-    const width: u32 = 1920;
-    const height: u32 = 1080;
-
-    if (screen_dimensions.width < @divExact(width, 4))
-        return;
-
-    const available_width = @intCast(i32, screen_dimensions.width) - 100;
-
-    var dividor: u32 = 2;
-    while (@divExact(width, dividor) > available_width)
-        dividor *= 2;
-
-    if (dividor > 4)
-        return;
-
-    const divided_width = @intToFloat(f64, @divExact(width, dividor));
-    const divided_height = @intToFloat(f64, @divExact(height, dividor));
-
-    const margin_top = 20 * screen_scale.vertical * 2.0;
-    const margin_left = 20 * screen_scale.horizontal * 2.0;
-
-    const extent = geometry.Extent2D(f32){
-        .x = @floatCast(f32, -1.0 + margin_left),
-        .y = @floatCast(f32, -1.0 + margin_top),
-        .width = @floatCast(f32, divided_width * screen_scale.horizontal),
-        .height = @floatCast(f32, divided_height * screen_scale.vertical),
-    };
-    const color = graphics.RGB(f32).fromInt(120, 120, 120);
-    (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, color.toRGBA(), .top_left);
-}
-
 fn drawTexture() !void {
     const screen_extent = geometry.Extent2D(f32){
         .x = -0.8,
@@ -898,30 +864,63 @@ fn drawTexture() !void {
     );
 }
 
-/// Our example draw function
-/// This will run anytime the screen is resized
-fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
-    face_writer.reset();
+fn drawScreenCapture() !void {
 
-    if (screen_recorder.state.is_recording) {
+    //
+    // Draw preview background
+    //
+    const margin_top_pixels = 20;
+    const margin_left_pixels = 20;
+    const border_width_pixels = 1;
+    {
+        const margin_top = margin_top_pixels * screen_scale.vertical;
+        const margin_left = margin_left_pixels * screen_scale.horizontal;
+        const background_width = @intToFloat(f64, preview_dimensions.width + (border_width_pixels * 2));
+        const background_height = @intToFloat(f64, preview_dimensions.height + (border_width_pixels * 2));
+        const extent = geometry.Extent2D(f32){
+            .x = @floatCast(f32, -1.0 + margin_left),
+            .y = @floatCast(f32, -1.0 + margin_top),
+            .width = @floatCast(f32, background_width * screen_scale.horizontal),
+            .height = @floatCast(f32, background_height * screen_scale.vertical),
+        };
+        const color = graphics.RGB(f32).fromInt(120, 120, 120);
+        (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, color.toRGBA(), .top_left);
+    }
+
+    //
+    // Draw actual preview
+    //
+    {
+        const y_top: f64 = (margin_top_pixels + 1) * screen_scale.vertical;
+        const x_left: f64 = (margin_left_pixels + 1) * screen_scale.horizontal;
         preview_quad = try face_writer.create(QuadFace);
-        const preview_extent = geometry.Extent2D(f32){
-            .x = -0.4,
-            .y = 0.0,
+        const screen_extent = geometry.Extent2D(f32){
+            .x = @floatCast(f32, -1.0 + x_left),
+            .y = @floatCast(f32, -1.0 + y_top),
             .width = @floatCast(f32, @intToFloat(f64, preview_dimensions.width) * screen_scale.horizontal),
             .height = @floatCast(f32, @intToFloat(f64, preview_dimensions.height) * screen_scale.vertical),
         };
-        const preview_texture_extent = geometry.Extent2D(f32){
+        const texture_extent = geometry.Extent2D(f32){
             .x = @intToFloat(f32, preview_reserved_texture_extent.x) / 512,
             .y = @intToFloat(f32, preview_reserved_texture_extent.y) / 512,
             .width = @intToFloat(f32, preview_reserved_texture_extent.width) / 512,
             .height = @intToFloat(f32, preview_reserved_texture_extent.height) / 512,
         };
         preview_quad.* = graphics.quadTextured(
-            preview_extent,
-            preview_texture_extent,
-            .bottom_left,
+            screen_extent,
+            texture_extent,
+            .top_left,
         );
+    }
+}
+
+/// Our example draw function
+/// This will run anytime the screen is resized
+fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
+    face_writer.reset();
+
+    if (screen_recorder.state.is_recording) {
+        try drawScreenCapture();
     }
 
     if (record_button_opt == null) {
@@ -969,7 +968,7 @@ fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         try record_button.draw(
             extent,
             record_button_color_normal,
-            "Record",
+            if (screen_recorder.state.is_recording) "Stop" else "Record",
             &pen,
             screen_scale,
             .{ .rounding_radius = 5 },
