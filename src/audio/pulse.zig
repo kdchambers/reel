@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Keith Chambers
 
+const std = @import("std");
+const DynLib = std.DynLib;
+
 pub const Simple = opaque {};
 pub const StreamDirection = enum(i32) {
     no_direction = 0,
@@ -126,6 +129,7 @@ extern fn pa_simple_new(
 ) callconv(.C) ?*Simple;
 
 extern fn pa_simple_free(simple: *Simple) callconv(.C) void;
+extern fn pa_strerror(err: i32) [*:0]const u8;
 
 //
 // Function alias'
@@ -134,3 +138,70 @@ extern fn pa_simple_free(simple: *Simple) callconv(.C) void;
 pub const simpleNew = pa_simple_new;
 pub const simpleRead = pa_simple_read;
 pub const simpleFree = pa_simple_free;
+pub const strError = pa_strerror;
+
+//
+// Functions as Types for loading
+//
+
+const SimpleNewFn = *const @TypeOf(simpleNew);
+const SimpleReadFn = *const @TypeOf(simpleRead);
+const SimpleFreeFn = *const @TypeOf(simpleFree);
+const StrErrorFn = *const @TypeOf(strError);
+
+//
+// High level API
+//
+
+pub const InputCapture = struct {
+    pulse_simple_handle: DynLib,
+    connection: *Simple,
+
+    //
+    // Loaded function pointers
+    //
+
+    simpleNewFn: SimpleNewFn,
+    simpleReadFn: SimpleReadFn,
+    simpleFreeFn: SimpleFreeFn,
+    strErrorFn: StrErrorFn,
+
+    pub fn init(self: *@This()) !void {
+        self.pulse_simple_handle = DynLib.open("libpulse-simple.so") catch
+            return error.LinkPulseSimpleFail;
+
+        self.simpleNewFn = self.pulse_simple_handle.lookup(SimpleNewFn, "pa_simple_new") orelse
+            return error.LookupFailed;
+        self.simpleReadFn = self.pulse_simple_handle.lookup(SimpleReadFn, "pa_simple_read") orelse
+            return error.LookupFailed;
+        self.simpleFreeFn = self.pulse_simple_handle.lookup(SimpleFreeFn, "pa_simple_free") orelse
+            return error.LookupFailed;
+        self.strErrorFn = self.pulse_simple_handle.lookup(StrErrorFn, "pa_strerror") orelse
+            return error.LookupFailed;
+
+        // TODO: Allow to be user configurable
+        const sample_spec = SampleSpec{
+            .format = .s16le,
+            .rate = 44100,
+            .channels = 1,
+        };
+        var errcode: i32 = undefined;
+        self.connection = self.simpleNewFn(null, "reel", .record, null, "main", &sample_spec, null, null, &errcode) orelse {
+            const error_message = self.strErrorFn(errcode);
+            std.log.err("pulse: {s}", .{error_message});
+            return error.CreateConnectionFail;
+        };
+    }
+
+    pub inline fn read(self: @This(), buffer: []u8) !void {
+        var errcode: i32 = undefined;
+        if (self.simpleReadFn(self.connection, &buffer, buffer.len, &errcode) < 0) {
+            std.log.err("pulse: read input fail", .{});
+            return error.ReadInputDeviceFail;
+        }
+    }
+
+    pub fn deinit(self: @This()) void {
+        self.simpleFreeFn(self.connection);
+    }
+};
