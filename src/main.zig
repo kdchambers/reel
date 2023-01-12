@@ -7,6 +7,7 @@ const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
 const linux = std.os.linux;
 const img = @import("zigimg");
+const audio = @import("audio.zig");
 
 const geometry = @import("geometry.zig");
 
@@ -501,6 +502,8 @@ var add_icon_opt: ?renderer.ImageHandle = null;
 
 var image_button_background_color = graphics.RGBA(f32){ .r = 0.3, .g = 0.3, .b = 0.3, .a = 1.0 };
 
+var audio_input_capture: audio.pulse.InputCapture = undefined;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -509,6 +512,9 @@ pub fn main() !void {
 
     font = try Font.initFromFile(allocator, asset_path_font);
     defer font.deinit(allocator);
+
+    try audio_input_capture.init();
+    defer audio_input_capture.deinit();
 
     texture_atlas = try Atlas.init(allocator, 512);
     defer texture_atlas.deinit(allocator);
@@ -601,6 +607,10 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     );
     defer allocator.free(screen_preview_buffer);
 
+    const samples_per_frame: usize = @divFloor(44100, input_fps);
+    std.log.info("Allocating {d} bytes for audio buffer", .{samples_per_frame * 2});
+    var audio_buffer = try allocator.alloc(u16, samples_per_frame);
+
     while (!is_shutdown_requested) {
         frame_count += 1;
 
@@ -648,6 +658,15 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
         const wayland_poll_end = std.time.nanoTimestamp();
         wayland_duration_total_ns += @intCast(u64, wayland_poll_end - frame_start_ns);
+
+        try audio_input_capture.read(u16, &audio_buffer);
+        var audio_accum: u64 = 0;
+        for (audio_buffer) |sample| {
+            audio_accum += try std.math.powi(u64, sample, 2);
+        }
+        audio_accum = @divFloor(audio_accum, 44100);
+        const audio_volume: f64 = std.math.sqrt(@intToFloat(f64, audio_accum));
+        _ = audio_volume;
 
         if (framebuffer_resized) {
             app.swapchain_extent.width = screen_dimensions.width;
@@ -761,6 +780,9 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         if (frame_duration_ns < fastest_frame_ns) {
             fastest_frame_ns = frame_duration_ns;
         }
+
+        if (target_ns_per_frame <= frame_duration_ns)
+            continue;
 
         std.debug.assert(target_ns_per_frame > frame_duration_ns);
         const remaining_ns: u64 = target_ns_per_frame - @intCast(u64, frame_duration_ns);

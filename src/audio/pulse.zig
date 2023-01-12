@@ -101,6 +101,7 @@ pub const SampleSpec = extern struct {
 pub const BufferAttr = extern struct {
     max_length: u32,
     tlength: u32,
+    prebuf: u32,
     minreq: u32,
     fragsize: u32,
 };
@@ -179,6 +180,15 @@ pub const InputCapture = struct {
         self.strErrorFn = self.pulse_simple_handle.lookup(StrErrorFn, "pa_strerror") orelse
             return error.LookupFailed;
 
+        const server_buffer_size = @divFloor(44100, 15) * @sizeOf(u16);
+
+        const buffer_attributes = BufferAttr{
+            .max_length = std.math.maxInt(u32),
+            .tlength = std.math.maxInt(u32),
+            .minreq = std.math.maxInt(u32),
+            .prebuf = server_buffer_size,
+            .fragsize = server_buffer_size,
+        };
         // TODO: Allow to be user configurable
         const sample_spec = SampleSpec{
             .format = .s16le,
@@ -186,16 +196,16 @@ pub const InputCapture = struct {
             .channels = 1,
         };
         var errcode: i32 = undefined;
-        self.connection = self.simpleNewFn(null, "reel", .record, null, "main", &sample_spec, null, null, &errcode) orelse {
+        self.connection = self.simpleNewFn(null, "reel", .record, null, "main", &sample_spec, null, &buffer_attributes, &errcode) orelse {
             const error_message = self.strErrorFn(errcode);
             std.log.err("pulse: {s}", .{error_message});
             return error.CreateConnectionFail;
         };
     }
 
-    pub inline fn read(self: @This(), buffer: []u8) !void {
+    pub inline fn read(self: @This(), comptime Type: type, buffer: *[]Type) !void {
         var errcode: i32 = undefined;
-        if (self.simpleReadFn(self.connection, &buffer, buffer.len, &errcode) < 0) {
+        if (self.simpleReadFn(self.connection, @ptrCast([*]u8, buffer.ptr), buffer.len * @sizeOf(Type), &errcode) < 0) {
             std.log.err("pulse: read input fail", .{});
             return error.ReadInputDeviceFail;
         }
