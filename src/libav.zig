@@ -26,6 +26,76 @@ pub const InputFormat = libav.AVInputFormat;
 pub const MediaType = libav.AVMediaType;
 pub const Dictionary = libav.AVDictionary;
 pub const Codec = libav.AVCodec;
+pub const CodecID = libav.AVCodecID;
+
+extern fn av_dict_set(dict: *?*Dictionary, key: [*:0]const u8, value: [*:0]const u8, flags: i32) callconv(.C) i32;
+extern fn av_dict_free(dict: **Dictionary) callconv(.C) void;
+extern fn av_frame_alloc() callconv(.C) *Frame;
+extern fn av_frame_unref(frame: *Frame) callconv(.C) void;
+extern fn av_log_set_level(level: i32) callconv(.C) void;
+extern fn av_find_input_format(short_name: [*:0]const u8) callconv(.C) ?*InputFormat;
+
+extern fn av_find_best_stream(
+    ic: *FormatContext,
+    media_type: MediaType,
+    wanted_stream: i32,
+    related_stream: i32,
+    out_decoder: ?**Codec,
+    flags: i32,
+) callconv(.C) i32;
+
+extern fn av_dump_format(
+    format_context: *FormatContext,
+    index: i32,
+    url: [*:0]const u8,
+    is_output: i32,
+) callconv(.C) void;
+
+extern fn av_image_alloc(
+    pointers: [*][*]u8,
+    linesizes: *[4]i32,
+    width: i32,
+    height: i32,
+    pixel_format: libav.AVPixelFormat,
+    alignment: i32,
+) callconv(.C) i32;
+
+extern fn avcodec_find_decoder(id: CodecID) callconv(.C) *Codec;
+extern fn avcodec_open2(context: *CodecContext, codec: *const Codec, options: *?*Dictionary) callconv(.C) i32;
+extern fn avcodec_send_packet(context: *CodecContext, packet: *const Packet) callconv(.C) i32;
+extern fn avcodec_receive_frame(context: *CodecContext, frame: *Frame) callconv(.C) i32;
+
+extern fn avdevice_register_all() callconv(.C) void;
+
+extern fn avformat_alloc_context() callconv(.C) ?*FormatContext;
+extern fn avformat_open_input(
+    format_context: **FormatContext,
+    input_path: [*:0]const u8,
+    input_format: *InputFormat,
+    options: *?*Dictionary,
+) callconv(.C) i32;
+extern fn avformat_find_stream_info(format_context: *FormatContext, options: ?*?*Dictionary) callconv(.C) i32;
+
+pub const dictSet = av_dict_set;
+pub const dictFree = av_dict_free;
+pub const frameUnref = av_frame_unref;
+pub const frameAlloc = av_frame_alloc;
+pub const logSetLevel = av_log_set_level;
+pub const findInputFormat = av_find_input_format;
+pub const findBestStream = av_find_best_stream;
+pub const dumpFormat = av_dump_format;
+pub const imageAlloc = av_image_alloc;
+
+pub const deviceRegisterAll = avdevice_register_all;
+
+pub const formatFindStreamInfo = avformat_find_stream_info;
+pub const formatOpenInput = avformat_open_input;
+pub const formatAllocContext = avformat_alloc_context;
+
+pub const codecReceiveFrame = avcodec_receive_frame;
+pub const codecSendPacket = avcodec_send_packet;
+pub const codecOpen2 = avcodec_open2;
+pub const codecFindDecoder = avcodec_find_decoder;
 
 pub const PixelFormat = enum(i32) {
     YUV420P = 0,
