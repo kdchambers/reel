@@ -14,6 +14,10 @@ pub fn Index(comptime Type: type) type {
 
         index: u16,
 
+        pub inline fn isNull(self: @This()) bool {
+            return self.index == std.math.maxInt(u16);
+        }
+
         pub inline fn get(self: @This()) Type {
             return @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.index])).*;
         }

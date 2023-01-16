@@ -55,9 +55,11 @@ pub fn init(
     is_mouse_in_screen_ref = is_mouse_in_screen;
 }
 
-pub const ImageButton = packed struct(u32) {
+pub const ImageButton = packed struct(u64) {
     background_vertex_index: u16,
     state_index: Index(HoverZoneState),
+    extent_index: Index(geometry.Extent2D(f32)),
+    reserved: u16 = 0,
 
     pub fn create() !ImageButton {
         const state_index = event_system.reserveState();
@@ -65,6 +67,7 @@ pub const ImageButton = packed struct(u32) {
         return ImageButton{
             .background_vertex_index = std.math.maxInt(u16),
             .state_index = state_index,
+            .extent_index = .{ .index = std.math.maxInt(u16) },
         };
     }
 
@@ -80,6 +83,7 @@ pub const ImageButton = packed struct(u32) {
         event_system.bindStateToMouseEvent(
             self.state_index,
             extent,
+            &self.extent_index,
             .{
                 .enable_hover = true,
                 .start_active = false,
@@ -109,7 +113,7 @@ pub const Button = packed struct(u64) {
     vertex_index: u16,
     vertex_count: u16,
     state_index: Index(HoverZoneState),
-    reserved: u16 = 0,
+    extent_index: Index(geometry.Extent2D(f32)),
 
     pub const DrawOptions = struct {
         rounding_radius: ?f64,
@@ -122,6 +126,7 @@ pub const Button = packed struct(u64) {
             .vertex_index = std.math.maxInt(u16),
             .state_index = state_index,
             .vertex_count = undefined,
+            .extent_index = .{ .index = std.math.maxInt(u16) },
         };
     }
 
@@ -147,7 +152,7 @@ pub const Button = packed struct(u64) {
         try pen.writeCentered(label, extent, screen_scale, &text_writer_interface);
 
         const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
-        event_system.bindStateToMouseEvent(self.state_index, extent, bind_options);
+        event_system.bindStateToMouseEvent(self.state_index, extent, &self.extent_index, bind_options);
     }
 
     pub inline fn state(self: @This()) HoverZoneState {

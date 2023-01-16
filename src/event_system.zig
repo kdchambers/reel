@@ -153,16 +153,48 @@ pub const MouseEventOptions = packed struct(u32) {
 pub fn bindStateToMouseEvent(
     state_index: Index(HoverZoneState),
     extent: geometry.Extent2D(f32),
+    old_extent_index: *Index(geometry.Extent2D(f32)),
     options: MouseEventOptions,
 ) void {
-    const extent_index = mini_heap.write(geometry.Extent2D(f32), &extent);
-    const event = MouseEventEntry{
-        .extent = extent_index.toIndexAligned(),
-        .state = state_index,
-        .hover_active = options.start_active,
-        .hover_enabled = options.enable_hover,
-    };
-    _ = event_cluster_buffer.write(event);
+    //
+    // There's no extent to modify, just write a new value and return
+    //
+    if (old_extent_index.isNull()) {
+        const extent_index = mini_heap.write(geometry.Extent2D(f32), &extent);
+        const event = MouseEventEntry{
+            .extent = extent_index.toIndexAligned(),
+            .state = state_index,
+            .hover_active = options.start_active,
+            .hover_enabled = options.enable_hover,
+        };
+        _ = event_cluster_buffer.write(event);
+        old_extent_index.* = extent_index;
+        std.debug.assert(!old_extent_index.isNull());
+        return;
+    }
+
+    //
+    // We already have an extent registered, we need to find and update it
+    //
+
+    const aligned_index = old_extent_index.toIndexAligned();
+    var buffer_i: usize = 0;
+    while (buffer_i < event_cluster_buffer.len) : (buffer_i += 1) {
+        const cluster = &event_cluster_buffer.buffers[buffer_i];
+        var cluster_i: u8 = 0;
+        while (cluster_i < cluster.len) : (cluster_i += 1) {
+            const entry = cluster.at(cluster_i);
+            if (entry.extent.index == aligned_index.index) {
+                entry.extent.getPtr().* = extent;
+                return;
+            }
+        }
+    }
+
+    //
+    // old_extent_index not found
+    //
+    unreachable;
 }
 
 pub fn addMouseEvent(
