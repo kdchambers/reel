@@ -55,6 +55,102 @@ pub fn init(
     is_mouse_in_screen_ref = is_mouse_in_screen;
 }
 
+pub const Checkbox = packed struct(u64) {
+    background_vertex_index: u16,
+    state_index: Index(HoverZoneState),
+    extent_index: Index(geometry.Extent2D(f32)),
+    reserved: u16 = 0,
+
+    pub fn create() !@This() {
+        const state_index = event_system.reserveState();
+        state_index.getPtr().reset();
+        return @This(){
+            .background_vertex_index = std.math.maxInt(u16),
+            .state_index = state_index,
+            .extent_index = .{ .index = std.math.maxInt(u16) },
+        };
+    }
+
+    pub fn draw(
+        self: *@This(),
+        center: geometry.Coordinates2D(f64),
+        radius_pixels: f64,
+        screen_scale: ScaleFactor2D(f64),
+        color: graphics.RGBA(f32),
+        is_checked: bool,
+    ) !void {
+        const grey = graphics.RGB(f32).fromInt(120, 120, 120);
+
+        try drawCircle(
+            center,
+            radius_pixels,
+            screen_scale,
+            grey.toRGBA(),
+        );
+
+        if (is_checked) {
+            try drawCircle(
+                center,
+                radius_pixels / 2,
+                screen_scale,
+                color,
+            );
+        }
+
+        //
+        // Style #2
+        //
+
+        // if(!is_checked) {
+        //     try drawCircle(
+        //         center,
+        //         radius_pixels,
+        //         screen_scale,
+        //         grey.toRGBA(),
+        //     );
+        // } else {
+        //     try drawCircle(
+        //         center,
+        //         radius_pixels,
+        //         screen_scale,
+        //         color,
+        //     );
+        //     try drawCircle(
+        //         center,
+        //         radius_pixels / 3,
+        //         screen_scale,
+        //         grey.toRGBA(),
+        //     );
+        // }
+
+        const radius_h: f64 = radius_pixels * screen_scale.horizontal;
+        const radius_v: f64 = radius_pixels * screen_scale.vertical;
+
+        const extent = geometry.Extent2D(f32){
+            .x = @floatCast(f32, center.x - radius_h),
+            .y = @floatCast(f32, center.y + radius_v),
+            .width = @floatCast(f32, radius_h * 2),
+            .height = @floatCast(f32, radius_v * 2),
+        };
+
+        event_system.bindStateToMouseEvent(
+            self.state_index,
+            extent,
+            &self.extent_index,
+            .{
+                .enable_hover = true,
+                .start_active = false,
+            },
+        );
+    }
+
+    pub inline fn state(self: @This()) HoverZoneState {
+        const state_copy = self.state_index.get();
+        self.state_index.getPtr().clear();
+        return state_copy;
+    }
+};
+
 pub const ImageButton = packed struct(u64) {
     background_vertex_index: u16,
     state_index: Index(HoverZoneState),
@@ -379,4 +475,55 @@ pub fn drawRoundRect(
         face_writer_ref.vertices_used += points_per_curve + 2;
         face_writer_ref.indices_used += (points_per_curve - 1) * 3;
     }
+}
+
+pub fn drawCircle(
+    center: geometry.Coordinates2D(f64),
+    radius_pixels: f64,
+    screen_scale: ScaleFactor2D(f64),
+    color: graphics.RGBA(f32),
+) !void {
+    const point_count = @max(20, @floatToInt(u16, @divFloor(radius_pixels, 2)));
+
+    const radius_h: f64 = radius_pixels * screen_scale.horizontal;
+    const radius_v: f64 = radius_pixels * screen_scale.vertical;
+
+    const degreesToRadians = std.math.degreesToRadians;
+
+    const rotation_per_point = degreesToRadians(f64, 360 / @intToFloat(f64, point_count));
+
+    const vertices_index: u16 = face_writer_ref.vertices_used;
+    var indices_index: u16 = face_writer_ref.indices_used;
+
+    face_writer_ref.vertices[vertices_index] = Vertex{
+        .x = @floatCast(f32, center.x),
+        .y = @floatCast(f32, center.y),
+        .color = color,
+    };
+
+    //
+    // Draw first on-curve point
+    //
+    face_writer_ref.vertices[vertices_index + 1] = Vertex{
+        .x = @floatCast(f32, center.x + (radius_h * @cos(0.0))),
+        .y = @floatCast(f32, center.y + (radius_v * @sin(0.0))),
+        .color = color,
+    };
+
+    var i: u16 = 1;
+    while (i <= point_count) : (i += 1) {
+        const angle_radians: f64 = rotation_per_point * @intToFloat(f64, i);
+        face_writer_ref.vertices[vertices_index + i + 1] = Vertex{
+            .x = @floatCast(f32, center.x + (radius_h * @cos(angle_radians))),
+            .y = @floatCast(f32, center.y + (radius_v * @sin(angle_radians))),
+            .color = color,
+        };
+        face_writer_ref.indices[indices_index + 0] = vertices_index; // Center
+        face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+        face_writer_ref.indices[indices_index + 2] = vertices_index + i + 1; // Current
+        indices_index += 3;
+    }
+
+    face_writer_ref.vertices_used += point_count + 2;
+    face_writer_ref.indices_used += point_count * 3;
 }
