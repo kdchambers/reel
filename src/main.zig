@@ -9,6 +9,8 @@ const linux = std.os.linux;
 const img = @import("zigimg");
 const audio = @import("audio.zig");
 
+const style = @import("app_styling.zig");
+
 const geometry = @import("geometry.zig");
 
 const fontana = @import("fontana");
@@ -28,8 +30,6 @@ const FaceWriter = graphics.FaceWriter;
 
 const widget = @import("widgets.zig");
 const renderer = @import("renderer.zig");
-
-const gui = @import("app_interface.zig");
 
 const Button = widget.Button;
 const ImageButton = widget.ImageButton;
@@ -76,7 +76,7 @@ const window_decorations = struct {
 ///       another image. In present mode FIFO this should correspond to the monitors display rate
 ///       using v-sync.
 ///       However, `input_fps` can be used to limit / reduce the display refresh rate
-const input_fps: u32 = 15;
+const input_fps: u32 = 30;
 
 /// Color to use for icon images
 const icon_color = graphics.RGB(f32).fromInt(200, 200, 200);
@@ -132,6 +132,21 @@ const icon_path_list = [_][]const u8{
     asset_path_icon ++ "search.png",
     asset_path_icon ++ "settings.png",
     asset_path_icon ++ "star.png",
+};
+
+const TextWriterInterface = struct {
+    quad_writer: *FaceWriter,
+    pub fn write(
+        self: *@This(),
+        screen_extent: geometry.Extent2D(f32),
+        texture_extent: geometry.Extent2D(f32),
+    ) !void {
+        (try self.quad_writer.create(QuadFace)).* = graphics.quadTextured(
+            screen_extent,
+            texture_extent,
+            .bottom_left,
+        );
+    }
 };
 
 var face_writer: FaceWriter = undefined;
@@ -504,264 +519,9 @@ var image_button_background_color = graphics.RGBA(f32){ .r = 0.3, .g = 0.3, .b =
 
 var audio_input_capture: audio.pulse.InputCapture = undefined;
 
-const libav = @cImport({
-    @cInclude("libavcodec/avcodec.h");
-    @cInclude("libavformat/avformat.h");
-    @cInclude("libavutil/opt.h");
-    @cInclude("libavutil/samplefmt.h");
-    @cInclude("libavutil/imgutils.h");
-    @cInclude("libavdevice/avdevice.h");
-    @cInclude("libswscale/swscale.h");
-    @cInclude("libavfilter/avfilter.h");
-    @cInclude("libavfilter/buffersink.h");
-    @cInclude("libavfilter/buffersrc.h");
-});
+const WebcamStream = @import("WebcamStream.zig").WebcamStream;
 
-const av = @import("libav.zig");
-
-const EAGAIN: i32 = -11;
-const EINVAL: i32 = -22;
-
-const WebcamStream = struct {
-    video_codec_context: *av.CodecContext,
-    format_context: *av.FormatContext,
-    video_frame: ?*av.Frame,
-    converted_frame: ?*av.Frame,
-    input_format: *av.InputFormat,
-    video_stream: ?*av.Stream,
-    video_dst_data: [4][*]u8,
-    video_dst_linesize: [4]i32,
-    video_dst_bufsize: i32,
-    video_stream_index: i32,
-    packet: av.Packet,
-    video_frame_count: i32,
-
-    pub fn create(
-        input_name: [*:0]const u8,
-        width: u32,
-        height: u32,
-        // desired_fps: u32,
-    ) @This() {
-        _ = height;
-        _ = width;
-
-        var webcam_stream: WebcamStream = undefined;
-        webcam_stream.video_frame_count = 0;
-
-        var ret_code: i32 = 0;
-        var options: ?*av.Dictionary = null;
-
-        if (builtin.mode == .Debug)
-            av.logSetLevel(libav.AV_LOG_DEBUG);
-
-        av.deviceRegisterAll();
-
-        webcam_stream.input_format = av.findInputFormat("video4linux2") orelse return error.GetInputFormatFail;
-
-        webcam_stream.format_context = av.formatAllocContext() orelse return error.AllocateFormatContextFail;
-        webcam_stream.format_context.flags |= libav.AVFMT_FLAG_NONBLOCK;
-
-        _ = av.dictSet(&options, "framerate", "15", 0);
-        _ = av.dictSet(&options, "video_size", "320x224", 0);
-
-        ret_code = av.formatOpenInput(
-            &webcam_stream.format_context,
-            input_name,
-            webcam_stream.input_format,
-            &options,
-        );
-        if (ret_code < 0) {
-            return error.OpenInputFail;
-        }
-
-        ret_code = av.formatFindStreamInfo(webcam_stream.format_context, null);
-        if (ret_code < 0) {
-            return error.FindStreamInfoFail;
-        }
-
-        var codec_params: libav.AVCodecParameters = undefined;
-        var stream: *av.Stream = undefined;
-        var decoder: ?*av.Codec = null;
-        var codec_options: ?*av.Dictionary = null;
-
-        ret_code = av.findBestStream(webcam_stream.format_context, libav.AVMEDIA_TYPE_VIDEO, -1, -1, null, 0);
-        if (ret_code < 0)
-            return error.FindBestStreamFail;
-
-        webcam_stream.video_stream_index = ret_code;
-        stream = webcam_stream.format_context.streams[@intCast(usize, webcam_stream.video_stream_index)];
-
-        decoder = av.codecFindDecoder(stream.codecpar[0].codec_id);
-        if (decoder == null)
-            return error.FindDecoderFail;
-
-        _ = av.dictSet(&codec_options, "refcounted_frames", "1", 0);
-
-        webcam_stream.decoder_context = libav.avcodec_alloc_context3(decoder);
-
-        const stream_codec_params = stream.codecpar[0];
-        webcam_stream.decoder_context.width = stream_codec_params.width;
-        webcam_stream.decoder_context.height = stream_codec_params.height;
-        webcam_stream.decoder_context.pix_fmt = stream_codec_params.format;
-
-        std.log.info("Opening decoder. Dimensions {d}x{d} pixel format: {d}", .{
-            webcam_stream.decoder_context.width,
-            webcam_stream.decoder_context.height,
-            webcam_stream.decoder_context.pix_fmt,
-        });
-
-        ret_code = av.codecOpen2(webcam_stream.decoder_context, decoder.?, &codec_options);
-        if (ret_code < 0)
-            return error.OpenDecoderFail;
-
-        ret_code = libav.avcodec_parameters_from_context(stream.codecpar, webcam_stream.decoder_context);
-        if (ret_code < 0)
-            return error.CopyContextParametersFail;
-
-        // ret_code = try openCodecContext(&webcam_stream.video_stream_index, libav.AVMEDIA_TYPE_VIDEO);
-        // if (ret_code < 0)
-        //     return error.OpenCodecContextFail;
-
-        webcam_stream.video_stream = webcam_stream.format_context.streams[@intCast(usize, webcam_stream.video_stream_index)];
-        codec_params = webcam_stream.video_stream.?.codecpar[0];
-        ret_code = av.imageAlloc(
-            &webcam_stream.video_dst_data,
-            &webcam_stream,
-            webcam_stream.video_dst_linesize,
-            codec_params.width,
-            codec_params.height,
-            codec_params.format,
-            1,
-        );
-        if (ret_code < 0)
-            return error.AllocateImageFail;
-
-        webcam_stream.video_dst_bufsize = ret_code;
-
-        if (builtin.mode == .Debug)
-            av.dumpFormat(webcam_stream.format_context, 0, input_name, 0);
-
-        if (webcam_stream.video_stream == null)
-            return error.SetupVideoStreamFail;
-
-        webcam_stream.video_frame = av.frameAlloc();
-        if (webcam_stream.video_frame == null)
-            return error.AllocateVideoFrameFail;
-
-        webcam_stream.packet = libav.av_packet_alloc();
-        webcam_stream.coverted_frame = av.frameAlloc();
-        ret_code = libav.av_image_alloc(
-            @ptrCast([*c][*c]u8, &webcam_stream.coverted_frame.data[0]),
-            &webcam_stream.coverted_frame.linesize,
-            webcam_stream.decoder_context.width,
-            webcam_stream.decoder_context.height,
-            libav.AV_PIX_FMT_RGBA,
-            1,
-        );
-
-        return webcam_stream;
-    }
-
-    pub fn getFrame(
-        self: @This(),
-        output_buffer: []graphics.RGBA(f32),
-        dst_x: u32,
-        dst_y: u32,
-        stride: u32,
-    ) !void {
-        var ret_code = libav.av_read_frame(self.format_context, self.packet);
-
-        if (ret_code < 0) {
-            if (ret_code == EAGAIN)
-                return error.EAGAIN;
-            return error.ReadFrameFail;
-        }
-
-        if (self.packet.stream_index != self.video_stream_index)
-            return error.InvalidFrame;
-
-        //
-        // Send encoded packet to decoder
-        //
-        ret_code = av.codecSendPacket(self.decoder_context, self.packet);
-
-        if (ret_code != 0)
-            return error.DecodePacketFail;
-
-        //
-        // Read decoded frame from decoder
-        //
-        ret_code = av.codecReceiveFrame(self.decoder_context, self.video_frame.?);
-        if (ret_code == EAGAIN)
-            return 0;
-
-        if (ret_code != 0)
-            return error.EncodeFrameFailed;
-
-        //
-        // We have a decoded frame, but we need to convert it into our desired
-        // pixel format before returning
-        //
-
-        const width = @intCast(usize, self.decoder_context.width);
-        const height = @intCast(usize, self.decoder_context.height);
-
-        var conversion = libav.sws_getContext(
-            self.decoder_context.width,
-            self.decoder_context.height,
-            self.decoder_context.pix_fmt,
-            self.decoder_context.width,
-            self.decoder_context.height,
-            libav.AV_PIX_FMT_RGBA,
-            libav.SWS_FAST_BILINEAR | libav.SWS_FULL_CHR_H_INT | libav.SWS_ACCURATE_RND,
-            null,
-            null,
-            null,
-        );
-        _ = libav.sws_scale(
-            conversion,
-            &self.video_frame.?.data,
-            &self.video_frame.?.linesize,
-            0,
-            self.decoder_context.height,
-            &self.coverted_frame.data,
-            &self.coverted_frame.linesize,
-        );
-        libav.sws_freeContext(conversion);
-        libav.av_packet_unref(self.packet);
-
-        std.log.info("Dimensions: {d}x{d} linesize {d}", .{
-            self.decoder_context.width,
-            self.decoder_context.height,
-            self.video_frame.?.linesize[0],
-        });
-
-        const pixel_count = width * height;
-        const frame_pixels = @ptrCast([*]geometry.RGBA(u8), &self.coverted_frame.data[0][0])[0..pixel_count];
-        var y: usize = 0;
-        while (y < height) : (y += 1) {
-            var x: usize = 0;
-            while (x < width) : (x += 1) {
-                const src_index = x + (y * width);
-                const dst_index = (x + dst_x) + ((y + dst_y) * stride);
-                output_buffer[dst_index].r = @intToFloat(f32, frame_pixels[src_index].r) / 255;
-                output_buffer[dst_index].g = @intToFloat(f32, frame_pixels[src_index].g) / 255;
-                output_buffer[dst_index].b = @intToFloat(f32, frame_pixels[src_index].b) / 255;
-                output_buffer[dst_index].a = 1.0;
-            }
-        }
-        self.video_frame_count += 1;
-    }
-
-    pub fn deinit(self: @This()) !void {
-        _ = libav.avcodec_close(self.decoder_context);
-        libav.avformat_close_input(
-            @ptrCast([*c][*c]av.FormatContext, &self.format_context),
-        );
-        libav.av_frame_free(&self.video_frame);
-        libav.av_free(self.video_dst_data[0]);
-    }
-};
+var webcam: WebcamStream = undefined;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -935,7 +695,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             try renderer.recreateSwapchain(allocator, app, screen_dimensions);
         }
 
-        if (screen_recorder.state.is_recording) {
+        if (enable_preview and screen_recorder.state.is_recording) {
             if (screen_recorder.nextFrameImage(frame_count - 1)) |frame_image| {
                 try screen_recorder.captureFrame(frame_count);
                 var gpu_texture = try renderer.textureGet(app);
@@ -977,7 +737,36 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                     }
                 }
 
+                try webcam.getFrame(
+                    gpu_texture.pixels,
+                    preview_reserved_texture_extent.x,
+                    preview_reserved_texture_extent.y,
+                    512,
+                );
+
                 try renderer.textureCommit(app);
+
+                is_draw_required = true;
+            }
+        }
+
+        if (enable_preview_checkbox_opt) |enable_preview_checkbox| {
+            const state = enable_preview_checkbox.state();
+            if (state.left_click_release) {
+                std.log.info("Enabling preview", .{});
+                enable_preview = !enable_preview;
+
+                if (!screen_recorder.isInitialized()) {
+                    std.log.info("Setting up screen recorder", .{});
+                    try screen_recorder.init(
+                        wayland_client.output_opt.?,
+                        wayland_client.screencopy_manager,
+                    );
+                    webcam = try WebcamStream.create("/dev/video0", 320, 224);
+                } else {
+                    std.log.info("Flushing buffer frames", .{});
+                    webcam.flushFrameBuffer();
+                }
 
                 is_draw_required = true;
             }
@@ -997,15 +786,16 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             if (state.hover_exit)
                 record_button.setColor(record_button_color_normal);
 
-            if (state.left_click_release) {
-                if (!screen_recorder.isInitialized()) {
-                    std.log.info("Recording started", .{});
-                    try screen_recorder.init(
-                        wayland_client.output_opt.?,
-                        wayland_client.screencopy_manager,
-                    );
-                }
-            }
+            // if (state.left_click_release) {
+            //     if (!screen_recorder.isInitialized()) {
+            //         std.log.info("Recording started", .{});
+            //         try screen_recorder.init(
+            //             wayland_client.output_opt.?,
+            //             wayland_client.screencopy_manager,
+            //         );
+            //         webcam = try WebcamStream.create("/dev/video0", 320, 224);
+            //     }
+            // }
         }
 
         if (is_draw_required) {
@@ -1065,6 +855,12 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.log.info("Wayland poll average: {}", .{std.fmt.fmtDuration(wayland_duration_average_ns)});
 
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
+
+    if (screen_recorder.state.is_recording) {
+        webcam.deinit() catch |err| {
+            std.log.warn("Failedd to deinitialize webcam. Error: {}", .{err});
+        };
+    }
 }
 
 // TODO:
@@ -1145,14 +941,13 @@ fn drawTexture() !void {
     );
 }
 
-fn drawScreenCapture() !void {
-
+fn drawScreenCaptureBackground() !void {
     //
     // Draw preview background
     //
-    const margin_top_pixels = 20;
-    const margin_left_pixels = 20;
-    const border_width_pixels = 1;
+    const margin_top_pixels = style.screen_preview.margin_top_pixels;
+    const margin_left_pixels = style.screen_preview.margin_left_pixels;
+    const border_width_pixels = style.screen_preview.border_width_pixels;
     {
         const margin_top = margin_top_pixels * screen_scale.vertical;
         const margin_left = margin_left_pixels * screen_scale.horizontal;
@@ -1167,10 +962,14 @@ fn drawScreenCapture() !void {
         const color = graphics.RGB(f32).fromInt(120, 120, 120);
         (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, color.toRGBA(), .top_left);
     }
+}
 
+fn drawScreenCapture() !void {
     //
     // Draw actual preview
     //
+    const margin_top_pixels = style.screen_preview.margin_top_pixels;
+    const margin_left_pixels = style.screen_preview.margin_left_pixels;
     {
         const y_top: f64 = (margin_top_pixels + 1) * screen_scale.vertical;
         const x_left: f64 = (margin_left_pixels + 1) * screen_scale.horizontal;
@@ -1195,11 +994,54 @@ fn drawScreenCapture() !void {
     }
 }
 
+const white = graphics.RGB(f32).fromInt(255, 255, 255);
+
+const Checkbox = widget.Checkbox;
+var enable_preview_checkbox_opt: ?Checkbox = null;
+var enable_preview: bool = false;
+
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     face_writer.reset();
 
+    {
+        if (enable_preview_checkbox_opt == null)
+            enable_preview_checkbox_opt = try Checkbox.create();
+
+        const preview_margin_left: f64 = style.screen_preview.margin_left_pixels * screen_scale.horizontal;
+        const checkbox_radius_pixels = 11;
+        const checkbox_width = checkbox_radius_pixels * screen_scale.horizontal * 2;
+        const center = geometry.Coordinates2D(f64){
+            .x = -1.0 + (preview_margin_left + (checkbox_width / 2)),
+            .y = -0.3,
+        };
+        try enable_preview_checkbox_opt.?.draw(
+            center,
+            checkbox_radius_pixels,
+            screen_scale,
+            style.checkbox_checked_color.toRGBA(),
+            enable_preview,
+        );
+
+        // TODO: Vertically aligning label will require knowing it's height
+        const v_adjustment_hack = 0.85;
+
+        const placement = geometry.Coordinates2D(f32){
+            .x = @floatCast(f32, center.x + checkbox_width),
+            .y = @floatCast(f32, center.y + (checkbox_radius_pixels * screen_scale.vertical * v_adjustment_hack)),
+        };
+
+        var text_writer_interface = TextWriterInterface{ .quad_writer = &face_writer };
+        try pen.write(
+            "Enable Preview",
+            placement,
+            screen_scale,
+            &text_writer_interface,
+        );
+    }
+
+    try drawScreenCaptureBackground();
     if (screen_recorder.state.is_recording) {
         try drawScreenCapture();
     }
