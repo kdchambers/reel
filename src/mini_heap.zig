@@ -71,6 +71,13 @@ pub fn Cluster(comptime Type: type) type {
         capacity: u8,
         len: u8,
 
+        pub inline fn remove(self: *@This(), index: u16) void {
+            std.debug.assert(self.len > 0);
+            std.debug.assert(index < self.len);
+            self.len -= 1;
+            self.atPtr(self.len).* = self.atPtr(index).*;
+        }
+
         pub inline fn reserve(self: *@This()) Index(Type) {
             const index = self.base_index.index + self.len;
             self.len += 1;
