@@ -343,10 +343,6 @@ fn appLoop(allocator: std.mem.Allocator) !void {
 
                     const convert_image_start = std.time.nanoTimestamp();
 
-                    var r: u16 = 0;
-                    var g: u16 = 0;
-                    var b: u16 = 0;
-
                     const src_stride: usize = screen_capture.width * 4;
                     var y: usize = 0;
                     var y_base: usize = 0;
@@ -358,38 +354,36 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                             //
                             const index_hi = (x * 4) + y_base;
                             const index_lo = index_hi + screen_capture.width;
-                            const tl = src_pixels[index_hi + 0];
-                            const tr = src_pixels[index_hi + 1];
-                            const bl = src_pixels[index_lo + 0];
-                            const br = src_pixels[index_lo + 1];
+
+                            const c0: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 0]);
+                            const c1: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 1]);
+                            const c2: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 0]);
+                            const c3: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 1]);
+
+                            const out_i = c0 + c1 + c2 + c3;
+                            var out_f = @Vector(4, f32){
+                                @intToFloat(f32, out_i[0]),
+                                @intToFloat(f32, out_i[1]),
+                                @intToFloat(f32, out_i[2]),
+                                @intToFloat(f32, out_i[3]),
+                            };
 
                             //
                             // NOTE: Have noticed serious performance loss here, switching to mult helps
                             //       @intToFloat(f32, rgb) / 255) / 4.0
                             //
                             const mult = comptime (1.0 / 4.0) * (1.0 / 255.0);
+                            const mult_vec = @Vector(4, f32){ mult, mult, mult, 1.0 };
 
-                            r = tl.r;
-                            r += tr.r;
-                            r += bl.r;
-                            r += br.r;
-
-                            g = tl.g;
-                            g += tr.g;
-                            g += bl.g;
-                            g += br.g;
-
-                            b = tl.b;
-                            b += tr.b;
-                            b += bl.b;
-                            b += br.b;
+                            out_f *= mult_vec;
 
                             const pixel = graphics.RGBA(f32){
-                                .r = @intToFloat(f32, r) * mult,
-                                .g = @intToFloat(f32, g) * mult,
-                                .b = @intToFloat(f32, b) * mult,
+                                .r = out_f[0],
+                                .g = out_f[1],
+                                .b = out_f[2],
                                 .a = 1.0,
                             };
+
                             const dst_x = x + preview_reserved_texture_extent.x;
                             const dst_y = y + preview_reserved_texture_extent.y;
                             dst_pixels[dst_x + (dst_y * gpu_texture.width)] = pixel;
