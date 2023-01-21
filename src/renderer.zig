@@ -115,8 +115,6 @@ const full_texture_extent = geometry.Extent2D(TextureNormalizedBaseType){
 
 var texture_image_view: vk.ImageView = undefined;
 var texture_image: vk.Image = undefined;
-var vertices_buffer: vk.Buffer = undefined;
-var indices_buffer: vk.Buffer = undefined;
 
 var multisampled_image: vk.Image = undefined;
 var multisampled_image_view: vk.ImageView = undefined;
@@ -144,47 +142,53 @@ const PushConstant = packed struct {
     frame: f32,
 };
 
-pub const GraphicsContext = struct {
-    base_dispatch: vulkan_config.BaseDispatch,
-    instance_dispatch: vulkan_config.InstanceDispatch,
-    device_dispatch: vulkan_config.DeviceDispatch,
+//
+// Graphics context
+//
 
-    vertex_shader_module: vk.ShaderModule,
-    fragment_shader_module: vk.ShaderModule,
+pub var base_dispatch: vulkan_config.BaseDispatch = undefined;
+pub var instance_dispatch: vulkan_config.InstanceDispatch = undefined;
+pub var device_dispatch: vulkan_config.DeviceDispatch = undefined;
 
-    render_pass: vk.RenderPass,
-    framebuffers: []vk.Framebuffer,
-    graphics_pipeline: vk.Pipeline,
-    descriptor_pool: vk.DescriptorPool,
-    descriptor_sets: []vk.DescriptorSet,
-    descriptor_set_layouts: []vk.DescriptorSetLayout,
-    pipeline_layout: vk.PipelineLayout,
+var vertex_shader_module: vk.ShaderModule = undefined;
+var fragment_shader_module: vk.ShaderModule = undefined;
 
-    instance: vk.Instance,
-    surface: vk.SurfaceKHR,
-    surface_format: vk.SurfaceFormatKHR,
-    physical_device: vk.PhysicalDevice,
-    logical_device: vk.Device,
-    graphics_present_queue: vk.Queue, // Same queue used for graphics + presenting
-    graphics_present_queue_index: u32,
-    swapchain_min_image_count: u32,
-    swapchain: vk.SwapchainKHR,
-    swapchain_extent: vk.Extent2D,
-    swapchain_images: []vk.Image,
-    swapchain_image_views: []vk.ImageView,
-    command_pool: vk.CommandPool,
-    command_buffers: []vk.CommandBuffer,
-    images_available: []vk.Semaphore,
-    renders_finished: []vk.Semaphore,
-    inflight_fences: []vk.Fence,
-    sampler: vk.Sampler,
+var render_pass: vk.RenderPass = undefined;
+var framebuffers: []vk.Framebuffer = undefined;
+var graphics_pipeline: vk.Pipeline = undefined;
+var descriptor_pool: vk.DescriptorPool = undefined;
+var descriptor_sets: []vk.DescriptorSet = undefined;
+var descriptor_set_layouts: []vk.DescriptorSetLayout = undefined;
+var pipeline_layout: vk.PipelineLayout = undefined;
 
-    antialias_sample_count: vk.SampleCountFlags,
-    selected_memory_index: u32,
+var instance: vk.Instance = undefined;
+var surface: vk.SurfaceKHR = undefined;
+var swapchain_surface_format: vk.SurfaceFormatKHR = undefined;
+var physical_device: vk.PhysicalDevice = undefined;
+// TODO:
+pub var logical_device: vk.Device = undefined;
+var graphics_present_queue: vk.Queue = undefined; // Same queue used for graphics + presenting
+var graphics_present_queue_index: u32 = undefined;
+var swapchain_min_image_count: u32 = undefined;
+var swapchain: vk.SwapchainKHR = undefined;
+pub var swapchain_extent: vk.Extent2D = undefined;
+var swapchain_images: []vk.Image = undefined;
+var swapchain_image_views: []vk.ImageView = undefined;
+var command_pool: vk.CommandPool = undefined;
+var command_buffers: []vk.CommandBuffer = undefined;
+var images_available: []vk.Semaphore = undefined;
+var renders_finished: []vk.Semaphore = undefined;
+var inflight_fences: []vk.Fence = undefined;
+var sampler: vk.Sampler = undefined;
 
-    vertices_buffer: []graphics.GenericVertex,
-    indices_buffer: []u16,
-};
+var antialias_sample_count: vk.SampleCountFlags = undefined;
+var selected_memory_index: u32 = undefined;
+
+pub var vertices_buffer: []graphics.GenericVertex = undefined;
+pub var indices_buffer: []u16 = undefined;
+
+var vulkan_vertices_buffer: vk.Buffer = undefined;
+var vulkan_indices_buffer: vk.Buffer = undefined;
 
 // Has a precision of 2^12 = 4096
 pub const ImageHandle = packed struct(u64) {
@@ -213,23 +217,22 @@ pub const ImageHandle = packed struct(u64) {
     }
 };
 
+pub const Surface = opaque {};
+pub const Display = opaque {};
+
 const ScreenPixelBaseType = u16;
 const ScreenNormalizedBaseType = f32;
 
 const TexturePixelBaseType = u16;
 const TextureNormalizedBaseType = f32;
 
-pub fn recreateSwapchain(
-    allocator: std.mem.Allocator,
-    app: *GraphicsContext,
-    screen_dimensions: geometry.Dimensions2D(u16),
-) !void {
+pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
     const recreate_swapchain_start = std.time.nanoTimestamp();
 
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
+    _ = try device_dispatch.waitForFences(
+        logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[previous_frame]),
+        @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
         vk.TRUE,
         std.math.maxInt(u64),
     );
@@ -237,26 +240,26 @@ pub fn recreateSwapchain(
     //
     // Destroy and recreate multisampled image
     //
-    app.device_dispatch.destroyImage(app.logical_device, multisampled_image, null);
-    app.device_dispatch.destroyImageView(app.logical_device, multisampled_image_view, null);
-    app.device_dispatch.freeMemory(app.logical_device, multisampled_image_memory, null);
+    device_dispatch.destroyImage(logical_device, multisampled_image, null);
+    device_dispatch.destroyImageView(logical_device, multisampled_image_view, null);
+    device_dispatch.freeMemory(logical_device, multisampled_image_memory, null);
 
-    try createMultiSampledImage(app, screen_dimensions.width, screen_dimensions.height, app.selected_memory_index);
+    try createMultiSampledImage(screen_dimensions.width, screen_dimensions.height, selected_memory_index);
 
-    for (app.swapchain_image_views) |image_view| {
-        app.device_dispatch.destroyImageView(app.logical_device, image_view, null);
+    for (swapchain_image_views) |image_view| {
+        device_dispatch.destroyImageView(logical_device, image_view, null);
     }
 
-    app.swapchain_extent.width = screen_dimensions.width;
-    app.swapchain_extent.height = screen_dimensions.height;
+    swapchain_extent.width = screen_dimensions.width;
+    swapchain_extent.height = screen_dimensions.height;
 
-    const old_swapchain = app.swapchain;
-    app.swapchain = try app.device_dispatch.createSwapchainKHR(app.logical_device, &vk.SwapchainCreateInfoKHR{
-        .surface = app.surface,
-        .min_image_count = app.swapchain_min_image_count,
-        .image_format = app.surface_format.format,
-        .image_color_space = app.surface_format.color_space,
-        .image_extent = app.swapchain_extent,
+    const old_swapchain = swapchain;
+    swapchain = try device_dispatch.createSwapchainKHR(logical_device, &vk.SwapchainCreateInfoKHR{
+        .surface = surface,
+        .min_image_count = swapchain_min_image_count,
+        .image_format = swapchain_surface_format.format,
+        .image_color_space = swapchain_surface_format.color_space,
+        .image_extent = swapchain_extent,
         .image_array_layers = 1,
         .image_usage = .{ .color_attachment_bit = true },
         .image_sharing_mode = .exclusive,
@@ -270,32 +273,31 @@ pub fn recreateSwapchain(
         .old_swapchain = old_swapchain,
     }, null);
 
-    app.device_dispatch.destroySwapchainKHR(app.logical_device, old_swapchain, null);
+    device_dispatch.destroySwapchainKHR(logical_device, old_swapchain, null);
 
     var image_count: u32 = undefined;
     {
-        if (.success != (try app.device_dispatch.getSwapchainImagesKHR(app.logical_device, app.swapchain, &image_count, null))) {
+        if (.success != (try device_dispatch.getSwapchainImagesKHR(logical_device, swapchain, &image_count, null))) {
             return error.FailedToGetSwapchainImagesCount;
         }
-
-        if (image_count != app.swapchain_images.len) {
-            app.swapchain_images = try allocator.realloc(app.swapchain_images, image_count);
-        }
+        //
+        // TODO: handle this
+        //
+        std.debug.assert(image_count == swapchain_images.len);
     }
 
-    if (.success != (try app.device_dispatch.getSwapchainImagesKHR(app.logical_device, app.swapchain, &image_count, app.swapchain_images.ptr))) {
+    if (.success != (try device_dispatch.getSwapchainImagesKHR(logical_device, swapchain, &image_count, swapchain_images.ptr))) {
         return error.FailedToGetSwapchainImages;
     }
-    try createSwapchainImageViews(app.*);
+    try createSwapchainImageViews();
 
-    for (app.framebuffers) |framebuffer| {
-        app.device_dispatch.destroyFramebuffer(app.logical_device, framebuffer, null);
+    for (framebuffers) |framebuffer| {
+        device_dispatch.destroyFramebuffer(logical_device, framebuffer, null);
     }
 
     {
-        app.framebuffers = try allocator.realloc(app.framebuffers, app.swapchain_image_views.len);
         var framebuffer_create_info = vk.FramebufferCreateInfo{
-            .render_pass = app.render_pass,
+            .render_pass = render_pass,
             .attachment_count = 2,
             // We assign to `p_attachments` below in the loop
             .p_attachments = undefined,
@@ -306,12 +308,12 @@ pub fn recreateSwapchain(
         };
         var attachment_buffer = [2]vk.ImageView{ multisampled_image_view, undefined };
         var i: u32 = 0;
-        while (i < app.swapchain_image_views.len) : (i += 1) {
+        while (i < swapchain_image_views.len) : (i += 1) {
             // We reuse framebuffer_create_info for each framebuffer we create,
             // only updating the swapchain_image_view that is attached
-            attachment_buffer[1] = app.swapchain_image_views[i];
+            attachment_buffer[1] = swapchain_image_views[i];
             framebuffer_create_info.p_attachments = &attachment_buffer;
-            app.framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
+            framebuffers[i] = try device_dispatch.createFramebuffer(logical_device, &framebuffer_create_info, null);
         }
     }
 
@@ -319,28 +321,31 @@ pub fn recreateSwapchain(
     std.debug.assert(recreate_swapchain_end >= recreate_swapchain_start);
     const recreate_swapchain_duration = @intCast(u64, recreate_swapchain_end - recreate_swapchain_start);
 
-    std.log.info("Swapchain recreated in {}", .{std.fmt.fmtDuration(recreate_swapchain_duration)});
+    std.log.info("Swapchain resized to {}x{} in {}", .{
+        screen_dimensions.width,
+        screen_dimensions.height,
+        std.fmt.fmtDuration(recreate_swapchain_duration),
+    });
 }
 
 pub fn recordRenderPass(
-    app: GraphicsContext,
     indices_count: u32,
     screen_dimensions: geometry.Dimensions2D(u16),
 ) !void {
-    std.debug.assert(app.command_buffers.len > 0);
-    std.debug.assert(app.swapchain_images.len == app.command_buffers.len);
-    std.debug.assert(screen_dimensions.width == app.swapchain_extent.width);
-    std.debug.assert(screen_dimensions.height == app.swapchain_extent.height);
+    std.debug.assert(command_buffers.len > 0);
+    std.debug.assert(swapchain_images.len == command_buffers.len);
+    std.debug.assert(screen_dimensions.width == swapchain_extent.width);
+    std.debug.assert(screen_dimensions.height == swapchain_extent.height);
 
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
+    _ = try device_dispatch.waitForFences(
+        logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[previous_frame]),
+        @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
         vk.TRUE,
         std.math.maxInt(u64),
     );
 
-    try app.device_dispatch.resetCommandPool(app.logical_device, app.command_pool, .{});
+    try device_dispatch.resetCommandPool(logical_device, command_pool, .{});
 
     const clear_color = graphics.RGBA(f32){ .r = 0.12, .g = 0.12, .b = 0.12, .a = 1.0 };
     const clear_colors = [2]vk.ClearValue{
@@ -356,27 +361,27 @@ pub fn recordRenderPass(
         },
     };
 
-    for (app.command_buffers) |command_buffer, i| {
-        try app.device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+    for (command_buffers) |command_buffer, i| {
+        try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
         });
 
-        app.device_dispatch.cmdBeginRenderPass(command_buffer, &vk.RenderPassBeginInfo{
-            .render_pass = app.render_pass,
-            .framebuffer = app.framebuffers[i],
+        device_dispatch.cmdBeginRenderPass(command_buffer, &vk.RenderPassBeginInfo{
+            .render_pass = render_pass,
+            .framebuffer = framebuffers[i],
             .render_area = vk.Rect2D{
                 .offset = vk.Offset2D{
                     .x = 0,
                     .y = 0,
                 },
-                .extent = app.swapchain_extent,
+                .extent = swapchain_extent,
             },
             .clear_value_count = clear_colors.len,
             .p_clear_values = &clear_colors,
         }, .@"inline");
 
-        app.device_dispatch.cmdBindPipeline(command_buffer, .graphics, app.graphics_pipeline);
+        device_dispatch.cmdBindPipeline(command_buffer, .graphics, graphics_pipeline);
 
         {
             const viewports = [1]vk.Viewport{
@@ -389,7 +394,7 @@ pub fn recordRenderPass(
                     .max_depth = 1.0,
                 },
             };
-            app.device_dispatch.cmdSetViewport(command_buffer, 0, 1, @ptrCast([*]const vk.Viewport, &viewports));
+            device_dispatch.cmdSetViewport(command_buffer, 0, 1, @ptrCast([*]const vk.Viewport, &viewports));
         }
         {
             const scissors = [1]vk.Rect2D{
@@ -404,18 +409,18 @@ pub fn recordRenderPass(
                     },
                 },
             };
-            app.device_dispatch.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissors));
+            device_dispatch.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissors));
         }
 
-        app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &[1]vk.Buffer{vertices_buffer}, &[1]vk.DeviceSize{0});
-        app.device_dispatch.cmdBindIndexBuffer(command_buffer, indices_buffer, 0, .uint16);
-        app.device_dispatch.cmdBindDescriptorSets(
+        device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &[1]vk.Buffer{vulkan_vertices_buffer}, &[1]vk.DeviceSize{0});
+        device_dispatch.cmdBindIndexBuffer(command_buffer, vulkan_indices_buffer, 0, .uint16);
+        device_dispatch.cmdBindDescriptorSets(
             command_buffer,
             .graphics,
-            app.pipeline_layout,
+            pipeline_layout,
             0,
             1,
-            &[1]vk.DescriptorSet{app.descriptor_sets[i]},
+            &[1]vk.DescriptorSet{descriptor_sets[i]},
             0,
             undefined,
         );
@@ -426,29 +431,19 @@ pub fn recordRenderPass(
             .frame = 0.0,
         };
 
-        app.device_dispatch.cmdPushConstants(
+        device_dispatch.cmdPushConstants(
             command_buffer,
-            app.pipeline_layout,
+            pipeline_layout,
             .{ .fragment_bit = true },
             0,
             @sizeOf(PushConstant),
             &push_constant,
         );
-        app.device_dispatch.cmdDrawIndexed(command_buffer, indices_count, 1, 0, 0, 0);
+        device_dispatch.cmdDrawIndexed(command_buffer, indices_count, 1, 0, 0, 0);
 
-        app.device_dispatch.cmdEndRenderPass(command_buffer);
-        try app.device_dispatch.endCommandBuffer(command_buffer);
+        device_dispatch.cmdEndRenderPass(command_buffer);
+        try device_dispatch.endCommandBuffer(command_buffer);
     }
-}
-
-pub fn waitGPU(app: *GraphicsContext) !void {
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[previous_frame]),
-        vk.TRUE,
-        std.math.maxInt(u64),
-    );
 }
 
 pub const Texture = struct {
@@ -457,8 +452,8 @@ pub const Texture = struct {
     height: u32,
 };
 
-pub fn textureGet(app: *GraphicsContext) !Texture {
-    try transitionTextureToGeneral(app);
+pub fn textureGet() !Texture {
+    try transitionTextureToGeneral();
     const pixel_count = @intCast(u32, texture_layer_dimensions.width) * texture_layer_dimensions.height;
     return Texture{
         .pixels = texture_memory_map[0..pixel_count],
@@ -467,24 +462,24 @@ pub fn textureGet(app: *GraphicsContext) !Texture {
     };
 }
 
-pub fn textureCommit(app: *GraphicsContext) !void {
-    try transitionTextureToOptimal(app);
+pub fn textureCommit() !void {
+    try transitionTextureToOptimal();
 }
 
-fn transitionTextureToGeneral(app: *GraphicsContext) !void {
+fn transitionTextureToGeneral() !void {
     const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-        .command_pool = app.command_pool,
+        .command_pool = command_pool,
         .level = .primary,
         .command_buffer_count = 1,
     };
 
-    try app.device_dispatch.allocateCommandBuffers(
-        app.logical_device,
+    try device_dispatch.allocateCommandBuffers(
+        logical_device,
         &command_buffer_allocate_info,
         @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
     );
 
-    try app.device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
+    try device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
         .flags = .{ .one_time_submit_bit = true },
         .p_inheritance_info = null,
     });
@@ -510,7 +505,7 @@ fn transitionTextureToGeneral(app: *GraphicsContext) !void {
     const src_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
     const dst_stage = vk.PipelineStageFlags{ .bottom_of_pipe_bit = true };
     const dependency_flags = vk.DependencyFlags{};
-    app.device_dispatch.cmdPipelineBarrier(
+    device_dispatch.cmdPipelineBarrier(
         jobs_command_buffer,
         src_stage,
         dst_stage,
@@ -523,7 +518,7 @@ fn transitionTextureToGeneral(app: *GraphicsContext) !void {
         &barrier,
     );
 
-    try app.device_dispatch.endCommandBuffer(jobs_command_buffer);
+    try device_dispatch.endCommandBuffer(jobs_command_buffer);
 
     const submit_command_infos = [_]vk.SubmitInfo{.{
         .wait_semaphore_count = 0,
@@ -535,41 +530,41 @@ fn transitionTextureToGeneral(app: *GraphicsContext) !void {
         .p_signal_semaphores = undefined,
     }};
 
-    const job_fence = try app.device_dispatch.createFence(
-        app.logical_device,
+    const job_fence = try device_dispatch.createFence(
+        logical_device,
         &.{ .flags = .{ .signaled_bit = false } },
         null,
     );
 
-    try app.device_dispatch.queueSubmit(app.graphics_present_queue, 1, &submit_command_infos, job_fence);
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
+    try device_dispatch.queueSubmit(graphics_present_queue, 1, &submit_command_infos, job_fence);
+    _ = try device_dispatch.waitForFences(
+        logical_device,
         1,
         @ptrCast([*]const vk.Fence, &job_fence),
         vk.TRUE,
         std.time.ns_per_s * 2,
     );
-    app.device_dispatch.destroyFence(app.logical_device, job_fence, null);
-    app.device_dispatch.freeCommandBuffers(
-        app.logical_device,
-        app.command_pool,
+    device_dispatch.destroyFence(logical_device, job_fence, null);
+    device_dispatch.freeCommandBuffers(
+        logical_device,
+        command_pool,
         1,
         @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
     );
 }
 
-fn transitionTextureToOptimal(app: *GraphicsContext) !void {
+fn transitionTextureToOptimal() !void {
     const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-        .command_pool = app.command_pool,
+        .command_pool = command_pool,
         .level = .primary,
         .command_buffer_count = 1,
     };
-    try app.device_dispatch.allocateCommandBuffers(
-        app.logical_device,
+    try device_dispatch.allocateCommandBuffers(
+        logical_device,
         &command_buffer_allocate_info,
         @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
     );
-    try app.device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
+    try device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
         .flags = .{ .one_time_submit_bit = true },
         .p_inheritance_info = null,
     });
@@ -597,7 +592,7 @@ fn transitionTextureToOptimal(app: *GraphicsContext) !void {
         const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
         const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
         const dependency_flags = vk.DependencyFlags{};
-        app.device_dispatch.cmdPipelineBarrier(
+        device_dispatch.cmdPipelineBarrier(
             jobs_command_buffer,
             src_stage,
             dst_stage,
@@ -611,7 +606,7 @@ fn transitionTextureToOptimal(app: *GraphicsContext) !void {
         );
     }
 
-    try app.device_dispatch.endCommandBuffer(jobs_command_buffer);
+    try device_dispatch.endCommandBuffer(jobs_command_buffer);
 
     const submit_command_infos = [_]vk.SubmitInfo{.{
         .wait_semaphore_count = 0,
@@ -623,39 +618,38 @@ fn transitionTextureToOptimal(app: *GraphicsContext) !void {
         .p_signal_semaphores = undefined,
     }};
 
-    const job_fence = try app.device_dispatch.createFence(app.logical_device, &.{ .flags = .{ .signaled_bit = false } }, null);
-    try app.device_dispatch.queueSubmit(app.graphics_present_queue, 1, &submit_command_infos, job_fence);
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
+    const job_fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{ .signaled_bit = false } }, null);
+    try device_dispatch.queueSubmit(graphics_present_queue, 1, &submit_command_infos, job_fence);
+    _ = try device_dispatch.waitForFences(
+        logical_device,
         1,
         @ptrCast([*]const vk.Fence, &job_fence),
         vk.TRUE,
         std.time.ns_per_s * 2,
     );
-    app.device_dispatch.destroyFence(app.logical_device, job_fence, null);
-    app.device_dispatch.freeCommandBuffers(
-        app.logical_device,
-        app.command_pool,
+    device_dispatch.destroyFence(logical_device, job_fence, null);
+    device_dispatch.freeCommandBuffers(
+        logical_device,
+        command_pool,
         1,
         @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
     );
 }
 
 pub fn addTexture(
-    app: *GraphicsContext,
     allocator: std.mem.Allocator,
     width: u32,
     height: u32,
     pixels: [*]graphics.RGBA(u8),
 ) !ImageHandle {
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
+    _ = try device_dispatch.waitForFences(
+        logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[current_frame]),
+        @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
         vk.TRUE,
         std.math.maxInt(u64),
     );
-    try transitionTextureToGeneral(app);
+    try transitionTextureToGeneral();
 
     const dst_extent = try texture_atlas.reserve(geometry.Extent2D(u32), allocator, width, height);
     var src_y: u32 = 0;
@@ -664,16 +658,16 @@ pub fn addTexture(
         while (src_x < width) : (src_x += 1) {
             const src_index = src_x + (src_y * width);
             const dst_index = dst_extent.x + src_x + ((dst_extent.y + src_y) * texture_layer_dimensions.width);
-            texture_memory_map[dst_index].r = 1.0; // @intToFloat(f32, pixels[dst_index].r) / 255;
-            texture_memory_map[dst_index].g = 1.0; // @intToFloat(f32, pixels[dst_index].g) / 255;
-            texture_memory_map[dst_index].b = 1.0; // @intToFloat(f32, pixels[dst_index].b) / 255;
+            texture_memory_map[dst_index].r = 1.0; // @intToFloat(f32, pixels[src_index].r) / 255;
+            texture_memory_map[dst_index].g = 1.0; // @intToFloat(f32, pixels[src_index].g) / 255;
+            texture_memory_map[dst_index].b = 1.0; // @intToFloat(f32, pixels[src_index].b) / 255;
             texture_memory_map[dst_index].a = @intToFloat(f32, pixels[src_index].a) / 255;
         }
     }
     std.debug.assert(dst_extent.width == width);
     std.debug.assert(dst_extent.height == height);
 
-    try transitionTextureToOptimal(app);
+    try transitionTextureToOptimal();
 
     return ImageHandle{
         .texture_array_index = 0,
@@ -685,20 +679,26 @@ pub fn addTexture(
     };
 }
 
-pub fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext, screen_dimensions: geometry.Dimensions2D(u16)) !void {
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
+pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
+    _ = try device_dispatch.waitForFences(
+        logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[current_frame]),
+        @ptrCast([*]const vk.Fence, &inflight_fences[current_frame]),
         vk.TRUE,
         std.math.maxInt(u64),
     );
 
-    const acquire_image_result = try app.device_dispatch.acquireNextImageKHR(
-        app.logical_device,
-        app.swapchain,
+    try device_dispatch.resetFences(
+        logical_device,
+        1,
+        @ptrCast([*]const vk.Fence, &inflight_fences[current_frame]),
+    );
+
+    const acquire_image_result = try device_dispatch.acquireNextImageKHR(
+        logical_device,
+        swapchain,
         std.math.maxInt(u64),
-        app.images_available[current_frame],
+        images_available[current_frame],
         .null_handle,
     );
 
@@ -706,7 +706,8 @@ pub fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext, screen_d
     switch (acquire_image_result.result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
-            try recreateSwapchain(allocator, app, screen_dimensions);
+            std.log.warn("error_out_of_date_khr or suboptimal_khr", .{});
+            try recreateSwapchain(screen_dimensions);
             return;
         },
         .error_out_of_host_memory => return error.VulkanHostOutOfMemory,
@@ -721,29 +722,28 @@ pub fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext, screen_d
 
     const swapchain_image_index = acquire_image_result.image_index;
 
-    const wait_semaphores = [1]vk.Semaphore{app.images_available[current_frame]};
+    const wait_semaphores = [1]vk.Semaphore{images_available[current_frame]};
     const wait_stages = [1]vk.PipelineStageFlags{.{ .color_attachment_output_bit = true }};
-    const signal_semaphores = [1]vk.Semaphore{app.renders_finished[current_frame]};
+    const signal_semaphores = [1]vk.Semaphore{renders_finished[current_frame]};
 
     const command_submit_info = vk.SubmitInfo{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = &wait_semaphores,
         .p_wait_dst_stage_mask = @ptrCast([*]align(4) const vk.PipelineStageFlags, &wait_stages),
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &app.command_buffers[swapchain_image_index]),
+        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &command_buffers[swapchain_image_index]),
         .signal_semaphore_count = 1,
         .p_signal_semaphores = &signal_semaphores,
     };
 
-    try app.device_dispatch.resetFences(app.logical_device, 1, @ptrCast([*]const vk.Fence, &app.inflight_fences[current_frame]));
-    try app.device_dispatch.queueSubmit(
-        app.graphics_present_queue,
+    try device_dispatch.queueSubmit(
+        graphics_present_queue,
         1,
         @ptrCast([*]const vk.SubmitInfo, &command_submit_info),
-        app.inflight_fences[current_frame],
+        inflight_fences[current_frame],
     );
 
-    const swapchains = [1]vk.SwapchainKHR{app.swapchain};
+    const swapchains = [1]vk.SwapchainKHR{swapchain};
     const present_info = vk.PresentInfoKHR{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = &signal_semaphores,
@@ -753,13 +753,13 @@ pub fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext, screen_d
         .p_results = null,
     };
 
-    const present_result = try app.device_dispatch.queuePresentKHR(app.graphics_present_queue, &present_info);
+    const present_result = try device_dispatch.queuePresentKHR(graphics_present_queue, &present_info);
 
     // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkQueuePresentKHR.html
     switch (present_result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
-            try recreateSwapchain(allocator, app, screen_dimensions);
+            try recreateSwapchain(screen_dimensions);
             return;
         },
         .error_out_of_host_memory => return error.VulkanHostOutOfMemory,
@@ -778,12 +778,12 @@ pub fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext, screen_d
     current_frame = (current_frame + 1) % max_frames_in_flight;
 }
 
-fn createSwapchainImageViews(app: GraphicsContext) !void {
-    for (app.swapchain_image_views) |*image_view, image_view_i| {
+fn createSwapchainImageViews() !void {
+    for (swapchain_image_views) |*image_view, image_view_i| {
         const image_view_create_info = vk.ImageViewCreateInfo{
-            .image = app.swapchain_images[image_view_i],
+            .image = swapchain_images[image_view_i],
             .view_type = .@"2d",
-            .format = app.surface_format.format,
+            .format = swapchain_surface_format.format,
             .components = vk.ComponentMapping{
                 .r = .identity,
                 .g = .identity,
@@ -799,20 +799,20 @@ fn createSwapchainImageViews(app: GraphicsContext) !void {
             },
             .flags = .{},
         };
-        image_view.* = try app.device_dispatch.createImageView(app.logical_device, &image_view_create_info, null);
+        image_view.* = try device_dispatch.createImageView(logical_device, &image_view_create_info, null);
     }
 }
 
-fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
-    return try app.device_dispatch.createRenderPass(app.logical_device, &vk.RenderPassCreateInfo{
+fn createRenderPass() !vk.RenderPass {
+    return try device_dispatch.createRenderPass(logical_device, &vk.RenderPassCreateInfo{
         .attachment_count = 2,
         .p_attachments = &[2]vk.AttachmentDescription{
             //
             // [0] Multisampled Image
             //
             .{
-                .format = app.surface_format.format,
-                .samples = app.antialias_sample_count,
+                .format = swapchain_surface_format.format,
+                .samples = antialias_sample_count,
                 .load_op = .clear,
                 .store_op = .dont_care,
                 .stencil_load_op = .dont_care,
@@ -825,7 +825,7 @@ fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
             // [1] Swapchain
             //
             .{
-                .format = app.surface_format.format,
+                .format = swapchain_surface_format.format,
                 .samples = .{ .@"1_bit" = true },
                 .load_op = .dont_care,
                 .store_op = .store,
@@ -886,8 +886,8 @@ fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
     }, null);
 }
 
-fn createDescriptorPool(app: GraphicsContext) !vk.DescriptorPool {
-    const image_count: u32 = @intCast(u32, app.swapchain_image_views.len);
+fn createDescriptorPool() !vk.DescriptorPool {
+    const image_count: u32 = @intCast(u32, swapchain_image_views.len);
     const descriptor_pool_sizes = [_]vk.DescriptorPoolSize{
         .{
             .type = .sampler,
@@ -904,11 +904,11 @@ fn createDescriptorPool(app: GraphicsContext) !vk.DescriptorPool {
         .max_sets = image_count,
         .flags = .{},
     };
-    return try app.device_dispatch.createDescriptorPool(app.logical_device, &create_pool_info, null);
+    return try device_dispatch.createDescriptorPool(logical_device, &create_pool_info, null);
 }
 
-fn createDescriptorSetLayouts(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.DescriptorSetLayout {
-    var descriptor_set_layouts = try allocator.alloc(vk.DescriptorSetLayout, app.swapchain_image_views.len);
+fn createDescriptorSetLayouts(allocator: std.mem.Allocator) !void {
+    descriptor_set_layouts = try allocator.alloc(vk.DescriptorSetLayout, swapchain_image_views.len);
     {
         const descriptor_set_layout_bindings = [_]vk.DescriptorSetLayoutBinding{vk.DescriptorSetLayoutBinding{
             .binding = 0,
@@ -922,29 +922,28 @@ fn createDescriptorSetLayouts(allocator: std.mem.Allocator, app: GraphicsContext
             .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &descriptor_set_layout_bindings[0]),
             .flags = .{},
         };
-        descriptor_set_layouts[0] = try app.device_dispatch.createDescriptorSetLayout(app.logical_device, &descriptor_set_layout_create_info, null);
+        descriptor_set_layouts[0] = try device_dispatch.createDescriptorSetLayout(logical_device, &descriptor_set_layout_create_info, null);
 
         // We can copy the same descriptor set layout for each swapchain image
         var x: u32 = 1;
-        while (x < app.swapchain_image_views.len) : (x += 1) {
+        while (x < swapchain_image_views.len) : (x += 1) {
             descriptor_set_layouts[x] = descriptor_set_layouts[0];
         }
     }
-    return descriptor_set_layouts;
 }
 
-fn createDescriptorSets(allocator: std.mem.Allocator, app: *GraphicsContext, descriptor_set_layouts: []vk.DescriptorSetLayout) ![]vk.DescriptorSet {
-    const swapchain_image_count: u32 = @intCast(u32, app.swapchain_image_views.len);
+fn createDescriptorSets(allocator: std.mem.Allocator) !void {
+    const swapchain_image_count: u32 = @intCast(u32, swapchain_image_views.len);
 
     // 1. Allocate DescriptorSets from DescriptorPool
-    var descriptor_sets = try allocator.alloc(vk.DescriptorSet, swapchain_image_count);
+    descriptor_sets = try allocator.alloc(vk.DescriptorSet, swapchain_image_count);
     {
         const descriptor_set_allocator_info = vk.DescriptorSetAllocateInfo{
-            .descriptor_pool = app.descriptor_pool,
+            .descriptor_pool = descriptor_pool,
             .descriptor_set_count = swapchain_image_count,
             .p_set_layouts = descriptor_set_layouts.ptr,
         };
-        try app.device_dispatch.allocateDescriptorSets(app.logical_device, &descriptor_set_allocator_info, @ptrCast([*]vk.DescriptorSet, descriptor_sets.ptr));
+        try device_dispatch.allocateDescriptorSets(logical_device, &descriptor_set_allocator_info, @ptrCast([*]vk.DescriptorSet, descriptor_sets.ptr));
     }
 
     // 2. Create Sampler that will be written to DescriptorSet
@@ -966,7 +965,7 @@ fn createDescriptorSets(allocator: std.mem.Allocator, app: *GraphicsContext, des
         .compare_op = .always,
         .mipmap_mode = .linear,
     };
-    app.sampler = try app.device_dispatch.createSampler(app.logical_device, &sampler_create_info, null);
+    sampler = try device_dispatch.createSampler(logical_device, &sampler_create_info, null);
 
     // 3. Write to DescriptorSets
     var i: u32 = 0;
@@ -975,7 +974,7 @@ fn createDescriptorSets(allocator: std.mem.Allocator, app: *GraphicsContext, des
             .{
                 .image_layout = .shader_read_only_optimal,
                 .image_view = texture_image_view,
-                .sampler = app.sampler,
+                .sampler = sampler,
             },
         };
         const write_descriptor_set = [_]vk.WriteDescriptorSet{.{
@@ -988,12 +987,11 @@ fn createDescriptorSets(allocator: std.mem.Allocator, app: *GraphicsContext, des
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         }};
-        app.device_dispatch.updateDescriptorSets(app.logical_device, 1, &write_descriptor_set, 0, undefined);
+        device_dispatch.updateDescriptorSets(logical_device, 1, &write_descriptor_set, 0, undefined);
     }
-    return descriptor_sets;
 }
 
-fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.DescriptorSetLayout) !vk.PipelineLayout {
+fn createPipelineLayout() !vk.PipelineLayout {
     const push_constant = vk.PushConstantRange{
         .stage_flags = .{ .fragment_bit = true },
         .offset = 0,
@@ -1006,15 +1004,12 @@ fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.Descr
         .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &push_constant),
         .flags = .{},
     };
-    return try app.device_dispatch.createPipelineLayout(app.logical_device, &pipeline_layout_create_info, null);
+    return device_dispatch.createPipelineLayout(logical_device, &pipeline_layout_create_info, null);
 }
 
 fn createGraphicsPipeline(
-    app: GraphicsContext,
-    pipeline_layout: vk.PipelineLayout,
-    render_pass: vk.RenderPass,
     screen_dimensions: geometry.Dimensions2D(u16),
-) !vk.Pipeline {
+) !void {
     const vertex_input_attribute_descriptions = [_]vk.VertexInputAttributeDescription{
         vk.VertexInputAttributeDescription{ // inPosition
             .binding = 0,
@@ -1038,7 +1033,7 @@ fn createGraphicsPipeline(
 
     const vertex_shader_stage_info = vk.PipelineShaderStageCreateInfo{
         .stage = .{ .vertex_bit = true },
-        .module = app.vertex_shader_module,
+        .module = vertex_shader_module,
         .p_name = "main",
         .p_specialization_info = null,
         .flags = .{},
@@ -1046,7 +1041,7 @@ fn createGraphicsPipeline(
 
     const fragment_shader_stage_info = vk.PipelineShaderStageCreateInfo{
         .stage = .{ .fragment_bit = true },
-        .module = app.fragment_shader_module,
+        .module = fragment_shader_module,
         .p_name = "main",
         .p_specialization_info = null,
         .flags = .{},
@@ -1125,7 +1120,7 @@ fn createGraphicsPipeline(
 
     const multisampling = vk.PipelineMultisampleStateCreateInfo{
         .sample_shading_enable = vk.FALSE,
-        .rasterization_samples = app.antialias_sample_count,
+        .rasterization_samples = antialias_sample_count,
         .min_sample_shading = 0.0,
         .p_sample_mask = null,
         .alpha_to_coverage_enable = vk.FALSE,
@@ -1183,42 +1178,39 @@ fn createGraphicsPipeline(
         },
     };
 
-    var graphics_pipeline: vk.Pipeline = undefined;
-    _ = try app.device_dispatch.createGraphicsPipelines(
-        app.logical_device,
+    // TODO: Check vkResult
+    _ = try device_dispatch.createGraphicsPipelines(
+        logical_device,
         .null_handle,
         1,
         &pipeline_create_infos,
         null,
         @ptrCast([*]vk.Pipeline, &graphics_pipeline),
     );
-
-    return graphics_pipeline;
 }
 
-fn cleanupSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) void {
-    app.device_dispatch.freeCommandBuffers(
-        app.logical_device,
-        app.command_pool,
-        @intCast(u32, app.command_buffers.len),
-        app.command_buffers.ptr,
+fn cleanupSwapchain(allocator: std.mem.Allocator) void {
+    device_dispatch.freeCommandBuffers(
+        logical_device,
+        command_pool,
+        @intCast(u32, command_buffers.len),
+        command_buffers.ptr,
     );
-    allocator.free(app.command_buffers);
+    allocator.free(command_buffers);
 
-    for (app.swapchain_image_views) |image_view| {
-        app.device_dispatch.destroyImageView(app.logical_device, image_view, null);
+    for (swapchain_image_views) |image_view| {
+        device_dispatch.destroyImageView(logical_device, image_view, null);
     }
-    app.device_dispatch.destroySwapchainKHR(app.logical_device, app.swapchain, null);
+    device_dispatch.destroySwapchainKHR(logical_device, swapchain, null);
 }
 
 fn createFramebuffers(
     allocator: std.mem.Allocator,
-    app: GraphicsContext,
     screen_dimensions: geometry.Dimensions2D(u16),
-) ![]vk.Framebuffer {
-    std.debug.assert(app.swapchain_image_views.len > 0);
+) !void {
+    std.debug.assert(swapchain_image_views.len > 0);
     var framebuffer_create_info = vk.FramebufferCreateInfo{
-        .render_pass = app.render_pass,
+        .render_pass = render_pass,
         .attachment_count = 2,
         .p_attachments = undefined,
         .width = screen_dimensions.width,
@@ -1227,64 +1219,62 @@ fn createFramebuffers(
         .flags = .{},
     };
 
-    var framebuffers = try allocator.alloc(vk.Framebuffer, app.swapchain_image_views.len);
+    framebuffers = try allocator.alloc(vk.Framebuffer, swapchain_image_views.len);
     var attachment_buffer = [2]vk.ImageView{ multisampled_image_view, undefined };
     var i: u32 = 0;
-    while (i < app.swapchain_image_views.len) : (i += 1) {
+    while (i < swapchain_image_views.len) : (i += 1) {
         // We reuse framebuffer_create_info for each framebuffer we create,
         // only updating the swapchain_image_view that is attached
-        attachment_buffer[1] = app.swapchain_image_views[i];
+        attachment_buffer[1] = swapchain_image_views[i];
         framebuffer_create_info.p_attachments = &attachment_buffer;
-        framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
+        framebuffers[i] = try device_dispatch.createFramebuffer(logical_device, &framebuffer_create_info, null);
     }
-    return framebuffers;
 }
 
-pub fn deinit(allocator: std.mem.Allocator, app: *GraphicsContext) void {
-    app.device_dispatch.deviceWaitIdle(app.logical_device) catch std.time.sleep(std.time.ns_per_ms * 20);
+pub fn deinit(allocator: std.mem.Allocator) void {
+    device_dispatch.deviceWaitIdle(logical_device) catch std.time.sleep(std.time.ns_per_ms * 20);
 
-    cleanupSwapchain(allocator, app);
+    cleanupSwapchain(allocator);
 
-    allocator.free(app.images_available);
-    allocator.free(app.renders_finished);
-    allocator.free(app.inflight_fences);
+    allocator.free(images_available);
+    allocator.free(renders_finished);
+    allocator.free(inflight_fences);
 
-    allocator.free(app.swapchain_image_views);
-    allocator.free(app.swapchain_images);
+    allocator.free(swapchain_image_views);
+    allocator.free(swapchain_images);
 
-    allocator.free(app.descriptor_set_layouts);
-    allocator.free(app.descriptor_sets);
-    allocator.free(app.framebuffers);
+    allocator.free(descriptor_set_layouts);
+    allocator.free(descriptor_sets);
+    allocator.free(framebuffers);
 
-    app.instance_dispatch.destroySurfaceKHR(app.instance, app.surface, null);
+    instance_dispatch.destroySurfaceKHR(instance, surface, null);
 }
 
-fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
+fn createFragmentShaderModule() !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.fragment_spv.len,
         .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.fragment_spv)),
         .flags = .{},
     };
-    return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
+    return try device_dispatch.createShaderModule(logical_device, &create_info, null);
 }
 
-fn createVertexShaderModule(app: GraphicsContext) !vk.ShaderModule {
+fn createVertexShaderModule() !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.vertex_spv.len,
         .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.vertex_spv)),
         .flags = .{},
     };
-    return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
+    return try device_dispatch.createShaderModule(logical_device, &create_info, null);
 }
 
 fn selectSurfaceFormat(
     allocator: std.mem.Allocator,
-    app: GraphicsContext,
     color_space: vk.ColorSpaceKHR,
     surface_format: vk.Format,
 ) !?vk.SurfaceFormatKHR {
     var format_count: u32 = undefined;
-    if (.success != (try app.instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(app.physical_device, app.surface, &format_count, null))) {
+    if (.success != (try instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, null))) {
         return error.FailedToGetSurfaceFormats;
     }
 
@@ -1299,7 +1289,7 @@ fn selectSurfaceFormat(
     var formats: []vk.SurfaceFormatKHR = try allocator.alloc(vk.SurfaceFormatKHR, format_count);
     defer allocator.free(formats);
 
-    if (.success != (try app.instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(app.physical_device, app.surface, &format_count, formats.ptr))) {
+    if (.success != (try instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats.ptr))) {
         return error.FailedToGetSurfaceFormats;
     }
 
@@ -1311,10 +1301,7 @@ fn selectSurfaceFormat(
     return null;
 }
 
-pub const Surface = opaque {};
-pub const Display = opaque {};
-
-pub fn createMultiSampledImage(app: *GraphicsContext, width: u32, height: u32, memory_heap_index: u32) !void {
+pub fn createMultiSampledImage(width: u32, height: u32, memory_heap_index: u32) !void {
     const image_create_info = vk.ImageCreateInfo{
         .flags = .{},
         .image_type = .@"2d",
@@ -1329,23 +1316,23 @@ pub fn createMultiSampledImage(app: *GraphicsContext, width: u32, height: u32, m
         .array_layers = 1,
         .initial_layout = .undefined,
         .usage = .{ .transient_attachment_bit = true, .color_attachment_bit = true },
-        .samples = app.antialias_sample_count,
+        .samples = antialias_sample_count,
         .sharing_mode = .exclusive,
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
     };
-    multisampled_image = try app.device_dispatch.createImage(app.logical_device, &image_create_info, null);
+    multisampled_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
 
-    const multisampled_image_requirements = app.device_dispatch.getImageMemoryRequirements(app.logical_device, multisampled_image);
+    const multisampled_image_requirements = device_dispatch.getImageMemoryRequirements(logical_device, multisampled_image);
 
-    multisampled_image_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
+    multisampled_image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = multisampled_image_requirements.size,
         .memory_type_index = memory_heap_index,
     }, null);
 
-    try app.device_dispatch.bindImageMemory(app.logical_device, multisampled_image, multisampled_image_memory, 0);
+    try device_dispatch.bindImageMemory(logical_device, multisampled_image, multisampled_image_memory, 0);
 
-    multisampled_image_view = try app.device_dispatch.createImageView(app.logical_device, &vk.ImageViewCreateInfo{
+    multisampled_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
         .flags = .{},
         .image = multisampled_image,
         .view_type = .@"2d_array",
@@ -1363,7 +1350,6 @@ pub fn createMultiSampledImage(app: *GraphicsContext, width: u32, height: u32, m
 
 pub fn init(
     allocator: std.mem.Allocator,
-    app: *GraphicsContext,
     screen_dimensions: geometry.Dimensions2D(u16),
     wayland_display: *Display,
     wayland_surface: *Surface,
@@ -1375,7 +1361,7 @@ pub fn init(
         const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
         if (vk_get_instance_proc_addr_fn_opt) |vk_get_instance_proc_addr_fn| {
             vkGetInstanceProcAddr = vk_get_instance_proc_addr_fn;
-            app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
+            base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
         } else {
             std.log.err("Failed to load vkGetInstanceProcAddr function from vulkan loader", .{});
             return error.FailedToGetVulkanSymbol;
@@ -1385,9 +1371,9 @@ pub fn init(
         return error.FailedToGetVulkanSymbol;
     }
 
-    app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
+    base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
 
-    app.instance = try app.base_dispatch.createInstance(&vk.InstanceCreateInfo{
+    instance = try base_dispatch.createInstance(&vk.InstanceCreateInfo{
         .p_application_info = &vk.ApplicationInfo{
             .p_application_name = application_name,
             .application_version = vulkan_application_version,
@@ -1402,8 +1388,8 @@ pub fn init(
         .flags = .{},
     }, null);
 
-    app.instance_dispatch = try vulkan_config.InstanceDispatch.load(app.instance, vkGetInstanceProcAddr);
-    errdefer app.instance_dispatch.destroyInstance(app.instance, null);
+    instance_dispatch = try vulkan_config.InstanceDispatch.load(instance, vkGetInstanceProcAddr);
+    errdefer instance_dispatch.destroyInstance(instance, null);
 
     {
         const wayland_surface_create_info = vk.WaylandSurfaceCreateInfoKHR{
@@ -1412,22 +1398,22 @@ pub fn init(
             .flags = .{},
         };
 
-        app.surface = try app.instance_dispatch.createWaylandSurfaceKHR(
-            app.instance,
+        surface = try instance_dispatch.createWaylandSurfaceKHR(
+            instance,
             &wayland_surface_create_info,
             null,
         );
     }
-    errdefer app.instance_dispatch.destroySurfaceKHR(app.instance, app.surface, null);
+    errdefer instance_dispatch.destroySurfaceKHR(instance, surface, null);
 
     // Find a suitable physical device (GPU/APU) to use
     // Criteria:
     //   1. Supports defined list of device extensions. See `device_extensions` above
     //   2. Has a graphics queue that supports presentation on our selected surface
-    const best_physical_device = outer: {
+    const best_physical_device_opt = outer: {
         const physical_devices = blk: {
             var device_count: u32 = 0;
-            if (.success != (try app.instance_dispatch.enumeratePhysicalDevices(app.instance, &device_count, null))) {
+            if (.success != (try instance_dispatch.enumeratePhysicalDevices(instance, &device_count, null))) {
                 std.log.warn("Failed to query physical device count", .{});
                 return error.PhysicalDeviceQueryFailure;
             }
@@ -1438,27 +1424,27 @@ pub fn init(
             }
 
             const devices = try allocator.alloc(vk.PhysicalDevice, device_count);
-            _ = try app.instance_dispatch.enumeratePhysicalDevices(app.instance, &device_count, devices.ptr);
+            _ = try instance_dispatch.enumeratePhysicalDevices(instance, &device_count, devices.ptr);
 
             break :blk devices;
         };
         defer allocator.free(physical_devices);
 
-        for (physical_devices) |physical_device, physical_device_i| {
+        for (physical_devices) |device, device_i| {
             std.log.info("Physical vulkan devices found: {d}", .{physical_devices.len});
 
             const device_supports_extensions = blk: {
                 var extension_count: u32 = undefined;
-                if (.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, null))) {
-                    std.log.warn("Failed to get device extension property count for physical device index {d}", .{physical_device_i});
+                if (.success != (try instance_dispatch.enumerateDeviceExtensionProperties(device, null, &extension_count, null))) {
+                    std.log.warn("Failed to get device extension property count for physical device index {d}", .{device_i});
                     continue;
                 }
 
                 const extensions = try allocator.alloc(vk.ExtensionProperties, extension_count);
                 defer allocator.free(extensions);
 
-                if (.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, extensions.ptr))) {
-                    std.log.warn("Failed to load device extension properties for physical device index {d}", .{physical_device_i});
+                if (.success != (try instance_dispatch.enumerateDeviceExtensionProperties(device, null, &extension_count, extensions.ptr))) {
+                    std.log.warn("Failed to load device extension properties for physical device index {d}", .{device_i});
                     continue;
                 }
 
@@ -1481,7 +1467,7 @@ pub fn init(
             }
 
             var queue_family_count: u32 = 0;
-            app.instance_dispatch.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
+            instance_dispatch.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, null);
 
             if (queue_family_count == 0) {
                 continue;
@@ -1493,7 +1479,7 @@ pub fn init(
             }
 
             var queue_families: [max_family_queues]vk.QueueFamilyProperties = undefined;
-            app.instance_dispatch.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, &queue_families);
+            instance_dispatch.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, &queue_families);
 
             std.debug.print("** Queue Families found on device **\n\n", .{});
             printVulkanQueueFamilies(queue_families[0..queue_family_count], 0);
@@ -1503,14 +1489,14 @@ pub fn init(
                     continue;
                 }
                 if (queue_family.queue_flags.graphics_bit) {
-                    const present_support = try app.instance_dispatch.getPhysicalDeviceSurfaceSupportKHR(
-                        physical_device,
+                    const present_support = try instance_dispatch.getPhysicalDeviceSurfaceSupportKHR(
+                        device,
                         @intCast(u32, queue_family_i),
-                        app.surface,
+                        surface,
                     );
                     if (present_support != 0) {
-                        app.graphics_present_queue_index = @intCast(u32, queue_family_i);
-                        break :outer physical_device;
+                        graphics_present_queue_index = @intCast(u32, queue_family_i);
+                        break :outer device;
                     }
                 }
             }
@@ -1520,12 +1506,12 @@ pub fn init(
         break :outer null;
     };
 
-    if (best_physical_device) |physical_device| {
-        app.physical_device = physical_device;
+    if (best_physical_device_opt) |best_physical_device| {
+        physical_device = best_physical_device;
     } else return error.NoSuitablePhysicalDevice;
 
-    app.antialias_sample_count = blk: {
-        const physical_device_properties = app.instance_dispatch.getPhysicalDeviceProperties(app.physical_device);
+    antialias_sample_count = blk: {
+        const physical_device_properties = instance_dispatch.getPhysicalDeviceProperties(physical_device);
         const sample_counts = physical_device_properties.limits.framebuffer_color_sample_counts;
 
         std.log.info("Framebuffer color sample counts:", .{});
@@ -1561,7 +1547,7 @@ pub fn init(
         const device_create_info = vk.DeviceCreateInfo{
             .queue_create_info_count = 1,
             .p_queue_create_infos = @ptrCast([*]vk.DeviceQueueCreateInfo, &vk.DeviceQueueCreateInfo{
-                .queue_family_index = app.graphics_present_queue_index,
+                .queue_family_index = graphics_present_queue_index,
                 .queue_count = 1,
                 .p_queue_priorities = &[1]f32{1.0},
                 .flags = .{},
@@ -1574,26 +1560,28 @@ pub fn init(
             .flags = .{},
         };
 
-        app.logical_device = try app.instance_dispatch.createDevice(
-            app.physical_device,
+        logical_device = try instance_dispatch.createDevice(
+            physical_device,
             &device_create_info,
             null,
         );
     }
 
-    app.device_dispatch = try vulkan_config.DeviceDispatch.load(
-        app.logical_device,
-        app.instance_dispatch.dispatch.vkGetDeviceProcAddr,
+    device_dispatch = try vulkan_config.DeviceDispatch.load(
+        logical_device,
+        instance_dispatch.dispatch.vkGetDeviceProcAddr,
     );
-    app.graphics_present_queue = app.device_dispatch.getDeviceQueue(
-        app.logical_device,
-        app.graphics_present_queue_index,
+    graphics_present_queue = device_dispatch.getDeviceQueue(
+        logical_device,
+        graphics_present_queue_index,
         0,
     );
 
     // Query and select appropriate surface format for swapchain
-    if (try selectSurfaceFormat(allocator, app.*, .srgb_nonlinear_khr, .b8g8r8a8_unorm)) |surface_format| {
-        app.surface_format = surface_format;
+
+    const surface_format_opt = try selectSurfaceFormat(allocator, .srgb_nonlinear_khr, .b8g8r8a8_unorm);
+    if (surface_format_opt) |format| {
+        swapchain_surface_format = format;
     } else {
         return error.RequiredSurfaceFormatUnavailable;
     }
@@ -1606,7 +1594,7 @@ pub fn init(
         // Preferable
         //  - Device local (Memory on the GPU / APU)
 
-        const memory_properties = app.instance_dispatch.getPhysicalDeviceMemoryProperties(app.physical_device);
+        const memory_properties = instance_dispatch.getPhysicalDeviceMemoryProperties(physical_device);
         if (print_vulkan_objects.memory_type_all) {
             std.debug.print("\n** Memory heaps found on system **\n\n", .{});
             printVulkanMemoryHeaps(memory_properties, 0);
@@ -1655,7 +1643,7 @@ pub fn init(
     };
 
     // TODO:
-    app.selected_memory_index = mesh_memory_index;
+    selected_memory_index = mesh_memory_index;
 
     {
         const image_create_info = vk.ImageCreateInfo{
@@ -1678,19 +1666,19 @@ pub fn init(
             .p_queue_family_indices = undefined,
         };
 
-        texture_image = try app.device_dispatch.createImage(app.logical_device, &image_create_info, null);
+        texture_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
     }
 
-    const texture_memory_requirements = app.device_dispatch.getImageMemoryRequirements(app.logical_device, texture_image);
+    const texture_memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, texture_image);
 
-    var image_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
+    var image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = texture_memory_requirements.size,
         .memory_type_index = mesh_memory_index,
     }, null);
 
-    try app.device_dispatch.bindImageMemory(app.logical_device, texture_image, image_memory, 0);
+    try device_dispatch.bindImageMemory(logical_device, texture_image, image_memory, 0);
 
-    const surface_capabilities = try app.instance_dispatch.getPhysicalDeviceSurfaceCapabilitiesKHR(app.physical_device, app.surface);
+    const surface_capabilities = try instance_dispatch.getPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface);
 
     if (print_vulkan_objects.surface_abilties) {
         std.debug.print("** Selected surface capabilites **\n\n", .{});
@@ -1714,17 +1702,17 @@ pub fn init(
     }
 
     if (surface_capabilities.current_extent.width == 0xFFFFFFFF or surface_capabilities.current_extent.height == 0xFFFFFFFF) {
-        app.swapchain_extent.width = screen_dimensions.width;
-        app.swapchain_extent.height = screen_dimensions.height;
+        swapchain_extent.width = screen_dimensions.width;
+        swapchain_extent.height = screen_dimensions.height;
     }
 
-    std.debug.assert(app.swapchain_extent.width >= surface_capabilities.min_image_extent.width);
-    std.debug.assert(app.swapchain_extent.height >= surface_capabilities.min_image_extent.height);
+    std.debug.assert(swapchain_extent.width >= surface_capabilities.min_image_extent.width);
+    std.debug.assert(swapchain_extent.height >= surface_capabilities.min_image_extent.height);
 
-    std.debug.assert(app.swapchain_extent.width <= surface_capabilities.max_image_extent.width);
-    std.debug.assert(app.swapchain_extent.height <= surface_capabilities.max_image_extent.height);
+    std.debug.assert(swapchain_extent.width <= surface_capabilities.max_image_extent.width);
+    std.debug.assert(swapchain_extent.height <= surface_capabilities.max_image_extent.height);
 
-    app.swapchain_min_image_count = surface_capabilities.min_image_count + 1;
+    swapchain_min_image_count = surface_capabilities.min_image_count + 1;
 
     // TODO: Perhaps more flexibily should be allowed here. I'm unsure if an application is
     //       supposed to match the rotation of the system / monitor, but I would assume not..
@@ -1735,12 +1723,12 @@ pub fn init(
         return error.VulkanSurfaceTransformInvalid;
     }
 
-    app.swapchain = try app.device_dispatch.createSwapchainKHR(app.logical_device, &vk.SwapchainCreateInfoKHR{
-        .surface = app.surface,
-        .min_image_count = app.swapchain_min_image_count,
-        .image_format = app.surface_format.format,
-        .image_color_space = app.surface_format.color_space,
-        .image_extent = app.swapchain_extent,
+    swapchain = try device_dispatch.createSwapchainKHR(logical_device, &vk.SwapchainCreateInfoKHR{
+        .surface = surface,
+        .min_image_count = swapchain_min_image_count,
+        .image_format = swapchain_surface_format.format,
+        .image_color_space = swapchain_surface_format.color_space,
+        .image_extent = swapchain_extent,
         .image_array_layers = 1,
         .image_usage = .{ .color_attachment_bit = true, .transfer_src_bit = true },
         .image_sharing_mode = .exclusive,
@@ -1759,58 +1747,58 @@ pub fn init(
         .old_swapchain = .null_handle,
     }, null);
 
-    app.swapchain_images = blk: {
+    swapchain_images = blk: {
         var image_count: u32 = undefined;
-        if (.success != (try app.device_dispatch.getSwapchainImagesKHR(app.logical_device, app.swapchain, &image_count, null))) {
+        if (.success != (try device_dispatch.getSwapchainImagesKHR(logical_device, swapchain, &image_count, null))) {
             return error.FailedToGetSwapchainImagesCount;
         }
 
-        var swapchain_images = try allocator.alloc(vk.Image, image_count);
-        if (.success != (try app.device_dispatch.getSwapchainImagesKHR(app.logical_device, app.swapchain, &image_count, swapchain_images.ptr))) {
+        var images = try allocator.alloc(vk.Image, image_count);
+        if (.success != (try device_dispatch.getSwapchainImagesKHR(logical_device, swapchain, &image_count, images.ptr))) {
             return error.FailedToGetSwapchainImages;
         }
 
-        break :blk swapchain_images;
+        break :blk images;
     };
 
-    app.swapchain_image_views = try allocator.alloc(vk.ImageView, app.swapchain_images.len);
-    try createSwapchainImageViews(app.*);
+    swapchain_image_views = try allocator.alloc(vk.ImageView, swapchain_images.len);
+    try createSwapchainImageViews();
 
-    try createMultiSampledImage(app, app.swapchain_extent.width, app.swapchain_extent.height, mesh_memory_index);
+    try createMultiSampledImage(swapchain_extent.width, swapchain_extent.height, mesh_memory_index);
 
-    app.command_pool = try app.device_dispatch.createCommandPool(app.logical_device, &vk.CommandPoolCreateInfo{
-        .queue_family_index = app.graphics_present_queue_index,
+    command_pool = try device_dispatch.createCommandPool(logical_device, &vk.CommandPoolCreateInfo{
+        .queue_family_index = graphics_present_queue_index,
         .flags = .{},
     }, null);
 
     {
         const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-            .command_pool = app.command_pool,
+            .command_pool = command_pool,
             .level = .primary,
             .command_buffer_count = 1,
         };
-        try app.device_dispatch.allocateCommandBuffers(
-            app.logical_device,
+        try device_dispatch.allocateCommandBuffers(
+            logical_device,
             &command_buffer_allocate_info,
             @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
         );
     }
 
     {
-        app.command_buffers = try allocator.alloc(vk.CommandBuffer, app.swapchain_images.len);
+        command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain_images.len);
         const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-            .command_pool = app.command_pool,
+            .command_pool = command_pool,
             .level = .primary,
-            .command_buffer_count = @intCast(u32, app.command_buffers.len),
+            .command_buffer_count = @intCast(u32, command_buffers.len),
         };
-        try app.device_dispatch.allocateCommandBuffers(
-            app.logical_device,
+        try device_dispatch.allocateCommandBuffers(
+            logical_device,
             &command_buffer_allocate_info,
-            app.command_buffers.ptr,
+            command_buffers.ptr,
         );
     }
 
-    try app.device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
+    try device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
         .flags = .{ .one_time_submit_bit = true },
         .p_inheritance_info = null,
     });
@@ -1819,7 +1807,7 @@ pub fn init(
     std.debug.assert(texture_memory_requirements.alignment >= 16);
     const last_index: usize = (@intCast(usize, texture_layer_dimensions.width) * texture_layer_dimensions.height) - 1;
     {
-        var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, image_memory, 0, texture_layer_size, .{})).?;
+        var mapped_memory_ptr = (try device_dispatch.mapMemory(logical_device, image_memory, 0, texture_layer_size, .{})).?;
         texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(16, mapped_memory_ptr));
         std.mem.set(graphics.RGBA(f32), texture_memory_map[0..last_index], .{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 0.0 });
     }
@@ -1857,7 +1845,7 @@ pub fn init(
         const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
         const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
         const dependency_flags = vk.DependencyFlags{};
-        app.device_dispatch.cmdPipelineBarrier(
+        device_dispatch.cmdPipelineBarrier(
             jobs_command_buffer,
             src_stage,
             dst_stage,
@@ -1871,7 +1859,7 @@ pub fn init(
         );
     }
 
-    try app.device_dispatch.endCommandBuffer(jobs_command_buffer);
+    try device_dispatch.endCommandBuffer(jobs_command_buffer);
 
     const submit_command_infos = [_]vk.SubmitInfo{.{
         .wait_semaphore_count = 0,
@@ -1887,32 +1875,32 @@ pub fn init(
         const fence_create_info = vk.FenceCreateInfo{
             .flags = .{ .signaled_bit = false },
         };
-        const fence = try app.device_dispatch.createFence(app.logical_device, &fence_create_info, null);
+        const fence = try device_dispatch.createFence(logical_device, &fence_create_info, null);
 
-        try app.device_dispatch.queueSubmit(
-            app.graphics_present_queue,
+        try device_dispatch.queueSubmit(
+            graphics_present_queue,
             1,
             &submit_command_infos,
             fence,
         );
 
-        _ = try app.device_dispatch.waitForFences(
-            app.logical_device,
+        _ = try device_dispatch.waitForFences(
+            logical_device,
             1,
             @ptrCast([*]const vk.Fence, &fence),
             vk.TRUE,
             std.time.ns_per_s * 3,
         );
-        app.device_dispatch.destroyFence(app.logical_device, fence, null);
-        app.device_dispatch.freeCommandBuffers(
-            app.logical_device,
-            app.command_pool,
+        device_dispatch.destroyFence(logical_device, fence, null);
+        device_dispatch.freeCommandBuffers(
+            logical_device,
+            command_pool,
             1,
             @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
         );
     }
 
-    texture_image_view = try app.device_dispatch.createImageView(app.logical_device, &vk.ImageViewCreateInfo{
+    texture_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
         .flags = .{},
         .image = texture_image,
         .view_type = .@"2d_array",
@@ -1929,7 +1917,7 @@ pub fn init(
 
     std.debug.assert(vertices_range_index_begin + vertices_range_size <= memory_size);
 
-    var mesh_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
+    var mesh_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = memory_size,
         .memory_type_index = mesh_memory_index,
     }, null);
@@ -1946,8 +1934,8 @@ pub fn init(
             .flags = .{},
         };
 
-        vertices_buffer = try app.device_dispatch.createBuffer(app.logical_device, &buffer_create_info, null);
-        try app.device_dispatch.bindBufferMemory(app.logical_device, vertices_buffer, mesh_memory, vertices_range_index_begin);
+        vulkan_vertices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
+        try device_dispatch.bindBufferMemory(logical_device, vulkan_vertices_buffer, mesh_memory, vertices_range_index_begin);
     }
 
     {
@@ -1962,23 +1950,23 @@ pub fn init(
             .flags = .{},
         };
 
-        indices_buffer = try app.device_dispatch.createBuffer(app.logical_device, &buffer_create_info, null);
-        try app.device_dispatch.bindBufferMemory(app.logical_device, indices_buffer, mesh_memory, indices_range_index_begin);
+        vulkan_indices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
+        try device_dispatch.bindBufferMemory(logical_device, vulkan_indices_buffer, mesh_memory, indices_range_index_begin);
     }
 
-    mapped_device_memory = @ptrCast([*]u8, (try app.device_dispatch.mapMemory(app.logical_device, mesh_memory, 0, memory_size, .{})).?);
+    mapped_device_memory = @ptrCast([*]u8, (try device_dispatch.mapMemory(logical_device, mesh_memory, 0, memory_size, .{})).?);
 
     {
         const Vertex = graphics.GenericVertex;
         const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &mapped_device_memory[vertices_range_index_begin]));
-        app.vertices_buffer = vertex_ptr[0..vertices_range_count];
+        vertices_buffer = vertex_ptr[0..vertices_range_count];
         const indices_ptr = @ptrCast([*]u16, @alignCast(16, &mapped_device_memory[indices_range_index_begin]));
-        app.indices_buffer = indices_ptr[0..indices_range_count];
+        indices_buffer = indices_ptr[0..indices_range_count];
     }
 
-    app.images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
-    app.renders_finished = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
-    app.inflight_fences = try allocator.alloc(vk.Fence, max_frames_in_flight);
+    images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
+    renders_finished = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
+    inflight_fences = try allocator.alloc(vk.Fence, max_frames_in_flight);
 
     const semaphore_create_info = vk.SemaphoreCreateInfo{
         .flags = .{},
@@ -1990,25 +1978,25 @@ pub fn init(
 
     var i: u32 = 0;
     while (i < max_frames_in_flight) {
-        app.images_available[i] = try app.device_dispatch.createSemaphore(app.logical_device, &semaphore_create_info, null);
-        app.renders_finished[i] = try app.device_dispatch.createSemaphore(app.logical_device, &semaphore_create_info, null);
-        app.inflight_fences[i] = try app.device_dispatch.createFence(app.logical_device, &fence_create_info, null);
+        images_available[i] = try device_dispatch.createSemaphore(logical_device, &semaphore_create_info, null);
+        renders_finished[i] = try device_dispatch.createSemaphore(logical_device, &semaphore_create_info, null);
+        inflight_fences[i] = try device_dispatch.createFence(logical_device, &fence_create_info, null);
         i += 1;
     }
 
-    app.vertex_shader_module = try createVertexShaderModule(app.*);
-    app.fragment_shader_module = try createFragmentShaderModule(app.*);
+    vertex_shader_module = try createVertexShaderModule();
+    fragment_shader_module = try createFragmentShaderModule();
 
-    std.debug.assert(app.swapchain_images.len > 0);
+    std.debug.assert(swapchain_images.len > 0);
 
-    app.render_pass = try createRenderPass(app.*);
+    render_pass = try createRenderPass();
 
-    app.descriptor_set_layouts = try createDescriptorSetLayouts(allocator, app.*);
-    app.pipeline_layout = try createPipelineLayout(app.*, app.descriptor_set_layouts);
-    app.descriptor_pool = try createDescriptorPool(app.*);
-    app.descriptor_sets = try createDescriptorSets(allocator, app, app.descriptor_set_layouts);
-    app.graphics_pipeline = try createGraphicsPipeline(app.*, app.pipeline_layout, app.render_pass, screen_dimensions);
-    app.framebuffers = try createFramebuffers(allocator, app.*, screen_dimensions);
+    try createDescriptorSetLayouts(allocator);
+    pipeline_layout = try createPipelineLayout();
+    descriptor_pool = try createDescriptorPool();
+    try createDescriptorSets(allocator);
+    try createGraphicsPipeline(screen_dimensions);
+    try createFramebuffers(allocator, screen_dimensions);
 }
 
 //
