@@ -97,7 +97,6 @@ pub fn open(
     on_success_cb: *const OpenOnSuccessFn,
     on_error_cb: *const OpenOnErrorFn,
 ) !void {
-
     on_success_handler = on_success_cb;
     on_error_handler = on_error_cb;
 

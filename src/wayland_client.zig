@@ -200,9 +200,9 @@ pub fn pollEvents() bool {
     _ = display.dispatchPending();
 
     if (awaiting_frame) {
-        if(frame_index == last_captured_frame_index)
+        if (frame_index == last_captured_frame_index)
             return false;
-        
+
         if (screen_stream_backend.state == .open) {
             std.debug.assert(frame_index != last_captured_frame_index);
             screen_stream_backend.captureFrame(frame_index) catch |err| {
