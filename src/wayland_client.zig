@@ -5,13 +5,16 @@ const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
 
-const geometry = @import("geometry.zig");
-
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 const zxdg = wayland.client.zxdg;
 const wlr = wayland.client.zwlr;
+
+const geometry = @import("geometry.zig");
+const graphics = @import("graphics.zig");
+
+const screen_stream_backend = @import("wayland_client/screen_stream.zig");
 
 const XCursor = struct {
     const hidden = "hidden";
@@ -40,8 +43,40 @@ pub const MouseButton = enum(c_int) {
     _,
 };
 
+pub const ButtonClicked = enum(u16) {
+    none,
+    right,
+    middle,
+    left,
+};
+
+//
+// Public Variables
+//
+
 pub var display: *wl.Display = undefined;
 pub var surface: *wl.Surface = undefined;
+
+pub var previous_mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
+pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
+
+pub var screen_dimensions: geometry.Dimensions2D(u16) = undefined;
+pub var screen_scale: geometry.ScaleFactor2D(f64) = undefined;
+
+pub var button_clicked: ButtonClicked = .none;
+pub var button_state: wl.Pointer.ButtonState = undefined;
+pub var is_mouse_moved: bool = false;
+pub var awaiting_frame: bool = true;
+
+pub var framebuffer_resized: bool = true;
+pub var is_mouse_in_screen: bool = true;
+pub var is_shutdown_requested: bool = false;
+pub var draw_window_decorations_requested: bool = false;
+pub var frame_start_ns: i128 = undefined;
+
+//
+// Internal Variables
+//
 
 var registry: *wl.Registry = undefined;
 var compositor: *wl.Compositor = undefined;
@@ -62,36 +97,18 @@ var cursor_surface: *wl.Surface = undefined;
 var xcursor: [:0]const u8 = undefined;
 var shared_memory: *wl.Shm = undefined;
 
-pub var previous_mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
-pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
+var frame_index: u32 = 0;
+var last_captured_frame_index: u32 = std.math.maxInt(u32);
 
-pub var screen_dimensions: geometry.Dimensions2D(u16) = undefined;
-pub var screen_scale: geometry.ScaleFactor2D(f64) = undefined;
-
-pub const ButtonClicked = enum(u16) {
-    none,
-    right,
-    middle,
-    left,
-};
-
-pub var button_clicked: ButtonClicked = .none;
-pub var button_state: wl.Pointer.ButtonState = undefined;
-pub var is_mouse_moved: bool = false;
-pub var awaiting_frame: bool = true;
-
-pub var framebuffer_resized: bool = true;
-pub var is_mouse_in_screen: bool = true;
-pub var is_shutdown_requested: bool = false;
-pub var draw_window_decorations_requested: bool = false;
-pub var frame_start_ns: i128 = undefined;
-
-pub fn mouseCoordinatesNDCR() geometry.Coordinates2D(f64) {
-    return .{
-        .x = -1.0 + (mouse_coordinates.x * screen_scale.horizontal),
-        .y = -1.0 + (mouse_coordinates.y * screen_scale.vertical),
-    };
-}
+//
+// Public Interface
+//
+// fn: init
+// fn: deinit
+// fn: pollEvents
+// fn: mouseCoordinatesNDCR
+// ns: screen_stream
+//
 
 pub fn init(app_name: [*:0]const u8) !void {
     display = try wl.Display.connect(null);
@@ -182,8 +199,65 @@ pub fn pollEvents() bool {
 
     _ = display.dispatchPending();
 
+    if (awaiting_frame) {
+        if(frame_index == last_captured_frame_index)
+            return false;
+        
+        if (screen_stream_backend.state == .open) {
+            std.debug.assert(frame_index != last_captured_frame_index);
+            screen_stream_backend.captureFrame(frame_index) catch |err| {
+                std.log.warn("wayland_client: Failed to capture screen frame. Error: {}", .{err});
+            };
+            last_captured_frame_index = frame_index;
+        }
+    }
+
     return false;
 }
+
+pub fn mouseCoordinatesNDCR() geometry.Coordinates2D(f64) {
+    return .{
+        .x = -1.0 + (mouse_coordinates.x * screen_scale.horizontal),
+        .y = -1.0 + (mouse_coordinates.y * screen_scale.vertical),
+    };
+}
+
+pub const screen_stream = struct {
+    const PixelType = graphics.RGBA(u8);
+    const FrameImage = graphics.Image(PixelType);
+
+    const OpenOnSuccessFn = screen_stream_backend.OpenOnSuccessFn;
+    const OpenOnErrorFn = screen_stream_backend.OpenOnErrorFn;
+
+    pub inline fn open(
+        on_success_cb: *const OpenOnSuccessFn,
+        on_error_cb: *const OpenOnErrorFn,
+    ) !void {
+        try screen_stream_backend.open(
+            output_opt.?,
+            screencopy_manager,
+            shared_memory,
+            on_success_cb,
+            on_error_cb,
+        );
+    }
+
+    pub inline fn close() void {
+        screen_stream_backend.close();
+    }
+
+    pub inline fn nextFrameImage() ?FrameImage {
+        return screen_stream_backend.nextFrameImage();
+    }
+
+    pub inline fn state() screen_stream_backend.State {
+        return screen_stream_backend.state;
+    }
+};
+
+//
+// Private Interface
+//
 
 fn xdgWmBaseListener(xdg_wm_base_ref: *xdg.WmBase, event: xdg.WmBase.Event, _: *const void) void {
     switch (event) {
@@ -233,6 +307,7 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, _: *const voi
             };
             frame_callback.setListener(*const void, frameListener, &{});
             awaiting_frame = true;
+            frame_index += 1;
         },
     }
 }
