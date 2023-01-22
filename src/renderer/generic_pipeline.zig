@@ -4,16 +4,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
-const vulkan_config = @import("../vulkan_config.zig");
+const vulkan_config = @import("vulkan_config.zig");
 const shaders = @import("shaders");
+
+const vulkan_core = @import("vulkan_core.zig");
+const render_pass = @import("render_pass.zig");
+const defines = @import("defines.zig");
 
 const geometry = @import("../geometry.zig");
 const graphics = @import("../graphics.zig");
-
-var texture_image_view: vk.ImageView = undefined;
-pub var texture_image: vk.Image = undefined;
-pub var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
-var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
 
 pub const PushConstant = packed struct {
     width: f32,
@@ -21,28 +20,26 @@ pub const PushConstant = packed struct {
     frame: f32,
 };
 
-var vertex_shader_module: vk.ShaderModule = undefined;
-var fragment_shader_module: vk.ShaderModule = undefined;
-
-pub var graphics_pipeline: vk.Pipeline = undefined;
-var descriptor_pool: vk.DescriptorPool = undefined;
+pub var texture_image: vk.Image = undefined;
+pub var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
 pub var descriptor_sets: []vk.DescriptorSet = undefined;
 pub var descriptor_set_layouts: []vk.DescriptorSetLayout = undefined;
 pub var pipeline_layout: vk.PipelineLayout = undefined;
-var sampler: vk.Sampler = undefined;
-
+pub var graphics_pipeline: vk.Pipeline = undefined;
 pub var vertices_buffer: []graphics.GenericVertex = undefined;
 pub var indices_buffer: []u16 = undefined;
-
 pub var vulkan_vertices_buffer: vk.Buffer = undefined;
 pub var vulkan_indices_buffer: vk.Buffer = undefined;
 
+var texture_image_view: vk.ImageView = undefined;
+var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
+var vertex_shader_module: vk.ShaderModule = undefined;
+var fragment_shader_module: vk.ShaderModule = undefined;
+var descriptor_pool: vk.DescriptorPool = undefined;
+var sampler: vk.Sampler = undefined;
+
 pub fn init(
     allocator: std.mem.Allocator,
-    device_dispatch: vulkan_config.DeviceDispatch,
-    logical_device: vk.Device,
-    render_pass: vk.RenderPass,
-    texture_dimensions: geometry.Dimensions2D(u16),
     texture_memory_index: u32,
     command_buffer: vk.CommandBuffer,
     graphics_present_queue: vk.Queue,
@@ -52,10 +49,14 @@ pub fn init(
     memory_offset: u32,
     indices_range_size: u32,
     vertices_range_size: u32,
-    command_pool: vk.CommandPool,
+    // command_pool: vk.CommandPool,
     mapped_device_memory: [*]u8,
-    antialias_sample_count: vk.SampleCountFlags,
 ) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+    const command_pool = vulkan_core.command_pool;
+    const texture_dimensions = defines.texture_layer_dimensions;
+
     {
         const image_create_info = vk.ImageCreateInfo{
             .flags = .{},
@@ -88,7 +89,7 @@ pub fn init(
 
     try device_dispatch.bindImageMemory(logical_device, texture_image, image_memory, 0);
 
-    const texture_layer_size = @intCast(usize, texture_dimensions.width) * texture_dimensions.height;
+    const texture_layer_size = defines.texture_layer_size;
 
     std.debug.assert(texture_layer_size <= texture_memory_requirements.size);
     std.debug.assert(texture_memory_requirements.alignment >= 16);
@@ -272,9 +273,7 @@ pub fn init(
     try createGraphicsPipeline(
         device_dispatch,
         logical_device,
-        render_pass,
         initial_viewport_dimensions,
-        antialias_sample_count,
     );
 }
 
@@ -360,7 +359,11 @@ fn createPipelineLayout(device_dispatch: vulkan_config.DeviceDispatch, logical_d
     return device_dispatch.createPipelineLayout(logical_device, &pipeline_layout_create_info, null);
 }
 
-fn createGraphicsPipeline(device_dispatch: vulkan_config.DeviceDispatch, logical_device: vk.Device, render_pass: vk.RenderPass, screen_dimensions: geometry.Dimensions2D(u16), antialias_sample_count: vk.SampleCountFlags) !void {
+fn createGraphicsPipeline(
+    device_dispatch: vulkan_config.DeviceDispatch,
+    logical_device: vk.Device,
+    screen_dimensions: geometry.Dimensions2D(u16),
+) !void {
     const vertex_input_attribute_descriptions = [_]vk.VertexInputAttributeDescription{
         vk.VertexInputAttributeDescription{ // inPosition
             .binding = 0,
@@ -471,7 +474,7 @@ fn createGraphicsPipeline(device_dispatch: vulkan_config.DeviceDispatch, logical
 
     const multisampling = vk.PipelineMultisampleStateCreateInfo{
         .sample_shading_enable = vk.FALSE,
-        .rasterization_samples = antialias_sample_count,
+        .rasterization_samples = render_pass.antialias_sample_count,
         .min_sample_shading = 0.0,
         .p_sample_mask = null,
         .alpha_to_coverage_enable = vk.FALSE,
@@ -521,7 +524,7 @@ fn createGraphicsPipeline(device_dispatch: vulkan_config.DeviceDispatch, logical
             .p_color_blend_state = &color_blending,
             .p_dynamic_state = &dynamic_state_create_info,
             .layout = pipeline_layout,
-            .render_pass = render_pass,
+            .render_pass = render_pass.pass,
             .subpass = 0,
             .base_pipeline_handle = .null_handle,
             .base_pipeline_index = 0,

@@ -5,7 +5,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 
-const vulkan_config = @import("../vulkan_config.zig");
+const vulkan_config = @import("vulkan_config.zig");
 const shaders = @import("shaders");
 const geometry = @import("../geometry.zig");
 const graphics = @import("../graphics.zig");

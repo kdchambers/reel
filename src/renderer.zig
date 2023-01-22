@@ -4,98 +4,27 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
-const vulkan_config = @import("vulkan_config.zig");
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 
+const vulkan_core = @import("renderer/vulkan_core.zig");
 const texture_pipeline = @import("renderer/texture_pipeline.zig");
 const generic_pipeline = @import("renderer/generic_pipeline.zig");
+const render_pass = @import("renderer/render_pass.zig");
+
+const defines = @import("renderer/defines.zig");
+const max_frames_in_flight = defines.max_frames_in_flight;
+const texture_layer_dimensions = defines.texture_layer_dimensions;
+const print_vulkan_objects = defines.print_vulkan_objects;
+const transparancy_enabled = defines.transparancy_enabled;
+const memory_size = defines.memory_size;
+const indices_range_size = defines.indices_range_size;
+const vertices_range_size = defines.vertices_range_size;
+const ScreenNormalizedBaseType = defines.ScreenNormalizedBaseType;
+const TextureNormalizedBaseType = defines.TextureNormalizedBaseType;
 
 // TODO: Fontana shouldn't be referenced here
 const Atlas = @import("fontana").Atlas;
-
-const clib = @cImport({
-    @cInclude("dlfcn.h");
-});
-
-var vkGetInstanceProcAddr: *const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = undefined;
-
-/// Enable Vulkan validation layers
-const enable_validation_layers = if (builtin.mode == .Debug) true else false;
-
-const vulkan_engine_version = vk.makeApiVersion(0, 0, 1, 0);
-const vulkan_engine_name = "No engine";
-const vulkan_application_version = vk.makeApiVersion(0, 0, 1, 0);
-const application_name = "reel";
-
-// NOTE: The max texture size that is guaranteed is 4096 * 4096
-//       Support for larger textures will need to be queried
-// https://github.com/gpuweb/gpuweb/issues/1327
-pub const texture_layer_dimensions = geometry.Dimensions2D(TexturePixelBaseType){
-    .width = 512,
-    .height = 512,
-};
-
-/// Size in bytes of each texture layer (Not including padding, etc)
-const texture_layer_size = @sizeOf(graphics.RGBA(f32)) * @intCast(u64, texture_layer_dimensions.width) * texture_layer_dimensions.height;
-const texture_size_bytes = texture_layer_dimensions.width * texture_layer_dimensions.height * @sizeOf(graphics.RGBA(f32));
-
-const background_color = graphics.RGBA(f32).fromInt(u8, 35, 35, 35, 255);
-
-const indices_range_index_begin = 0;
-const indices_range_size = max_texture_quads_per_render * @sizeOf(u16) * 6; // 12 kb
-const indices_range_count = indices_range_size / @sizeOf(u16);
-const vertices_range_index_begin = indices_range_size;
-const vertices_range_size = max_texture_quads_per_render * @sizeOf(graphics.GenericVertex) * 4; // 80 kb
-const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericVertex);
-const memory_size = indices_range_size + vertices_range_size;
-
-const device_extensions = [_][*:0]const u8{vk.extension_info.khr_swapchain.name};
-const surface_extensions = [_][*:0]const u8{ "VK_KHR_surface", "VK_KHR_wayland_surface" };
-
-const validation_layers = if (enable_validation_layers)
-    [1][*:0]const u8{"VK_LAYER_KHRONOS_validation"}
-else
-    [*:0]const u8{};
-
-/// Maximum number of screen framebuffers to use
-/// 2-3 would be recommented to avoid screen tearing
-const max_frames_in_flight: u32 = 2;
-
-/// Determines the memory allocated for storing mesh data
-/// Represents the number of quads that will be able to be drawn
-/// This can be a colored quad, or a textured quad such as a charactor
-const max_texture_quads_per_render: u32 = 1024;
-
-/// Enables transparency on the selected surface
-const transparancy_enabled = true;
-
-/// The transparency of the selected surface
-/// Valid values between 0.0 (no transparency) and 1.0 (full)
-/// Ignored if `transparancy_enabled` is false
-const transparancy_level = 0.0;
-
-/// Version of Vulkan to use
-/// https://www.khronos.org/registry/vulkan/
-const vulkan_api_version = vk.API_VERSION_1_1;
-
-/// Options to print various vulkan objects that will be selected at
-/// runtime based on the hardware / system that is available
-const print_vulkan_objects = struct {
-    /// Capabilities of all available memory types
-    const memory_type_all: bool = true;
-    /// Capabilities of the selected surface
-    /// VSync, transparency, etc
-    const surface_abilties: bool = true;
-};
-
-// NOTE: The following points aren't used in the code, but are useful to know
-// http://anki3d.org/vulkan-coordinate-system/
-const ScreenPoint = geometry.Coordinates2D(ScreenNormalizedBaseType);
-const point_top_left = ScreenPoint{ .x = -1.0, .y = -1.0 };
-const point_top_right = ScreenPoint{ .x = 1.0, .y = -1.0 };
-const point_bottom_left = ScreenPoint{ .x = -1.0, .y = 1.0 };
-const point_bottom_right = ScreenPoint{ .x = 1.0, .y = 1.0 };
 
 /// Defines the entire surface area of a screen in vulkans coordinate system
 /// I.e normalized device coordinates right (ndc right)
@@ -114,54 +43,34 @@ const full_texture_extent = geometry.Extent2D(TextureNormalizedBaseType){
     .height = 1.0,
 };
 
-var multisampled_image: vk.Image = undefined;
-var multisampled_image_view: vk.ImageView = undefined;
-var multisampled_image_memory: vk.DeviceMemory = undefined;
-
 var mapped_device_memory: [*]u8 = undefined;
-
 var quad_buffer: []graphics.QuadFace = undefined;
-
 var current_frame: u32 = 0;
 var previous_frame: u32 = 0;
-
 pub var texture_atlas: *Atlas = undefined;
 
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
-
 var jobs_command_buffer: vk.CommandBuffer = undefined;
 
 //
 // Graphics context
 //
 
-pub var base_dispatch: vulkan_config.BaseDispatch = undefined;
-pub var instance_dispatch: vulkan_config.InstanceDispatch = undefined;
-pub var device_dispatch: vulkan_config.DeviceDispatch = undefined;
+var selected_memory_index: u32 = undefined;
 
-var render_pass: vk.RenderPass = undefined;
-var framebuffers: []vk.Framebuffer = undefined;
-
-var instance: vk.Instance = undefined;
-var surface: vk.SurfaceKHR = undefined;
-var swapchain_surface_format: vk.SurfaceFormatKHR = undefined;
-var physical_device: vk.PhysicalDevice = undefined;
-// TODO:
-pub var logical_device: vk.Device = undefined;
-var graphics_present_queue: vk.Queue = undefined; // Same queue used for graphics + presenting
-var graphics_present_queue_index: u32 = undefined;
-var swapchain_min_image_count: u32 = undefined;
-var swapchain: vk.SwapchainKHR = undefined;
-pub var swapchain_extent: vk.Extent2D = undefined;
-var swapchain_images: []vk.Image = undefined;
-var swapchain_image_views: []vk.ImageView = undefined;
-var command_pool: vk.CommandPool = undefined;
 var command_buffers: []vk.CommandBuffer = undefined;
+
 var images_available: []vk.Semaphore = undefined;
 var renders_finished: []vk.Semaphore = undefined;
 var inflight_fences: []vk.Fence = undefined;
-var antialias_sample_count: vk.SampleCountFlags = undefined;
-var selected_memory_index: u32 = undefined;
+var swapchain: vk.SwapchainKHR = undefined;
+
+var framebuffers: []vk.Framebuffer = undefined;
+var swapchain_min_image_count: u32 = undefined;
+pub var swapchain_extent: vk.Extent2D = undefined;
+var swapchain_images: []vk.Image = undefined;
+var swapchain_image_views: []vk.ImageView = undefined;
+var swapchain_surface_format: vk.SurfaceFormatKHR = undefined;
 
 // Has a precision of 2^12 = 4096
 pub const ImageHandle = packed struct(u64) {
@@ -193,12 +102,6 @@ pub const ImageHandle = packed struct(u64) {
 pub const Surface = opaque {};
 pub const Display = opaque {};
 
-const ScreenPixelBaseType = u16;
-const ScreenNormalizedBaseType = f32;
-
-const TexturePixelBaseType = u16;
-const TextureNormalizedBaseType = f32;
-
 pub fn faceWriter() graphics.FaceWriter {
     return graphics.FaceWriter.init(
         generic_pipeline.vertices_buffer,
@@ -207,6 +110,9 @@ pub fn faceWriter() graphics.FaceWriter {
 }
 
 pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+
     const recreate_swapchain_start = std.time.nanoTimestamp();
 
     _ = try device_dispatch.waitForFences(
@@ -217,14 +123,16 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
         std.math.maxInt(u64),
     );
 
+    try render_pass.resizeSwapchain(screen_dimensions);
+
     //
     // Destroy and recreate multisampled image
     //
-    device_dispatch.destroyImage(logical_device, multisampled_image, null);
-    device_dispatch.destroyImageView(logical_device, multisampled_image_view, null);
-    device_dispatch.freeMemory(logical_device, multisampled_image_memory, null);
+    // device_dispatch.destroyImage(logical_device, multisampled_image, null);
+    // device_dispatch.destroyImageView(logical_device, multisampled_image_view, null);
+    // device_dispatch.freeMemory(logical_device, multisampled_image_memory, null);
 
-    try createMultiSampledImage(screen_dimensions.width, screen_dimensions.height, selected_memory_index);
+    // try createMultiSampledImage(screen_dimensions.width, screen_dimensions.height, selected_memory_index);
 
     for (swapchain_image_views) |image_view| {
         device_dispatch.destroyImageView(logical_device, image_view, null);
@@ -235,7 +143,7 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
 
     const old_swapchain = swapchain;
     swapchain = try device_dispatch.createSwapchainKHR(logical_device, &vk.SwapchainCreateInfoKHR{
-        .surface = surface,
+        .surface = vulkan_core.surface,
         .min_image_count = swapchain_min_image_count,
         .image_format = swapchain_surface_format.format,
         .image_color_space = swapchain_surface_format.color_space,
@@ -277,7 +185,7 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
 
     {
         var framebuffer_create_info = vk.FramebufferCreateInfo{
-            .render_pass = render_pass,
+            .render_pass = render_pass.pass,
             .attachment_count = 2,
             // We assign to `p_attachments` below in the loop
             .p_attachments = undefined,
@@ -286,7 +194,7 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
             .layers = 1,
             .flags = .{},
         };
-        var attachment_buffer = [2]vk.ImageView{ multisampled_image_view, undefined };
+        var attachment_buffer = [2]vk.ImageView{ render_pass.multisampled_image_view, undefined };
         var i: u32 = 0;
         while (i < swapchain_image_views.len) : (i += 1) {
             // We reuse framebuffer_create_info for each framebuffer we create,
@@ -316,6 +224,10 @@ pub fn recordRenderPass(
     std.debug.assert(swapchain_images.len == command_buffers.len);
     std.debug.assert(screen_dimensions.width == swapchain_extent.width);
     std.debug.assert(screen_dimensions.height == swapchain_extent.height);
+
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+    const command_pool = vulkan_core.command_pool;
 
     // TODO: Audit
     _ = try device_dispatch.waitForFences(
@@ -349,7 +261,7 @@ pub fn recordRenderPass(
         });
 
         device_dispatch.cmdBeginRenderPass(command_buffer, &vk.RenderPassBeginInfo{
-            .render_pass = render_pass,
+            .render_pass = render_pass.pass,
             .framebuffer = framebuffers[i],
             .render_area = vk.Rect2D{
                 .offset = vk.Offset2D{
@@ -453,8 +365,11 @@ pub fn textureCommit() !void {
 }
 
 fn transitionTextureToGeneral() !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+
     const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-        .command_pool = command_pool,
+        .command_pool = vulkan_core.command_pool,
         .level = .primary,
         .command_buffer_count = 1,
     };
@@ -522,7 +437,7 @@ fn transitionTextureToGeneral() !void {
         null,
     );
 
-    try device_dispatch.queueSubmit(graphics_present_queue, 1, &submit_command_infos, job_fence);
+    try device_dispatch.queueSubmit(vulkan_core.graphics_present_queue, 1, &submit_command_infos, job_fence);
     _ = try device_dispatch.waitForFences(
         logical_device,
         1,
@@ -533,15 +448,18 @@ fn transitionTextureToGeneral() !void {
     device_dispatch.destroyFence(logical_device, job_fence, null);
     device_dispatch.freeCommandBuffers(
         logical_device,
-        command_pool,
+        vulkan_core.command_pool,
         1,
         @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
     );
 }
 
 fn transitionTextureToOptimal() !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+
     const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-        .command_pool = command_pool,
+        .command_pool = vulkan_core.command_pool,
         .level = .primary,
         .command_buffer_count = 1,
     };
@@ -605,7 +523,7 @@ fn transitionTextureToOptimal() !void {
     }};
 
     const job_fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{ .signaled_bit = false } }, null);
-    try device_dispatch.queueSubmit(graphics_present_queue, 1, &submit_command_infos, job_fence);
+    try device_dispatch.queueSubmit(vulkan_core.graphics_present_queue, 1, &submit_command_infos, job_fence);
     _ = try device_dispatch.waitForFences(
         logical_device,
         1,
@@ -616,7 +534,7 @@ fn transitionTextureToOptimal() !void {
     device_dispatch.destroyFence(logical_device, job_fence, null);
     device_dispatch.freeCommandBuffers(
         logical_device,
-        command_pool,
+        vulkan_core.command_pool,
         1,
         @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
     );
@@ -666,6 +584,9 @@ fn transitionTextureToOptimal() !void {
 // }
 
 pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+
     //
     // TODO: Audit Fence management
     //
@@ -726,7 +647,7 @@ pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
     };
 
     try device_dispatch.queueSubmit(
-        graphics_present_queue,
+        vulkan_core.graphics_present_queue,
         1,
         @ptrCast([*]const vk.SubmitInfo, &command_submit_info),
         inflight_fences[current_frame],
@@ -742,7 +663,7 @@ pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
         .p_results = null,
     };
 
-    const present_result = try device_dispatch.queuePresentKHR(graphics_present_queue, &present_info);
+    const present_result = try device_dispatch.queuePresentKHR(vulkan_core.graphics_present_queue, &present_info);
 
     // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkQueuePresentKHR.html
     switch (present_result) {
@@ -768,6 +689,8 @@ pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
 }
 
 fn createSwapchainImageViews() !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
     for (swapchain_image_views) |*image_view, image_view_i| {
         const image_view_create_info = vk.ImageViewCreateInfo{
             .image = swapchain_images[image_view_i],
@@ -792,93 +715,12 @@ fn createSwapchainImageViews() !void {
     }
 }
 
-fn createRenderPass() !vk.RenderPass {
-    return try device_dispatch.createRenderPass(logical_device, &vk.RenderPassCreateInfo{
-        .attachment_count = 2,
-        .p_attachments = &[2]vk.AttachmentDescription{
-            //
-            // [0] Multisampled Image
-            //
-            .{
-                .format = swapchain_surface_format.format,
-                .samples = antialias_sample_count,
-                .load_op = .clear,
-                .store_op = .dont_care,
-                .stencil_load_op = .dont_care,
-                .stencil_store_op = .dont_care,
-                .initial_layout = .undefined,
-                .final_layout = .color_attachment_optimal,
-                .flags = .{},
-            },
-            //
-            // [1] Swapchain
-            //
-            .{
-                .format = swapchain_surface_format.format,
-                .samples = .{ .@"1_bit" = true },
-                .load_op = .dont_care,
-                .store_op = .store,
-                .stencil_load_op = .dont_care,
-                .stencil_store_op = .dont_care,
-                .initial_layout = .undefined,
-                .final_layout = .present_src_khr,
-                .flags = .{},
-            },
-        },
-        .subpass_count = 1,
-        .p_subpasses = &[1]vk.SubpassDescription{
-            .{
-                .pipeline_bind_point = .graphics,
-                .color_attachment_count = 1,
-                .p_color_attachments = &[1]vk.AttachmentReference{
-                    vk.AttachmentReference{
-                        .attachment = 0, // multisampled
-                        .layout = .color_attachment_optimal,
-                    },
-                },
-                .input_attachment_count = 0,
-                .p_input_attachments = undefined,
-                .p_resolve_attachments = &[1]vk.AttachmentReference{
-                    vk.AttachmentReference{
-                        .attachment = 1, // swapchain
-                        .layout = .color_attachment_optimal,
-                    },
-                },
-                .p_depth_stencil_attachment = null,
-                .preserve_attachment_count = 0,
-                .p_preserve_attachments = undefined,
-                .flags = .{},
-            },
-        },
-        .dependency_count = 2,
-        .p_dependencies = &[2]vk.SubpassDependency{
-            .{
-                .src_subpass = vk.SUBPASS_EXTERNAL,
-                .dst_subpass = 0,
-                .src_stage_mask = .{ .bottom_of_pipe_bit = true },
-                .dst_stage_mask = .{ .color_attachment_output_bit = true },
-                .src_access_mask = .{ .memory_read_bit = true },
-                .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
-                .dependency_flags = .{ .by_region_bit = true },
-            },
-            .{
-                .src_subpass = 0,
-                .dst_subpass = vk.SUBPASS_EXTERNAL,
-                .src_stage_mask = .{ .color_attachment_output_bit = true },
-                .dst_stage_mask = .{ .bottom_of_pipe_bit = true },
-                .src_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
-                .dst_access_mask = .{ .memory_read_bit = true },
-                .dependency_flags = .{ .by_region_bit = true },
-            },
-        },
-        .flags = .{},
-    }, null);
-}
-
 fn cleanupSwapchain(allocator: std.mem.Allocator) void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
     device_dispatch.freeCommandBuffers(
         logical_device,
-        command_pool,
+        vulkan_core.command_pool,
         @intCast(u32, command_buffers.len),
         command_buffers.ptr,
     );
@@ -894,9 +736,11 @@ fn createFramebuffers(
     allocator: std.mem.Allocator,
     screen_dimensions: geometry.Dimensions2D(u16),
 ) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
     std.debug.assert(swapchain_image_views.len > 0);
     var framebuffer_create_info = vk.FramebufferCreateInfo{
-        .render_pass = render_pass,
+        .render_pass = render_pass.pass,
         .attachment_count = 2,
         .p_attachments = undefined,
         .width = screen_dimensions.width,
@@ -906,7 +750,7 @@ fn createFramebuffers(
     };
 
     framebuffers = try allocator.alloc(vk.Framebuffer, swapchain_image_views.len);
-    var attachment_buffer = [2]vk.ImageView{ multisampled_image_view, undefined };
+    var attachment_buffer = [2]vk.ImageView{ render_pass.multisampled_image_view, undefined };
     var i: u32 = 0;
     while (i < swapchain_image_views.len) : (i += 1) {
         // We reuse framebuffer_create_info for each framebuffer we create,
@@ -918,6 +762,9 @@ fn createFramebuffers(
 }
 
 pub fn deinit(allocator: std.mem.Allocator) void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+
     device_dispatch.deviceWaitIdle(logical_device) catch std.time.sleep(std.time.ns_per_ms * 20);
 
     cleanupSwapchain(allocator);
@@ -931,7 +778,10 @@ pub fn deinit(allocator: std.mem.Allocator) void {
 
     allocator.free(framebuffers);
 
-    instance_dispatch.destroySurfaceKHR(instance, surface, null);
+    //
+    // TODO: Move to vulkan_core
+    //
+    vulkan_core.instance_dispatch.destroySurfaceKHR(vulkan_core.instance, vulkan_core.surface, null);
 }
 
 fn selectSurfaceFormat(
@@ -939,8 +789,10 @@ fn selectSurfaceFormat(
     color_space: vk.ColorSpaceKHR,
     surface_format: vk.Format,
 ) !?vk.SurfaceFormatKHR {
+    const physical_device = vulkan_core.physical_device;
+    const instance_dispatch = vulkan_core.instance_dispatch;
     var format_count: u32 = undefined;
-    if (.success != (try instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, null))) {
+    if (.success != (try instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(physical_device, vulkan_core.surface, &format_count, null))) {
         return error.FailedToGetSurfaceFormats;
     }
 
@@ -955,7 +807,7 @@ fn selectSurfaceFormat(
     var formats: []vk.SurfaceFormatKHR = try allocator.alloc(vk.SurfaceFormatKHR, format_count);
     defer allocator.free(formats);
 
-    if (.success != (try instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats.ptr))) {
+    if (.success != (try instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(physical_device, vulkan_core.surface, &format_count, formats.ptr))) {
         return error.FailedToGetSurfaceFormats;
     }
 
@@ -967,53 +819,6 @@ fn selectSurfaceFormat(
     return null;
 }
 
-pub fn createMultiSampledImage(width: u32, height: u32, memory_heap_index: u32) !void {
-    const image_create_info = vk.ImageCreateInfo{
-        .flags = .{},
-        .image_type = .@"2d",
-        .format = .b8g8r8a8_unorm,
-        .tiling = .optimal,
-        .extent = vk.Extent3D{
-            .width = width,
-            .height = height,
-            .depth = 1,
-        },
-        .mip_levels = 1,
-        .array_layers = 1,
-        .initial_layout = .undefined,
-        .usage = .{ .transient_attachment_bit = true, .color_attachment_bit = true },
-        .samples = antialias_sample_count,
-        .sharing_mode = .exclusive,
-        .queue_family_index_count = 0,
-        .p_queue_family_indices = undefined,
-    };
-    multisampled_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
-
-    const multisampled_image_requirements = device_dispatch.getImageMemoryRequirements(logical_device, multisampled_image);
-
-    multisampled_image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
-        .allocation_size = multisampled_image_requirements.size,
-        .memory_type_index = memory_heap_index,
-    }, null);
-
-    try device_dispatch.bindImageMemory(logical_device, multisampled_image, multisampled_image_memory, 0);
-
-    multisampled_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
-        .flags = .{},
-        .image = multisampled_image,
-        .view_type = .@"2d_array",
-        .format = .b8g8r8a8_unorm,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = 1,
-            .base_array_layer = 0,
-            .layer_count = 1,
-        },
-        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-    }, null);
-}
-
 pub fn init(
     allocator: std.mem.Allocator,
     screen_dimensions: geometry.Dimensions2D(u16),
@@ -1023,226 +828,16 @@ pub fn init(
 ) !void {
     texture_atlas = atlas;
 
-    if (clib.dlopen("libvulkan.so.1", clib.RTLD_NOW)) |vulkan_loader| {
-        const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
-        if (vk_get_instance_proc_addr_fn_opt) |vk_get_instance_proc_addr_fn| {
-            vkGetInstanceProcAddr = vk_get_instance_proc_addr_fn;
-            base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
-        } else {
-            std.log.err("Failed to load vkGetInstanceProcAddr function from vulkan loader", .{});
-            return error.FailedToGetVulkanSymbol;
-        }
-    } else {
-        std.log.err("Failed to load vulkan loader (libvulkan.so.1)", .{});
-        return error.FailedToGetVulkanSymbol;
-    }
-
-    base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
-
-    instance = try base_dispatch.createInstance(&vk.InstanceCreateInfo{
-        .p_application_info = &vk.ApplicationInfo{
-            .p_application_name = application_name,
-            .application_version = vulkan_application_version,
-            .p_engine_name = vulkan_engine_name,
-            .engine_version = vulkan_engine_version,
-            .api_version = vulkan_api_version,
-        },
-        .enabled_extension_count = surface_extensions.len,
-        .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &surface_extensions),
-        .enabled_layer_count = if (enable_validation_layers) validation_layers.len else 0,
-        .pp_enabled_layer_names = if (enable_validation_layers) &validation_layers else undefined,
-        .flags = .{},
-    }, null);
-
-    instance_dispatch = try vulkan_config.InstanceDispatch.load(instance, vkGetInstanceProcAddr);
-    errdefer instance_dispatch.destroyInstance(instance, null);
-
-    {
-        const wayland_surface_create_info = vk.WaylandSurfaceCreateInfoKHR{
-            .display = @ptrCast(*vk.wl_display, wayland_display),
-            .surface = @ptrCast(*vk.wl_surface, wayland_surface),
-            .flags = .{},
-        };
-
-        surface = try instance_dispatch.createWaylandSurfaceKHR(
-            instance,
-            &wayland_surface_create_info,
-            null,
-        );
-    }
-    errdefer instance_dispatch.destroySurfaceKHR(instance, surface, null);
-
-    // Find a suitable physical device (GPU/APU) to use
-    // Criteria:
-    //   1. Supports defined list of device extensions. See `device_extensions` above
-    //   2. Has a graphics queue that supports presentation on our selected surface
-    const best_physical_device_opt = outer: {
-        const physical_devices = blk: {
-            var device_count: u32 = 0;
-            if (.success != (try instance_dispatch.enumeratePhysicalDevices(instance, &device_count, null))) {
-                std.log.warn("Failed to query physical device count", .{});
-                return error.PhysicalDeviceQueryFailure;
-            }
-
-            if (device_count == 0) {
-                std.log.warn("No physical devices found", .{});
-                return error.NoDevicesFound;
-            }
-
-            const devices = try allocator.alloc(vk.PhysicalDevice, device_count);
-            _ = try instance_dispatch.enumeratePhysicalDevices(instance, &device_count, devices.ptr);
-
-            break :blk devices;
-        };
-        defer allocator.free(physical_devices);
-
-        for (physical_devices) |device, device_i| {
-            std.log.info("Physical vulkan devices found: {d}", .{physical_devices.len});
-
-            const device_supports_extensions = blk: {
-                var extension_count: u32 = undefined;
-                if (.success != (try instance_dispatch.enumerateDeviceExtensionProperties(device, null, &extension_count, null))) {
-                    std.log.warn("Failed to get device extension property count for physical device index {d}", .{device_i});
-                    continue;
-                }
-
-                const extensions = try allocator.alloc(vk.ExtensionProperties, extension_count);
-                defer allocator.free(extensions);
-
-                if (.success != (try instance_dispatch.enumerateDeviceExtensionProperties(device, null, &extension_count, extensions.ptr))) {
-                    std.log.warn("Failed to load device extension properties for physical device index {d}", .{device_i});
-                    continue;
-                }
-
-                dev_extensions: for (device_extensions) |requested_extension| {
-                    for (extensions) |available_extension| {
-                        // NOTE: We are relying on device_extensions to only contain c strings up to 255 charactors
-                        //       available_extension.extension_name will always be a null terminated string in a 256 char buffer
-                        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VK_MAX_EXTENSION_NAME_SIZE.html
-                        if (std.cstr.cmp(requested_extension, @ptrCast([*:0]const u8, &available_extension.extension_name)) == 0) {
-                            continue :dev_extensions;
-                        }
-                    }
-                    break :blk false;
-                }
-                break :blk true;
-            };
-
-            if (!device_supports_extensions) {
-                continue;
-            }
-
-            var queue_family_count: u32 = 0;
-            instance_dispatch.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, null);
-
-            if (queue_family_count == 0) {
-                continue;
-            }
-
-            const max_family_queues: u32 = 16;
-            if (queue_family_count > max_family_queues) {
-                std.log.warn("Some family queues for selected device ignored", .{});
-            }
-
-            var queue_families: [max_family_queues]vk.QueueFamilyProperties = undefined;
-            instance_dispatch.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, &queue_families);
-
-            std.debug.print("** Queue Families found on device **\n\n", .{});
-            printVulkanQueueFamilies(queue_families[0..queue_family_count], 0);
-
-            for (queue_families[0..queue_family_count]) |queue_family, queue_family_i| {
-                if (queue_family.queue_count <= 0) {
-                    continue;
-                }
-                if (queue_family.queue_flags.graphics_bit) {
-                    const present_support = try instance_dispatch.getPhysicalDeviceSurfaceSupportKHR(
-                        device,
-                        @intCast(u32, queue_family_i),
-                        surface,
-                    );
-                    if (present_support != 0) {
-                        graphics_present_queue_index = @intCast(u32, queue_family_i);
-                        break :outer device;
-                    }
-                }
-            }
-            // If we reach here, we couldn't find a suitable present_queue an will
-            // continue to the next device
-        }
-        break :outer null;
-    };
-
-    if (best_physical_device_opt) |best_physical_device| {
-        physical_device = best_physical_device;
-    } else return error.NoSuitablePhysicalDevice;
-
-    antialias_sample_count = blk: {
-        const physical_device_properties = instance_dispatch.getPhysicalDeviceProperties(physical_device);
-        const sample_counts = physical_device_properties.limits.framebuffer_color_sample_counts;
-
-        std.log.info("Framebuffer color sample counts:", .{});
-        std.log.info("1 bit: {}", .{sample_counts.@"1_bit"});
-        std.log.info("2 bit: {}", .{sample_counts.@"2_bit"});
-        std.log.info("4 bit: {}", .{sample_counts.@"4_bit"});
-        std.log.info("8 bit: {}", .{sample_counts.@"8_bit"});
-        std.log.info("16 bit: {}", .{sample_counts.@"16_bit"});
-        std.log.info("32 bit: {}", .{sample_counts.@"32_bit"});
-        std.log.info("64 bit: {}", .{sample_counts.@"64_bit"});
-
-        //
-        // Choose the highest sample rate from 16 bit
-        // Ignore 32 and 64 bit options
-        //
-
-        if (sample_counts.@"16_bit")
-            break :blk .{ .@"16_bit" = true };
-
-        if (sample_counts.@"8_bit")
-            break :blk .{ .@"8_bit" = true };
-
-        if (sample_counts.@"4_bit")
-            break :blk .{ .@"4_bit" = true };
-
-        if (sample_counts.@"2_bit")
-            break :blk .{ .@"2_bit" = true };
-
-        break :blk .{ .@"1_bit" = true };
-    };
-
-    {
-        const device_create_info = vk.DeviceCreateInfo{
-            .queue_create_info_count = 1,
-            .p_queue_create_infos = @ptrCast([*]vk.DeviceQueueCreateInfo, &vk.DeviceQueueCreateInfo{
-                .queue_family_index = graphics_present_queue_index,
-                .queue_count = 1,
-                .p_queue_priorities = &[1]f32{1.0},
-                .flags = .{},
-            }),
-            .p_enabled_features = &vulkan_config.enabled_device_features,
-            .enabled_extension_count = device_extensions.len,
-            .pp_enabled_extension_names = &device_extensions,
-            .enabled_layer_count = if (enable_validation_layers) validation_layers.len else 0,
-            .pp_enabled_layer_names = if (enable_validation_layers) &validation_layers else undefined,
-            .flags = .{},
-        };
-
-        logical_device = try instance_dispatch.createDevice(
-            physical_device,
-            &device_create_info,
-            null,
-        );
-    }
-
-    device_dispatch = try vulkan_config.DeviceDispatch.load(
-        logical_device,
-        instance_dispatch.dispatch.vkGetDeviceProcAddr,
+    try vulkan_core.init(
+        @ptrCast(*vk.wl_display, wayland_display),
+        @ptrCast(*vk.wl_surface, wayland_surface),
     );
 
-    graphics_present_queue = device_dispatch.getDeviceQueue(
-        logical_device,
-        graphics_present_queue_index,
-        0,
-    );
+    //
+    // Alias for readability
+    //
+    const v_instance = vulkan_core.instance_dispatch;
+    const v_device = vulkan_core.device_dispatch;
 
     // Query and select appropriate surface format for swapchain
 
@@ -1261,7 +856,7 @@ pub fn init(
         // Preferable
         //  - Device local (Memory on the GPU / APU)
 
-        const memory_properties = instance_dispatch.getPhysicalDeviceMemoryProperties(physical_device);
+        const memory_properties = v_instance.getPhysicalDeviceMemoryProperties(vulkan_core.physical_device);
         if (print_vulkan_objects.memory_type_all) {
             std.debug.print("\n** Memory heaps found on system **\n\n", .{});
             printVulkanMemoryHeaps(memory_properties, 0);
@@ -1312,7 +907,7 @@ pub fn init(
     // TODO:
     selected_memory_index = mesh_memory_index;
 
-    const surface_capabilities = try instance_dispatch.getPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface);
+    const surface_capabilities = try v_instance.getPhysicalDeviceSurfaceCapabilitiesKHR(vulkan_core.physical_device, vulkan_core.surface);
 
     if (print_vulkan_objects.surface_abilties) {
         std.debug.print("** Selected surface capabilites **\n\n", .{});
@@ -1357,8 +952,8 @@ pub fn init(
         return error.VulkanSurfaceTransformInvalid;
     }
 
-    swapchain = try device_dispatch.createSwapchainKHR(logical_device, &vk.SwapchainCreateInfoKHR{
-        .surface = surface,
+    swapchain = try v_device.createSwapchainKHR(vulkan_core.logical_device, &vk.SwapchainCreateInfoKHR{
+        .surface = vulkan_core.surface,
         .min_image_count = swapchain_min_image_count,
         .image_format = swapchain_surface_format.format,
         .image_color_space = swapchain_surface_format.color_space,
@@ -1383,12 +978,12 @@ pub fn init(
 
     swapchain_images = blk: {
         var image_count: u32 = undefined;
-        if (.success != (try device_dispatch.getSwapchainImagesKHR(logical_device, swapchain, &image_count, null))) {
+        if (.success != (try v_device.getSwapchainImagesKHR(vulkan_core.logical_device, swapchain, &image_count, null))) {
             return error.FailedToGetSwapchainImagesCount;
         }
 
         var images = try allocator.alloc(vk.Image, image_count);
-        if (.success != (try device_dispatch.getSwapchainImagesKHR(logical_device, swapchain, &image_count, images.ptr))) {
+        if (.success != (try v_device.getSwapchainImagesKHR(vulkan_core.logical_device, swapchain, &image_count, images.ptr))) {
             return error.FailedToGetSwapchainImages;
         }
 
@@ -1398,21 +993,16 @@ pub fn init(
     swapchain_image_views = try allocator.alloc(vk.ImageView, swapchain_images.len);
     try createSwapchainImageViews();
 
-    try createMultiSampledImage(swapchain_extent.width, swapchain_extent.height, mesh_memory_index);
-
-    command_pool = try device_dispatch.createCommandPool(logical_device, &vk.CommandPoolCreateInfo{
-        .queue_family_index = graphics_present_queue_index,
-        .flags = .{},
-    }, null);
+    try render_pass.init(swapchain_extent, swapchain_surface_format.format, selected_memory_index);
 
     {
         const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-            .command_pool = command_pool,
+            .command_pool = vulkan_core.command_pool,
             .level = .primary,
             .command_buffer_count = 1,
         };
-        try device_dispatch.allocateCommandBuffers(
-            logical_device,
+        try v_device.allocateCommandBuffers(
+            vulkan_core.logical_device,
             &command_buffer_allocate_info,
             @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
         );
@@ -1421,24 +1011,23 @@ pub fn init(
     {
         command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain_images.len);
         const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-            .command_pool = command_pool,
+            .command_pool = vulkan_core.command_pool,
             .level = .primary,
             .command_buffer_count = @intCast(u32, command_buffers.len),
         };
-        try device_dispatch.allocateCommandBuffers(
-            logical_device,
+        try v_device.allocateCommandBuffers(
+            vulkan_core.logical_device,
             &command_buffer_allocate_info,
             command_buffers.ptr,
         );
     }
 
-    std.debug.assert(vertices_range_index_begin + vertices_range_size <= memory_size);
-    var mesh_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
+    var mesh_memory = try v_device.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = memory_size,
         .memory_type_index = mesh_memory_index,
     }, null);
 
-    mapped_device_memory = @ptrCast([*]u8, (try device_dispatch.mapMemory(logical_device, mesh_memory, 0, memory_size, .{})).?);
+    mapped_device_memory = @ptrCast([*]u8, (try v_device.mapMemory(vulkan_core.logical_device, mesh_memory, 0, memory_size, .{})).?);
 
     images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
     renders_finished = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
@@ -1455,36 +1044,30 @@ pub fn init(
 
     var i: u32 = 0;
     while (i < max_frames_in_flight) {
-        images_available[i] = try device_dispatch.createSemaphore(logical_device, &semaphore_create_info, null);
-        renders_finished[i] = try device_dispatch.createSemaphore(logical_device, &semaphore_create_info, null);
-        inflight_fences[i] = try device_dispatch.createFence(logical_device, &fence_create_info, null);
+        images_available[i] = try v_device.createSemaphore(vulkan_core.logical_device, &semaphore_create_info, null);
+        renders_finished[i] = try v_device.createSemaphore(vulkan_core.logical_device, &semaphore_create_info, null);
+        inflight_fences[i] = try v_device.createFence(vulkan_core.logical_device, &fence_create_info, null);
         i += 1;
     }
 
     std.debug.assert(swapchain_images.len > 0);
 
-    render_pass = try createRenderPass();
     try createFramebuffers(allocator, screen_dimensions);
 
     std.log.info("Generic pipeline init begin", .{});
     try generic_pipeline.init(
         allocator,
-        device_dispatch,
-        logical_device,
-        render_pass,
-        texture_layer_dimensions,
         mesh_memory_index,
         jobs_command_buffer,
-        graphics_present_queue,
+        vulkan_core.graphics_present_queue,
         @intCast(u32, swapchain_images.len),
         screen_dimensions,
         mesh_memory,
         0, // mesh_offset
         indices_range_size,
         vertices_range_size,
-        command_pool,
+        // command_pool,
         mapped_device_memory,
-        antialias_sample_count,
     );
     std.log.info("Generic pipeline init end", .{});
 
@@ -1532,25 +1115,6 @@ fn printVulkanMemoryHeaps(memory_properties: vk.PhysicalDeviceMemoryProperties, 
     while (heap_i < heap_count) : (heap_i += 1) {
         printVulkanMemoryHeap(memory_properties, heap_i, indent_level);
     }
-}
-
-fn printVulkanQueueFamilies(queue_families: []vk.QueueFamilyProperties, comptime indent_level: u32) void {
-    const print = std.debug.print;
-    const base_indent = "  " ** indent_level;
-    for (queue_families) |queue_family, queue_family_i| {
-        print(base_indent ++ "Queue family index #{d}\n", .{queue_family_i});
-        printVulkanQueueFamily(queue_family, indent_level + 1);
-    }
-}
-
-fn printVulkanQueueFamily(queue_family: vk.QueueFamilyProperties, comptime indent_level: u32) void {
-    const print = std.debug.print;
-    const base_indent = "  " ** indent_level;
-    print(base_indent ++ "Queue count: {d}\n", .{queue_family.queue_count});
-    print(base_indent ++ "Support\n", .{});
-    print(base_indent ++ "  Graphics: {}\n", .{queue_family.queue_flags.graphics_bit});
-    print(base_indent ++ "  Transfer: {}\n", .{queue_family.queue_flags.transfer_bit});
-    print(base_indent ++ "  Compute:  {}\n", .{queue_family.queue_flags.compute_bit});
 }
 
 fn printSurfaceCapabilities(surface_capabilities: vk.SurfaceCapabilitiesKHR, comptime indent_level: u32) void {
