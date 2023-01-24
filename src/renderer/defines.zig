@@ -18,6 +18,11 @@ pub const vertices_range_size = max_texture_quads_per_render * @sizeOf(graphics.
 pub const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericVertex);
 pub const memory_size = indices_range_size + vertices_range_size;
 
+pub const initial_screen_dimensions = geometry.Dimensions2D(u16){
+    .width = 1920,
+    .height = 1080,
+};
+
 /// Determines the memory allocated for storing mesh data
 /// Represents the number of quads that will be able to be drawn
 /// This can be a colored quad, or a textured quad such as a charactor

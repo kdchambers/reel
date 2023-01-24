@@ -44,18 +44,18 @@ pub fn init(
     command_buffer: vk.CommandBuffer,
     graphics_present_queue: vk.Queue,
     swapchain_image_count: u32,
-    initial_viewport_dimensions: geometry.Dimensions2D(u16),
     mesh_memory: vk.DeviceMemory,
     memory_offset: u32,
     indices_range_size: u32,
     vertices_range_size: u32,
-    // command_pool: vk.CommandPool,
     mapped_device_memory: [*]u8,
 ) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
     const command_pool = vulkan_core.command_pool;
     const texture_dimensions = defines.texture_layer_dimensions;
+
+    const initial_viewport_dimensions = defines.initial_screen_dimensions;
 
     {
         const image_create_info = vk.ImageCreateInfo{

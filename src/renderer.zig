@@ -821,12 +821,13 @@ fn selectSurfaceFormat(
 
 pub fn init(
     allocator: std.mem.Allocator,
-    screen_dimensions: geometry.Dimensions2D(u16),
     wayland_display: *Display,
     wayland_surface: *Surface,
     atlas: *Atlas,
 ) !void {
     texture_atlas = atlas;
+
+    const screen_dimensions = defines.initial_screen_dimensions;
 
     try vulkan_core.init(
         @ptrCast(*vk.wl_display, wayland_display),
@@ -1061,7 +1062,6 @@ pub fn init(
         jobs_command_buffer,
         vulkan_core.graphics_present_queue,
         @intCast(u32, swapchain_images.len),
-        screen_dimensions,
         mesh_memory,
         0, // mesh_offset
         indices_range_size,
