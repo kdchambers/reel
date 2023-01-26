@@ -73,6 +73,8 @@ pub var is_mouse_in_screen: bool = true;
 pub var is_shutdown_requested: bool = false;
 pub var draw_window_decorations_requested: bool = false;
 pub var frame_start_ns: i128 = undefined;
+pub var is_fullscreen: bool = true;
+pub var is_draw_requested: bool = false;
 
 //
 // Internal Variables
@@ -292,6 +294,27 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
                 screen_dimensions.height = @intCast(u16, configure.height);
                 screen_scale.vertical = 2.0 / @intToFloat(f64, screen_dimensions.height);
             }
+
+            const state_list = configure.states.slice(xdg.Toplevel.State);
+            is_fullscreen = false;
+            for (state_list) |state| {
+                std.log.info("State: {}", .{state});
+                if (state == .fullscreen) {
+                    is_draw_requested = true;
+                    //
+                    // TODO: This is kind of a hack but we need to force a redraw
+                    //       when the screen is made fullscreen
+                    //
+                    awaiting_frame = true;
+                    is_fullscreen = true;
+                }
+            }
+            frame_callback.destroy();
+            frame_callback = surface.frame() catch |err| {
+                std.log.err("Failed to create new wayland frame -> {}", .{err});
+                return;
+            };
+            frame_callback.setListener(*const void, frameListener, &{});
         },
         .close => close_requested.* = true,
     }
@@ -486,7 +509,7 @@ fn registryListener(registry_ref: *wl.Registry, event: wl.Registry.Event, _: *co
             } else if (std.cstr.cmp(global.interface, wlr.ScreencopyManagerV1.getInterface().name) == 0) {
                 screencopy_manager = registry_ref.bind(global.name, wlr.ScreencopyManagerV1, 3) catch return;
             } else if (std.cstr.cmp(global.interface, wl.Output.getInterface().name) == 0) {
-                output_opt = registry_ref.bind(global.name, wl.Output, 3) catch return;
+                output_opt = registry_ref.bind(global.name, wl.Output, 2) catch return;
             } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
                 //
                 // TODO: Negociate with compositor how the window decorations will be drawn
