@@ -58,6 +58,26 @@ pub fn build(b: *Builder) void {
     exe.linkSystemLibrary("wayland-cursor");
 
     //
+    // Pipewire Screencast
+    //
+    // TODO: Remove header dependencies
+    const flags = [_][]const u8{
+        "-I/usr/include/pipewire-0.3",
+        "-I/usr/include/spa-0.2",
+    };
+    exe.addCSourceFile("src/screencast_backends/pipewire/pipewire_stream_extra.c", &flags);
+
+    //
+    // TODO: Remove header dependencies
+    // TODO: Use pkg-config when linking dbus and pipewire
+    //
+    exe.addIncludePath("/usr/include/dbus-1.0/");
+    exe.addIncludePath("/usr/include/pipewire-0.3/");
+    exe.addIncludePath("/usr/include/spa-0.2/");
+    exe.linkSystemLibrary("dbus-1");
+    exe.linkSystemLibrary("pipewire-0.3");
+
+    //
     // FFMPEG
     //
     exe.linkSystemLibrary("avcodec");
