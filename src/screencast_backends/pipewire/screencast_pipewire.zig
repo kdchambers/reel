@@ -28,6 +28,16 @@ const pw = @cImport({
 extern fn parseStreamFormat(params: [*c]const pw.spa_pod) callconv(.C) StreamFormat;
 extern fn buildPipewireParams(builder: *pw.spa_pod_builder) callconv(.C) *pw.spa_pod;
 
+const bus_name = "org.freedesktop.portal.Desktop";
+const object_path = "/org/freedesktop/portal/desktop";
+const interface_name = "org.freedesktop.portal.ScreenCast";
+
+pub const InitErrorSet = error{
+    OutOfMemory,
+    DBusOutOfMemory,
+    CreateThreadFail,
+};
+
 const SourceTypeFlags = packed struct(u32) {
     monitor: bool = false,
     window: bool = false,
@@ -88,10 +98,35 @@ var onOpenErrorCallback: *const screencast.OpenOnErrorFn = undefined;
 var init_thread: std.Thread = undefined;
 var once: bool = true;
 
-pub inline fn open(
+pub fn createInterface() screencast.Interface {
+    return .{
+        .requestOpen = open,
+        .state = state,
+        .nextFrameImage = nextFrameImage,
+        .pause = pause,
+        .unpause = unpause,
+        .close = close,
+    };
+}
+
+pub fn detectSupport() bool {
+    var err: dbus.Error = undefined;
+    dbus.errorInit(&err);
+    var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
+    if (dbus.errorIsSet(&err)) {
+        std.log.err("Failed to open a dbus connection. Error: '{s}'", .{
+            err.message,
+        });
+        return false;
+    }
+    const source_mode_flags = getProperty(u32, connection, "AvailableSourceTypes") catch return false;
+    return source_mode_flags.window;
+}
+
+pub fn open(
     on_success_cb: *const screencast.OpenOnSuccessFn,
     on_error_cb: *const screencast.OpenOnErrorFn,
-) !void {
+) InitErrorSet!void {
     onOpenSuccessCallback = on_success_cb;
     onOpenErrorCallback = on_error_cb;
 
@@ -103,30 +138,30 @@ pub inline fn open(
         std.log.err("Failed to create thread to open pipewire screencast. Error: {}", .{
             err,
         });
-        return error.CreateThreadFailed;
+        return error.CreateThreadFail;
     };
 }
 
-pub inline fn close() void {
+pub fn close() void {
     teardownPipewire();
     stream_state = .closed;
 }
 
-pub inline fn pause() void {
+pub fn pause() void {
     std.debug.assert(stream_state == .open);
     // TODO: Handle return
     _ = pw.pw_stream_set_active(stream, false);
     stream_state = .paused;
 }
 
-pub inline fn unpause() void {
+pub fn unpause() void {
     std.debug.assert(stream_state == .paused);
     // TODO: Handle return
     _ = pw.pw_stream_set_active(stream, true);
     stream_state = .open;
 }
 
-pub inline fn nextFrameImage() ?screencast.FrameImage {
+pub fn nextFrameImage() ?screencast.FrameImage {
     return screencast.FrameImage{
         .pixels = pixel_buffer.ptr,
         .width = @intCast(u16, stream_format.width),
@@ -134,7 +169,7 @@ pub inline fn nextFrameImage() ?screencast.FrameImage {
     };
 }
 
-pub inline fn state() screencast.State {
+pub fn state() screencast.State {
     return stream_state;
 }
 
@@ -155,9 +190,6 @@ fn generateSessionToken(buffer: []u8) ![*:0]const u8 {
 pub fn getProperty(
     comptime T: type,
     connection: *dbus.Connection,
-    bus_name: [*:0]const u8,
-    object_path: [*:0]const u8,
-    interface_name: [*:0]const u8,
     property_name: [*:0]const u8,
 ) !T {
     var err: dbus.Error = undefined;
@@ -328,9 +360,6 @@ fn pollForResponse(
 
 fn createSession(
     connection: *dbus.Connection,
-    bus_name: [*:0]const u8,
-    object_path: [*:0]const u8,
-    interface_name: [*:0]const u8,
 ) ![*:0]const u8 {
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
@@ -474,7 +503,6 @@ fn createSession(
 
 fn closeSession(
     connection: *dbus.Connection,
-    bus_name: [*:0]const u8,
     session: [*:0]const u8,
 ) !void {
     var err: dbus.Error = undefined;
@@ -510,9 +538,6 @@ fn closeSession(
 
 fn setSource(
     connection: *dbus.Connection,
-    bus_name: [*:0]const u8,
-    object_path: [*:0]const u8,
-    interface_name: [*:0]const u8,
     session_handle: [*:0]const u8,
     request_suffix: [*:0]const u8,
 ) ![*:0]const u8 {
@@ -661,9 +686,6 @@ fn setSource(
 
 fn startStream(
     connection: *dbus.Connection,
-    bus_name: [*:0]const u8,
-    object_path: [*:0]const u8,
-    interface_name: [*:0]const u8,
     session_handle: [*:0]const u8,
     request_suffix: [*:0]const u8,
 ) ![*:0]const u8 {
@@ -786,9 +808,6 @@ fn startStream(
 
 fn openPipewireRemote(
     connection: *dbus.Connection,
-    bus_name: [*:0]const u8,
-    object_path: [*:0]const u8,
-    interface_name: [*:0]const u8,
     session_handle: [*:0]const u8,
 ) !i32 {
     var err: dbus.Error = undefined;
@@ -867,9 +886,6 @@ pub fn init() !void {
         std.debug.assert(c.DBUS_BUS_STARTER == @enumToInt(dbus.BusType.starter));
     }
 
-    const bus_name = "org.freedesktop.portal.Desktop";
-    const object_path = "/org/freedesktop/portal/desktop";
-    const interface_name = "org.freedesktop.portal.ScreenCast";
     const property_name = "AvailableCursorModes";
     _ = property_name;
 
@@ -877,13 +893,6 @@ pub fn init() !void {
     dbus.errorInit(&err);
 
     var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
-
-    // orelse {
-    //     std.log.err("dbus_client: dbus_bus_get failed. Error: {s}", .{
-    //         err.message,
-    //     });
-    //     return error.CreateDBusConnectionFail;
-    // };
 
     const connection_name_max_size = 16;
     const connection_name = blk: {
@@ -936,7 +945,7 @@ pub fn init() !void {
 
     addSignalMatch(connection);
 
-    const create_session_request_path = try createSession(connection, bus_name, object_path, interface_name);
+    const create_session_request_path = try createSession(connection);
     _ = create_session_request_path;
 
     const session_handle_ref = try pollForResponse(connection);
@@ -968,9 +977,6 @@ pub fn init() !void {
 
     const select_source_request = try setSource(
         connection,
-        bus_name,
-        object_path,
-        interface_name,
         session_handle,
         select_source_request_suffix,
     );
@@ -1082,9 +1088,6 @@ pub fn init() !void {
     //
     const start_stream_request = try startStream(
         connection,
-        bus_name,
-        object_path,
-        interface_name,
         session_handle,
         start_stream_request_suffix,
     );
@@ -1135,9 +1138,6 @@ pub fn init() !void {
 
     const pipewire_fd = try openPipewireRemote(
         connection,
-        bus_name,
-        object_path,
-        interface_name,
         session_handle,
     );
 

@@ -11,7 +11,7 @@ const wayland_client = @import("wayland_client.zig");
 const style = @import("app_styling.zig");
 const geometry = @import("geometry.zig");
 const event_system = @import("event_system.zig");
-const screencast = @import("screencast_backends/pipewire/screencast_pipewire.zig");
+const screencast = @import("screencast.zig");
 
 const fontana = @import("fontana");
 const Atlas = fontana.Atlas;
@@ -178,6 +178,7 @@ var general_allocator: std.mem.Allocator = undefined;
 
 var app_runtime_start: i128 = undefined;
 var top_reserved_pixels: u16 = 0;
+var screencast_interface: ?screencast.Interface = null;
 
 pub fn main() !void {
     app_runtime_start = std.time.nanoTimestamp();
@@ -251,6 +252,11 @@ pub fn init() !void {
         &wayland_client.screen_dimensions,
         &wayland_client.is_mouse_in_screen,
     );
+
+    screencast_interface = screencast.createBestInterface();
+    if (screencast_interface == null) {
+        std.log.warn("No screencast backends detected", .{});
+    }
 }
 
 fn deinit() void {
@@ -313,114 +319,115 @@ fn appLoop(allocator: std.mem.Allocator) !void {
     while (!wayland_client.is_shutdown_requested) {
         app_loop_iteration += 1;
 
-        const screencast_state = screencast.state();
-
-        if (enable_preview_checkbox) |checkbox| {
-            const checkbox_state = checkbox.state();
-            if (checkbox_state.left_click_release) {
-                enable_preview = !enable_preview;
-                if (enable_preview) {
-                    //
-                    // Open or Resume preview
-                    //
-                    std.debug.assert(screencast_state != .closed);
-                    std.debug.assert(screencast_state != .open);
-                    switch (screencast_state) {
-                        .paused => screencast.unpause(),
-                        .uninitialized => try screencast.open(
-                            onScreenCaptureSuccess,
-                            onScreenCaptureError,
-                        ),
-                        else => {},
-                    }
-                } else {
-                    //
-                    // Pause preview
-                    //
-                    std.debug.assert(screencast_state == .open);
-                    screencast.pause();
-                }
-                is_draw_required = true;
-                std.log.info("Enable preview: {}", .{enable_preview});
-            }
-        }
-
-        if (wayland_client.awaiting_frame and screencast_state == .open) {
-            if (frames_presented_count != last_preview_update_frame_index) {
-                if (screencast.nextFrameImage()) |screen_capture| {
-                    last_preview_update_frame_index = frames_presented_count;
-                    var gpu_texture = try renderer.textureGet();
-
-                    //
-                    // TODO: Not sure if this can happen, but handle dimensions
-                    //       changing mid-stream
-                    //
-                    std.debug.assert((preview_dimensions.width * 4) == screen_capture.width);
-                    std.debug.assert((preview_dimensions.height * 4) == screen_capture.height);
-
-                    var src_pixels = screen_capture.pixels;
-                    var dst_pixels = gpu_texture.pixels;
-
-                    const convert_image_start = std.time.nanoTimestamp();
-
-                    const src_stride: usize = screen_capture.width * 4;
-                    var y: usize = 0;
-                    var y_base: usize = 0;
-                    while (y < preview_dimensions.height) : (y += 1) {
-                        var x: usize = 0;
-                        while (x < preview_dimensions.width) : (x += 1) {
-                            //
-                            // Combine a block of 4 pixels into using an average sum
-                            //
-                            const index_hi = (x * 4) + y_base;
-                            const index_lo = index_hi + screen_capture.width;
-
-                            const c0: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 0]);
-                            const c1: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 1]);
-                            const c2: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 0]);
-                            const c3: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 1]);
-
-                            const out_i = c0 + c1 + c2 + c3;
-                            var out_f = @Vector(4, f32){
-                                @intToFloat(f32, out_i[0]),
-                                @intToFloat(f32, out_i[1]),
-                                @intToFloat(f32, out_i[2]),
-                                @intToFloat(f32, out_i[3]),
-                            };
-
-                            //
-                            // NOTE: Have noticed substancial performance loss here, switching to mult helps
-                            //       @intToFloat(f32, rgb) / 255) / 4.0
-                            //
-                            const mult = comptime (1.0 / 4.0) * (1.0 / 255.0);
-                            const mult_vec = @Vector(4, f32){ mult, mult, mult, 1.0 };
-
-                            out_f *= mult_vec;
-
-                            const pixel = graphics.RGBA(f32){
-                                .r = out_f[0],
-                                .g = out_f[1],
-                                .b = out_f[2],
-                                .a = 1.0,
-                            };
-
-                            const dst_x = x + preview_reserved_texture_extent.x;
-                            const dst_y = y + preview_reserved_texture_extent.y;
-                            dst_pixels[dst_x + (dst_y * gpu_texture.width)] = pixel;
+        if (screencast_interface) |interface| {
+            const screencast_state = interface.state();
+            if (enable_preview_checkbox) |checkbox| {
+                const checkbox_state = checkbox.state();
+                if (checkbox_state.left_click_release) {
+                    enable_preview = !enable_preview;
+                    if (enable_preview) {
+                        //
+                        // Open or Resume preview
+                        //
+                        std.debug.assert(screencast_state != .closed);
+                        std.debug.assert(screencast_state != .open);
+                        switch (screencast_state) {
+                            .paused => interface.unpause(),
+                            .uninitialized => try interface.requestOpen(
+                                onScreenCaptureSuccess,
+                                onScreenCaptureError,
+                            ),
+                            else => {},
                         }
-                        y_base += src_stride;
+                    } else {
+                        //
+                        // Pause preview
+                        //
+                        std.debug.assert(screencast_state == .open);
+                        interface.pause();
                     }
+                    is_draw_required = true;
+                    std.log.info("Enable preview: {}", .{enable_preview});
+                }
+            }
 
-                    const convert_image_end = std.time.nanoTimestamp();
-                    const convert_image_duration = @intCast(u64, convert_image_end - convert_image_start);
-                    _ = convert_image_duration;
+            if (wayland_client.awaiting_frame and screencast_state == .open) {
+                if (frames_presented_count != last_preview_update_frame_index) {
+                    if (interface.nextFrameImage()) |screen_capture| {
+                        last_preview_update_frame_index = frames_presented_count;
+                        var gpu_texture = try renderer.textureGet();
 
-                    // std.log.info("converted image in {s}", .{std.fmt.fmtDuration(convert_image_duration)});
+                        //
+                        // TODO: Not sure if this can happen, but handle dimensions
+                        //       changing mid-stream
+                        //
+                        std.debug.assert((preview_dimensions.width * 4) == screen_capture.width);
+                        std.debug.assert((preview_dimensions.height * 4) == screen_capture.height);
 
-                    try renderer.textureCommit();
-                    is_render_requested = true;
-                } else {
-                    std.log.info("app: Screen capture frame not ready", .{});
+                        var src_pixels = screen_capture.pixels;
+                        var dst_pixels = gpu_texture.pixels;
+
+                        const convert_image_start = std.time.nanoTimestamp();
+
+                        const src_stride: usize = screen_capture.width * 4;
+                        var y: usize = 0;
+                        var y_base: usize = 0;
+                        while (y < preview_dimensions.height) : (y += 1) {
+                            var x: usize = 0;
+                            while (x < preview_dimensions.width) : (x += 1) {
+                                //
+                                // Combine a block of 4 pixels into using an average sum
+                                //
+                                const index_hi = (x * 4) + y_base;
+                                const index_lo = index_hi + screen_capture.width;
+
+                                const c0: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 0]);
+                                const c1: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 1]);
+                                const c2: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 0]);
+                                const c3: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 1]);
+
+                                const out_i = c0 + c1 + c2 + c3;
+                                var out_f = @Vector(4, f32){
+                                    @intToFloat(f32, out_i[0]),
+                                    @intToFloat(f32, out_i[1]),
+                                    @intToFloat(f32, out_i[2]),
+                                    @intToFloat(f32, out_i[3]),
+                                };
+
+                                //
+                                // NOTE: Have noticed substancial performance loss here, switching to mult helps
+                                //       @intToFloat(f32, rgb) / 255) / 4.0
+                                //
+                                const mult = comptime (1.0 / 4.0) * (1.0 / 255.0);
+                                const mult_vec = @Vector(4, f32){ mult, mult, mult, 1.0 };
+
+                                out_f *= mult_vec;
+
+                                const pixel = graphics.RGBA(f32){
+                                    .r = out_f[0],
+                                    .g = out_f[1],
+                                    .b = out_f[2],
+                                    .a = 1.0,
+                                };
+
+                                const dst_x = x + preview_reserved_texture_extent.x;
+                                const dst_y = y + preview_reserved_texture_extent.y;
+                                dst_pixels[dst_x + (dst_y * gpu_texture.width)] = pixel;
+                            }
+                            y_base += src_stride;
+                        }
+
+                        const convert_image_end = std.time.nanoTimestamp();
+                        const convert_image_duration = @intCast(u64, convert_image_end - convert_image_start);
+                        _ = convert_image_duration;
+
+                        // std.log.info("converted image in {s}", .{std.fmt.fmtDuration(convert_image_duration)});
+
+                        try renderer.textureCommit();
+                        is_render_requested = true;
+                    } else {
+                        std.log.info("app: Screen capture frame not ready", .{});
+                    }
                 }
             }
         }
@@ -484,9 +491,11 @@ fn appLoop(allocator: std.mem.Allocator) !void {
         }
     }
 
-    const screencast_state = screencast.state();
-    if (screencast_state != .uninitialized and screencast_state != .closed) {
-        screencast.close();
+    if (screencast_interface) |interface| {
+        const screencast_state = interface.state();
+        if (screencast_state != .uninitialized and screencast_state != .closed) {
+            interface.close();
+        }
     }
 
     const app_end = std.time.nanoTimestamp();
@@ -688,9 +697,11 @@ fn draw(allocator: std.mem.Allocator) !void {
     }
 
     try drawScreenCaptureBackground();
-    const screencast_state = screencast.state();
-    if (screencast_state == .open) {
-        try drawScreenCapture();
+    if (screencast_interface) |interface| {
+        const screencast_state = interface.state();
+        if (screencast_state == .open) {
+            try drawScreenCapture();
+        }
     }
 
     if (record_button_opt == null) {
