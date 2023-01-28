@@ -325,8 +325,6 @@ fn createSession(
     const request_id = try generateRequestToken(request_buffer[0..]);
     const session_id = try generateSessionToken(session_buffer[0..]);
 
-    std.log.info("Generated ids: {s} {s}", .{ request_id, session_id });
-
     var root_iter: dbus.MessageIter = undefined;
     dbus.messageIterInitAppend(query_message, &root_iter);
 
@@ -340,8 +338,6 @@ fn createSession(
     var array_iter: dbus.MessageIter = undefined;
     if (dbus.messageIterOpenContainer(&root_iter, c.DBUS_TYPE_ARRAY, &signature, &array_iter) != 1)
         return error.WriteDictFail;
-
-    std.log.info("Writing dicts", .{});
 
     const handle_token_option_label: [*:0]const u8 = "handle_token";
     const session_handle_token_option_label: [*:0]const u8 = "session_handle_token";
@@ -510,8 +506,6 @@ fn setSource(
     // Write parameters
     //
 
-    std.log.info("handle token1", .{});
-
     if (dbus.messageAppendArgs(
         request,
         c.DBUS_TYPE_OBJECT_PATH,
@@ -519,8 +513,6 @@ fn setSource(
         c.DBUS_TYPE_INVALID,
     ) != 1)
         return error.WriteRequestFail;
-
-    std.log.info("handle token2", .{});
 
     var root_iter: dbus.MessageIter = undefined;
     dbus.messageIterInitAppend(request, &root_iter);
@@ -535,8 +527,6 @@ fn setSource(
     var array_iter: dbus.MessageIter = undefined;
     if (dbus.messageIterOpenContainer(&root_iter, c.DBUS_TYPE_ARRAY, &signature, &array_iter) != 1)
         return error.WriteDictFail;
-
-    std.log.info("handle token", .{});
 
     //
     // Open Dict Entry [0] - handle_token s
@@ -571,8 +561,6 @@ fn setSource(
         if (dbus.messageIterCloseContainer(&array_iter, &dict_entry_iter) != 1)
             return error.CloseContainerFail;
     }
-
-    std.log.info("Writing types", .{});
 
     //
     // Open Dict Entry [1] - types u
@@ -635,15 +623,11 @@ fn setSource(
     var reply_iter: dbus.MessageIter = undefined;
     _ = dbus.messageIterInit(response, &reply_iter);
 
-    std.log.info("Getting response", .{});
-
     if (dbus.messageIterGetArgType(&reply_iter) != c.DBUS_TYPE_OBJECT_PATH) {
         return error.ReplyInvalidType;
     }
     var request_handle: [*:0]const u8 = undefined;
     dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &request_handle));
-
-    std.log.info("SetSource: {s}", .{request_handle});
 
     return request_handle;
 }
@@ -770,7 +754,6 @@ fn startStream(
     var request_handle: [*:0]const u8 = undefined;
     dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &request_handle));
 
-    std.log.info("Start: {s}", .{request_handle});
     return request_handle;
 }
 
@@ -861,6 +844,7 @@ pub fn init() !void {
     const object_path = "/org/freedesktop/portal/desktop";
     const interface_name = "org.freedesktop.portal.ScreenCast";
     const property_name = "AvailableCursorModes";
+    _ = property_name;
 
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
@@ -892,7 +876,6 @@ pub fn init() !void {
     };
     const connection_name_len = std.mem.len(connection_name);
 
-    std.log.info("Connection name: {s}", .{connection_name});
     if (connection_name_len >= connection_name_max_size) {
         std.log.err("dbus_client: Connection name '{s}' exceeds maximum size of {d}", .{
             connection_name,
@@ -916,22 +899,21 @@ pub fn init() !void {
     };
     std.debug.assert(std.mem.len(portal_connection_name) == connection_name_len);
 
-    std.log.info("Portal connection name: {s}", .{portal_connection_name});
-
-    const cursor_flags = try getProperty(u32, connection, bus_name, object_path, interface_name, property_name);
-    std.log.info("Cursor flags: {d}", .{cursor_flags});
-
-    const source_mode_flags = try getProperty(u32, connection, bus_name, object_path, interface_name, "AvailableSourceTypes");
-    std.log.info("Source types: {d}", .{source_mode_flags});
+    //
+    // Check support
+    //
+    // const cursor_flags = try getProperty(u32, connection, bus_name, object_path, interface_name, property_name);
+    // _ = cursor_flags;
+    // const source_mode_flags = try getProperty(u32, connection, bus_name, object_path, interface_name, "AvailableSourceTypes");
+    // _ = source_mode_flags;
 
     addSignalMatch(connection);
 
     const create_session_request_path = try createSession(connection, bus_name, object_path, interface_name);
-    std.log.info("Request path for CreateSession Request: {s}", .{create_session_request_path});
+    _ = create_session_request_path;
 
     const session_handle_ref = try pollForResponse(connection);
     const session_handle = try allocator.dupeZ(u8, std.mem.span(session_handle_ref));
-    std.log.info("Session handle: {s}", .{session_handle});
 
     var request_suffix_buffer: [64]u8 = undefined;
     const select_source_request_suffix = try generateRequestToken(&request_suffix_buffer);
@@ -957,8 +939,6 @@ pub fn init() !void {
         dbus.connectionFlush(connection);
     }
 
-    std.log.info("Selecting sources", .{});
-
     const select_source_request = try setSource(
         connection,
         bus_name,
@@ -967,8 +947,6 @@ pub fn init() !void {
         session_handle,
         select_source_request_suffix,
     );
-
-    std.log.info("select_source_request: {s}", .{select_source_request});
 
     //
     // Assert the returned Request path matches that we generated beforehand
@@ -1033,7 +1011,6 @@ pub fn init() !void {
     };
 
     dbus.busRemoveMatch(connection, select_source_match_rule, null);
-    std.log.info("select reponse response: done", .{});
 
     //
     // Extract payload from SelectSources Response
@@ -1073,8 +1050,6 @@ pub fn init() !void {
         dbus.connectionFlush(connection);
     }
 
-    std.log.info("Starting stream..", .{});
-
     //
     // Start the stream
     //
@@ -1103,7 +1078,7 @@ pub fn init() !void {
             const response = dbus.connectionPopMessage(connection) orelse continue;
 
             const response_path = dbus.messageGetPath(response);
-            std.log.info("Response path: {s}", .{response_path});
+            _ = response_path;
 
             const is_match = (1 == dbus.messageIsSignal(
                 response,
@@ -1126,14 +1101,10 @@ pub fn init() !void {
     };
 
     dbus.busRemoveMatch(connection, start_stream_match_rule, null);
-    std.log.info("start_stream_response: done", .{});
 
     const start_response_signature = dbus.messageGetSignature(start_stream_response);
-    std.log.info("Signature: {s}", .{start_response_signature});
-
+    _ = start_response_signature;
     const start_responses = try extractMessageStart(connection, start_stream_response);
-
-    std.log.info("Session handle: {s}", .{session_handle});
 
     const pipewire_fd = try openPipewireRemote(
         connection,
@@ -1142,8 +1113,6 @@ pub fn init() !void {
         interface_name,
         session_handle,
     );
-
-    std.log.info("Doing pipewire things", .{});
 
     //
     // Welcome to Pipewire land. Connect and get the stream setup
@@ -1229,16 +1198,12 @@ pub fn init() !void {
     stream_state = .init_pending;
 
     pw.pw_thread_loop_unlock(thread_loop);
-
-    std.time.sleep(std.time.ns_per_s * 60);
-
-    std.log.info("Terminating", .{});
 }
 
 fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
     const buffer = pw.pw_stream_dequeue_buffer(stream);
     std.debug.assert(stream_state == .open);
-    std.debug.print("New buffer: {d}\n", .{buffer.*.buffer.*.datas[0].chunk.*.size});
+    // std.debug.print("New buffer: {d}\n", .{buffer.*.buffer.*.datas[0].chunk.*.size});
     @memcpy(
         @ptrCast([*]u8, pixel_buffer.ptr),
         @ptrCast([*]const u8, buffer.*.buffer.*.datas[0].data.?),
@@ -1248,23 +1213,18 @@ fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
 }
 
 fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod) callconv(.C) void {
-    std.log.warn("Param changed callback with id: {d}", .{id});
     if (id == pw.SPA_PARAM_Format) {
         stream_state = .init_failed;
-        std.log.info("Format change", .{});
         stream_format = parseStreamFormat(params);
-        std.log.info("Format: {d}", .{stream_format.format});
-        std.log.info("Dimensions: {d}x{d}", .{
-            stream_format.width,
-            stream_format.height,
-        });
         const pixel_count = @intCast(usize, stream_format.width) * stream_format.height;
         buffer_size = pixel_count * @sizeOf(screencast.PixelType);
         pixel_buffer = allocator.alloc(screencast.PixelType, @sizeOf(screencast.PixelType) * pixel_count) catch {
             std.log.err("screencast_pipewire: Failed to allocator pixel buffer", .{});
+            onOpenErrorCallback();
             return;
         };
         stream_state = .open;
+        onOpenSuccessCallback(stream_format.width, stream_format.height);
     }
 }
 
@@ -1306,8 +1266,6 @@ fn extractMessageStart(
     var start_stream_response_iter: dbus.MessageIter = undefined;
     _ = dbus.messageIterInit(start_stream_response, &start_stream_response_iter);
 
-    std.log.info("Arg type: {c}", .{@intCast(u8, dbus.messageIterGetArgType(&start_stream_response_iter))});
-
     var entry = &start_response_buffer[0];
 
     if (dbus.messageIterGetArgType(&start_stream_response_iter) != c.DBUS_TYPE_UINT32) {
@@ -1334,7 +1292,6 @@ fn extractMessageStart(
 
     var option_label: [*:0]const u8 = undefined;
     dbus.messageIterGetBasic(&root_dict_iter, @ptrCast(*void, &option_label));
-    std.log.info("Dict name: {s}", .{option_label});
 
     _ = dbus.messageIterNext(&root_dict_iter);
     next_type = dbus.messageIterGetArgType(&root_dict_iter);
@@ -1379,7 +1336,6 @@ fn extractMessageStart(
                 next_type = dbus.messageIterGetArgType(&array_dict_entry_iter);
                 if (next_type == c.DBUS_TYPE_STRING) {
                     dbus.messageIterGetBasic(&array_dict_entry_iter, @ptrCast(*void, &option_label));
-                    std.log.info("Entry: {s}", .{option_label});
                     if (c.strncmp("size", option_label, 4) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
                         next_type = dbus.messageIterGetArgType(&array_dict_entry_iter);
@@ -1402,11 +1358,6 @@ fn extractMessageStart(
                         std.debug.assert(next_type == c.DBUS_TYPE_INT32);
 
                         dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &entry.dimensions[1]));
-
-                        std.log.info("Stream dimensions: {d} {d}", .{
-                            entry.dimensions[0],
-                            entry.dimensions[1],
-                        });
                     }
                     if (c.strncmp("id", option_label, 2) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
@@ -1419,7 +1370,6 @@ fn extractMessageStart(
                         std.debug.assert(next_type == c.DBUS_TYPE_STRING);
 
                         dbus.messageIterGetBasic(&id_variant_iter, @ptrCast(*void, &entry.id));
-                        std.log.info("Stream ID: {s}", .{entry.id});
                     }
                 }
 
@@ -1435,10 +1385,7 @@ fn extractMessageStart(
             break;
         _ = dbus.messageIterNext(&array_iter);
     }
-
     dbus.messageUnref(start_stream_response);
-
-    std.log.info("Start response done", .{});
 
     return start_response_buffer[0];
 }

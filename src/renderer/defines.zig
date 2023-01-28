@@ -19,8 +19,8 @@ pub const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericV
 pub const memory_size = indices_range_size + vertices_range_size;
 
 pub const initial_screen_dimensions = geometry.Dimensions2D(u16){
-    .width = 1920,
-    .height = 1080,
+    .width = 1040,
+    .height = 640,
 };
 
 /// Determines the memory allocated for storing mesh data

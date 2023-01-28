@@ -30,15 +30,6 @@ pub fn init(
         const physical_device_properties = vulkan_core.instance_dispatch.getPhysicalDeviceProperties(vulkan_core.physical_device);
         const sample_counts = physical_device_properties.limits.framebuffer_color_sample_counts;
 
-        std.log.info("Framebuffer color sample counts:", .{});
-        std.log.info("1 bit: {}", .{sample_counts.@"1_bit"});
-        std.log.info("2 bit: {}", .{sample_counts.@"2_bit"});
-        std.log.info("4 bit: {}", .{sample_counts.@"4_bit"});
-        std.log.info("8 bit: {}", .{sample_counts.@"8_bit"});
-        std.log.info("16 bit: {}", .{sample_counts.@"16_bit"});
-        std.log.info("32 bit: {}", .{sample_counts.@"32_bit"});
-        std.log.info("64 bit: {}", .{sample_counts.@"64_bit"});
-
         //
         // Choose the highest sample rate from 16 bit
         // Ignore 32 and 64 bit options

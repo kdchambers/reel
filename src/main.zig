@@ -4,14 +4,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
-const vulkan_config = @import("vulkan_config.zig");
 const linux = std.os.linux;
 const img = @import("zigimg");
-const audio = @import("audio.zig");
+// const audio = @import("audio.zig");
 const wayland_client = @import("wayland_client.zig");
 const style = @import("app_styling.zig");
 const geometry = @import("geometry.zig");
 const event_system = @import("event_system.zig");
+const screencast = @import("screencast_backends/pipewire/screencast_pipewire.zig");
 
 const fontana = @import("fontana");
 const Atlas = fontana.Atlas;
@@ -34,10 +34,6 @@ const ImageButton = widget.ImageButton;
 
 const texture_layer_dimensions = renderer.texture_layer_dimensions;
 
-const clib = @cImport({
-    @cInclude("dlfcn.h");
-});
-
 /// Change this to force the log level. Otherwise it is determined by release mode
 pub const log_level: std.log.Level = .info;
 
@@ -52,6 +48,8 @@ const window_decorations = struct {
         const color_hovered = graphics.RGBA(f32).fromInt(u8, 180, 180, 180, 255);
     };
 };
+
+var draw_window_decorations_requested: bool = true;
 
 /// Color to use for icon images
 const icon_color = graphics.RGB(f32).fromInt(200, 200, 200);
@@ -169,16 +167,21 @@ const TexturePixelBaseType = u16;
 const TextureNormalizedBaseType = f32;
 
 var record_button_opt: ?Button = null;
-var image_button_opt: ?ImageButton = null;
-var add_icon_opt: ?renderer.ImageHandle = null;
+// var image_button_opt: ?ImageButton = null;
+// var add_icon_opt: ?renderer.ImageHandle = null;
 
 var image_button_background_color = graphics.RGBA(f32){ .r = 0.3, .g = 0.3, .b = 0.3, .a = 1.0 };
-var audio_input_capture: audio.pulse.InputCapture = undefined;
+// var audio_input_capture: audio.pulse.InputCapture = undefined;
 
 var stdlib_gpa: if (builtin.mode == .Debug) std.heap.GeneralPurposeAllocator(.{}) else void = .{};
 var general_allocator: std.mem.Allocator = undefined;
 
+var app_runtime_start: i128 = undefined;
+var top_reserved_pixels: u16 = 0;
+
 pub fn main() !void {
+    app_runtime_start = std.time.nanoTimestamp();
+
     try init();
     try appLoop(general_allocator);
     deinit();
@@ -187,11 +190,14 @@ pub fn main() !void {
 pub fn init() !void {
     general_allocator = if (builtin.mode == .Debug) stdlib_gpa.allocator() else std.heap.c_allocator;
 
-    font = try Font.initFromFile(general_allocator, asset_path_font);
+    font = Font.initFromFile(general_allocator, asset_path_font) catch |err| {
+        std.log.err("app: Failed to initialize fonts. Is Freetype library installed? Error code: {}", .{err});
+        return err;
+    };
     errdefer font.deinit(general_allocator);
 
-    try audio_input_capture.init();
-    errdefer audio_input_capture.deinit();
+    // try audio_input_capture.init();
+    // errdefer audio_input_capture.deinit();
 
     texture_atlas = try Atlas.init(general_allocator, 512);
     errdefer texture_atlas.deinit(general_allocator);
@@ -204,13 +210,12 @@ pub fn init() !void {
     try wayland_client.init("reel");
     errdefer wayland_client.deinit();
 
-    const initial_screen_dimensions = geometry.Dimensions2D(u16){
-        .width = 1920,
-        .height = 1080,
-    };
+    if (draw_window_decorations_requested) {
+        top_reserved_pixels = window_decorations.height_pixels;
+    }
+
     try renderer.init(
         general_allocator,
-        initial_screen_dimensions,
         @ptrCast(*renderer.Display, wayland_client.display),
         @ptrCast(*renderer.Surface, wayland_client.surface),
         &texture_atlas,
@@ -237,7 +242,7 @@ pub fn init() !void {
     }
     errdefer pen.deinit(general_allocator);
 
-    face_writer = FaceWriter.init(renderer.vertices_buffer, renderer.indices_buffer);
+    face_writer = renderer.faceWriter();
 
     widget.init(
         &face_writer,
@@ -253,7 +258,7 @@ fn deinit() void {
     renderer.deinit(general_allocator);
     wayland_client.deinit();
     texture_atlas.deinit(general_allocator);
-    audio_input_capture.deinit();
+    // audio_input_capture.deinit();
     font.deinit(general_allocator);
 
     if (builtin.mode == .Debug) {
@@ -267,6 +272,7 @@ fn onScreenCaptureSuccess(width: u32, height: u32) void {
         height,
     });
     enable_preview = true;
+    screencast_init_complete = true;
     is_draw_required = true;
 }
 
@@ -284,6 +290,8 @@ var preview_quad: *QuadFace = undefined;
 var preview_reserved_texture_extent: geometry.Extent2D(u32) = undefined;
 
 var last_preview_update_frame_index: u64 = std.math.maxInt(u64);
+var screencast_init_thread: std.Thread = undefined;
+var screencast_init_complete: bool = false;
 
 fn appLoop(allocator: std.mem.Allocator) !void {
     preview_reserved_texture_extent = try renderer.texture_atlas.reserve(
@@ -296,10 +304,22 @@ fn appLoop(allocator: std.mem.Allocator) !void {
     wayland_client.screen_dimensions.width = @intCast(u16, renderer.swapchain_extent.width);
     wayland_client.screen_dimensions.height = @intCast(u16, renderer.swapchain_extent.height);
 
-    const app_start = std.time.nanoTimestamp();
+    std.log.info("Initial screen dimensions: {d} {d}", .{
+        wayland_client.screen_dimensions.width,
+        wayland_client.screen_dimensions.height,
+    });
+
+    const app_loop_start = std.time.nanoTimestamp();
+    const app_initialization_duration = @intCast(u64, app_loop_start - app_runtime_start);
+    std.log.info("App initialized in {s}", .{std.fmt.fmtDuration(app_initialization_duration)});
 
     while (!wayland_client.is_shutdown_requested) {
         app_loop_iteration += 1;
+
+        if (screencast_init_complete) {
+            screencast_init_complete = false;
+            screencast_init_thread.join();
+        }
 
         if (enable_preview_checkbox_opt) |enable_preview_checkbox| {
             const state = enable_preview_checkbox.state();
@@ -313,12 +333,27 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                     //
                     enable_preview = false;
                     std.log.info("Starting Screen Capture stream..", .{});
-                    wayland_client.screen_stream.open(
+
+                    screencast_init_thread = std.Thread.spawn(.{}, screencast.open, .{
                         onScreenCaptureSuccess,
                         onScreenCaptureError,
-                    ) catch |err| {
+                    }) catch |err| {
                         std.log.err("app: Failed to open screen capure stream. Error: {}", .{err});
+                        return;
                     };
+
+                    // screencast.open(
+                    //     onScreenCaptureSuccess,
+                    //     onScreenCaptureError,
+                    // ) catch |err| {
+                    //     std.log.err("app: Failed to open screen capure stream. Error: {}", .{err});
+                    // };
+                    // wayland_client.screen_stream.open(
+                    //     onScreenCaptureSuccess,
+                    //     onScreenCaptureError,
+                    // ) catch |err| {
+                    //     std.log.err("app: Failed to open screen capure stream. Error: {}", .{err});
+                    // };
                 }
                 is_draw_required = true;
                 std.log.info("Enable preview: {}", .{enable_preview});
@@ -327,7 +362,8 @@ fn appLoop(allocator: std.mem.Allocator) !void {
 
         if (wayland_client.awaiting_frame and enable_preview) {
             if (frames_presented_count != last_preview_update_frame_index) {
-                if (wayland_client.screen_stream.nextFrameImage()) |screen_capture| {
+                // if (wayland_client.screen_stream.nextFrameImage()) |screen_capture| {
+                if (screencast.nextFrameImage()) |screen_capture| {
                     last_preview_update_frame_index = frames_presented_count;
                     var gpu_texture = try renderer.textureGet();
 
@@ -369,7 +405,7 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                             };
 
                             //
-                            // NOTE: Have noticed serious performance loss here, switching to mult helps
+                            // NOTE: Have noticed substancial performance loss here, switching to mult helps
                             //       @intToFloat(f32, rgb) / 255) / 4.0
                             //
                             const mult = comptime (1.0 / 4.0) * (1.0 / 255.0);
@@ -417,7 +453,8 @@ fn appLoop(allocator: std.mem.Allocator) !void {
             }
         }
 
-        if (is_draw_required) {
+        is_draw_required = (is_draw_required or wayland_client.is_draw_requested);
+        if (is_draw_required and wayland_client.awaiting_frame) {
             is_draw_required = false;
             try draw(allocator);
             is_record_requested = true;
@@ -463,10 +500,8 @@ fn appLoop(allocator: std.mem.Allocator) !void {
         }
     }
 
-    try renderer.device_dispatch.deviceWaitIdle(renderer.logical_device);
-
     const app_end = std.time.nanoTimestamp();
-    const app_duration = @intCast(u64, app_end - app_start);
+    const app_duration = @intCast(u64, app_end - app_loop_start);
 
     std.log.info("Run time: {d}", .{std.fmt.fmtDuration(app_duration)});
     const runtime_seconds: f64 = @intToFloat(f64, app_duration) / std.time.ns_per_s;
@@ -476,63 +511,64 @@ fn appLoop(allocator: std.mem.Allocator) !void {
     std.log.info("Fixed FPS: {d}", .{@intToFloat(f64, app_loop_iteration) / runtime_seconds});
 }
 
-// TODO:
-// fn drawDecorations() void {
-//     if (draw_window_decorations_requested) {
-//         var faces = try face_writer.allocate(3, QuadFace);
-//         const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
-//         {
-//             //
-//             // Draw window decoration topbar background
-//             //
-//             const extent = geometry.Extent2D(f32){
-//                 .x = -1.0,
-//                 .y = -1.0,
-//                 .width = 2.0,
-//                 .height = window_decoration_height,
-//             };
-//             faces[0] = graphics.quadColored(extent, window_decorations.color, .top_left);
-//         }
-//         {
-//             //
-//             // Draw exit button in window decoration topbar
-//             //
-//             std.debug.assert(window_decorations.exit_button.size_pixels <= window_decorations.height_pixels);
-//             const screen_icon_dimensions = geometry.Dimensions2D(f32){
-//                 .width = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.width),
-//                 .height = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.height),
-//             };
-//             const exit_button_outer_margin_pixels = @intToFloat(f32, window_decorations.height_pixels - window_decorations.exit_button.size_pixels) / 2.0;
-//             const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.width);
-//             const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.height);
-//             const texture_coordinates = iconTextureLookup(.close);
-//             const texture_extent = geometry.Extent2D(f32){
-//                 .x = texture_coordinates.x,
-//                 .y = texture_coordinates.y,
-//                 .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
-//                 .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
-//             };
-//             const extent = geometry.Extent2D(f32){
-//                 .x = 1.0 - (outer_margin_hor + screen_icon_dimensions.width),
-//                 .y = -1.0 + outer_margin_ver,
-//                 .width = screen_icon_dimensions.width,
-//                 .height = screen_icon_dimensions.height,
-//             };
-//             faces[1] = graphics.quadColored(extent, window_decorations.color, .top_left);
-//             faces[2] = graphics.quadTextured(extent, texture_extent, .top_left);
+fn drawDecorations() !void {
+    const screen_dimensions = wayland_client.screen_dimensions;
 
-//             // TODO: Update on screen size change
-//             const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
-//             exit_button_extent = geometry.Extent2D(u16){ // Top left anchor
-//                 .x = screen_dimensions.width - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
-//                 .y = screen_dimensions.height - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
-//                 .width = window_decorations.exit_button.size_pixels,
-//                 .height = window_decorations.exit_button.size_pixels,
-//             };
-//             exit_button_background_quad = &faces[1];
-//         }
-//     }
-// }
+    if (draw_window_decorations_requested) {
+        var faces = try face_writer.allocate(QuadFace, 1);
+        const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
+        {
+            //
+            // Draw window decoration topbar background
+            //
+            const extent = geometry.Extent2D(f32){
+                .x = -1.0,
+                .y = -1.0,
+                .width = 2.0,
+                .height = window_decoration_height,
+            };
+            faces[0] = graphics.quadColored(extent, window_decorations.color, .top_left);
+        }
+        {
+            //
+            // Draw exit button in window decoration topbar
+            //
+            // std.debug.assert(window_decorations.exit_button.size_pixels <= window_decorations.height_pixels);
+            // const screen_icon_dimensions = geometry.Dimensions2D(f32){
+            //     .width = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.width),
+            //     .height = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.height),
+            // };
+            // const exit_button_outer_margin_pixels = @intToFloat(f32, window_decorations.height_pixels - window_decorations.exit_button.size_pixels) / 2.0;
+            // const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.width);
+            // const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.height);
+            // const texture_coordinates = iconTextureLookup(.close);
+            // const texture_extent = geometry.Extent2D(f32){
+            //     .x = texture_coordinates.x,
+            //     .y = texture_coordinates.y,
+            //     .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
+            //     .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
+            // };
+            // const extent = geometry.Extent2D(f32){
+            //     .x = 1.0 - (outer_margin_hor + screen_icon_dimensions.width),
+            //     .y = -1.0 + outer_margin_ver,
+            //     .width = screen_icon_dimensions.width,
+            //     .height = screen_icon_dimensions.height,
+            // };
+            // faces[1] = graphics.quadColored(extent, window_decorations.color, .top_left);
+            // faces[2] = graphics.quadTextured(extent, texture_extent, .top_left);
+
+            // // TODO: Update on screen size change
+            // const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
+            // exit_button_extent = geometry.Extent2D(u16){ // Top left anchor
+            //     .x = screen_dimensions.width - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
+            //     .y = screen_dimensions.height - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
+            //     .width = window_decorations.exit_button.size_pixels,
+            //     .height = window_decorations.exit_button.size_pixels,
+            // };
+            // exit_button_background_quad = &faces[1];
+        }
+    }
+}
 
 fn drawTexture() !void {
     const screen_extent = geometry.Extent2D(f32){
@@ -558,6 +594,7 @@ fn drawScreenCaptureBackground() !void {
     //
     // Draw preview background
     //
+    const y_offset = @intToFloat(f64, top_reserved_pixels) * wayland_client.screen_scale.vertical;
     const margin_top_pixels = style.screen_preview.margin_top_pixels;
     const margin_left_pixels = style.screen_preview.margin_left_pixels;
     const border_width_pixels = style.screen_preview.border_width_pixels;
@@ -568,7 +605,7 @@ fn drawScreenCaptureBackground() !void {
         const background_height = @intToFloat(f64, preview_dimensions.height + (border_width_pixels * 2));
         const extent = geometry.Extent2D(f32){
             .x = @floatCast(f32, -1.0 + margin_left),
-            .y = @floatCast(f32, -1.0 + margin_top),
+            .y = @floatCast(f32, -1.0 + margin_top + y_offset),
             .width = @floatCast(f32, background_width * wayland_client.screen_scale.horizontal),
             .height = @floatCast(f32, background_height * wayland_client.screen_scale.vertical),
         };
@@ -581,6 +618,7 @@ fn drawScreenCapture() !void {
     //
     // Draw actual preview
     //
+    const y_offset = @intToFloat(f64, top_reserved_pixels) * wayland_client.screen_scale.vertical;
     const margin_top_pixels = style.screen_preview.margin_top_pixels;
     const margin_left_pixels = style.screen_preview.margin_left_pixels;
     {
@@ -589,7 +627,7 @@ fn drawScreenCapture() !void {
         preview_quad = try face_writer.create(QuadFace);
         const screen_extent = geometry.Extent2D(f32){
             .x = @floatCast(f32, -1.0 + x_left),
-            .y = @floatCast(f32, -1.0 + y_top),
+            .y = @floatCast(f32, -1.0 + y_top + y_offset),
             .width = @floatCast(f32, @intToFloat(f64, preview_dimensions.width) * wayland_client.screen_scale.horizontal),
             .height = @floatCast(f32, @intToFloat(f64, preview_dimensions.height) * wayland_client.screen_scale.vertical),
         };
@@ -618,7 +656,12 @@ var enable_preview: bool = false;
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(allocator: std.mem.Allocator) !void {
+    _ = allocator;
+
     face_writer.reset();
+
+    try drawDecorations();
+
     {
         if (enable_preview_checkbox_opt == null)
             enable_preview_checkbox_opt = try Checkbox.create();
@@ -664,33 +707,33 @@ fn draw(allocator: std.mem.Allocator) !void {
         record_button_opt = try Button.create();
     }
 
-    if (image_button_opt == null) {
-        image_button_opt = try ImageButton.create();
+    // if (image_button_opt == null) {
+    //     image_button_opt = try ImageButton.create();
 
-        var icon = try img.Image.fromFilePath(allocator, icon_path_list[0]);
-        defer icon.deinit();
+    //     var icon = try img.Image.fromFilePath(allocator, icon_path_list[0]);
+    //     defer icon.deinit();
 
-        add_icon_opt = try renderer.addTexture(
-            allocator,
-            @intCast(u32, icon.width),
-            @intCast(u32, icon.height),
-            @ptrCast([*]graphics.RGBA(u8), icon.pixels.rgba32.ptr),
-        );
-    }
+    //     add_icon_opt = try renderer.addTexture(
+    //         allocator,
+    //         @intCast(u32, icon.width),
+    //         @intCast(u32, icon.height),
+    //         @ptrCast([*]graphics.RGBA(u8), icon.pixels.rgba32.ptr),
+    //     );
+    // }
 
-    if (image_button_opt) |*image_button| {
-        if (add_icon_opt) |add_icon| {
-            const width_pixels = @intToFloat(f32, add_icon.width());
-            const height_pixels = @intToFloat(f32, add_icon.height());
-            const extent = geometry.Extent2D(f32){
-                .x = 0.4,
-                .y = 0.8,
-                .width = @floatCast(f32, width_pixels * wayland_client.screen_scale.horizontal),
-                .height = @floatCast(f32, height_pixels * wayland_client.screen_scale.vertical),
-            };
-            try image_button.draw(extent, image_button_background_color, add_icon.extent());
-        }
-    }
+    // if (image_button_opt) |*image_button| {
+    //     if (add_icon_opt) |add_icon| {
+    //         const width_pixels = @intToFloat(f32, add_icon.width());
+    //         const height_pixels = @intToFloat(f32, add_icon.height());
+    //         const extent = geometry.Extent2D(f32){
+    //             .x = 0.4,
+    //             .y = 0.8,
+    //             .width = @floatCast(f32, width_pixels * wayland_client.screen_scale.horizontal),
+    //             .height = @floatCast(f32, height_pixels * wayland_client.screen_scale.vertical),
+    //         };
+    //         try image_button.draw(extent, image_button_background_color, add_icon.extent());
+    //     }
+    // }
 
     if (record_button_opt) |*record_button| {
         const width_pixels: f32 = 200;

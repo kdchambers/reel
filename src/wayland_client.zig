@@ -298,7 +298,6 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
             const state_list = configure.states.slice(xdg.Toplevel.State);
             is_fullscreen = false;
             for (state_list) |state| {
-                std.log.info("State: {}", .{state});
                 if (state == .fullscreen) {
                     is_draw_requested = true;
                     //
