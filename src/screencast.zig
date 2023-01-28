@@ -9,6 +9,7 @@ pub const State = enum(u8) {
     init_failed,
     open,
     closed,
+    paused,
 };
 
 pub const OpenOnSuccessFn = fn (width: u32, height: u32) void;

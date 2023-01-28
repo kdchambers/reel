@@ -85,18 +85,45 @@ var session_count: u32 = 0;
 var onOpenSuccessCallback: *const screencast.OpenOnSuccessFn = undefined;
 var onOpenErrorCallback: *const screencast.OpenOnErrorFn = undefined;
 
+var init_thread: std.Thread = undefined;
+var once: bool = true;
+
 pub inline fn open(
     on_success_cb: *const screencast.OpenOnSuccessFn,
     on_error_cb: *const screencast.OpenOnErrorFn,
 ) !void {
     onOpenSuccessCallback = on_success_cb;
     onOpenErrorCallback = on_error_cb;
-    try init();
+
+    std.debug.assert(once);
+    once = false;
+
+    init_thread = std.Thread.spawn(.{}, init, .{}) catch |err| {
+        onOpenErrorCallback();
+        std.log.err("Failed to create thread to open pipewire screencast. Error: {}", .{
+            err,
+        });
+        return error.CreateThreadFailed;
+    };
 }
 
 pub inline fn close() void {
     teardownPipewire();
     stream_state = .closed;
+}
+
+pub inline fn pause() void {
+    std.debug.assert(stream_state == .open);
+    // TODO: Handle return
+    _ = pw.pw_stream_set_active(stream, false);
+    stream_state = .paused;
+}
+
+pub inline fn unpause() void {
+    std.debug.assert(stream_state == .paused);
+    // TODO: Handle return
+    _ = pw.pw_stream_set_active(stream, true);
+    stream_state = .open;
 }
 
 pub inline fn nextFrameImage() ?screencast.FrameImage {
@@ -1203,7 +1230,6 @@ pub fn init() !void {
 fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
     const buffer = pw.pw_stream_dequeue_buffer(stream);
     std.debug.assert(stream_state == .open);
-    // std.debug.print("New buffer: {d}\n", .{buffer.*.buffer.*.datas[0].chunk.*.size});
     @memcpy(
         @ptrCast([*]u8, pixel_buffer.ptr),
         @ptrCast([*]const u8, buffer.*.buffer.*.datas[0].data.?),
@@ -1213,6 +1239,9 @@ fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
 }
 
 fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod) callconv(.C) void {
+    if (stream_state == .closed)
+        return;
+
     if (id == pw.SPA_PARAM_Format) {
         stream_state = .init_failed;
         stream_format = parseStreamFormat(params);
@@ -1253,9 +1282,14 @@ fn onCoreDoneCallback(_: ?*anyopaque, id: u32, seq: i32) callconv(.C) void {
 }
 
 fn teardownPipewire() void {
-    pw.pw_thread_loop_wait(thread_loop);
+    stream_state = .closed;
+    // TODO: Handle return
+    _ = pw.pw_stream_disconnect(stream);
+    pw.pw_stream_destroy(stream);
+
     pw.pw_thread_loop_stop(thread_loop);
-    pw.pw_stream_disconnect(stream);
+    pw.pw_thread_loop_destroy(thread_loop);
+    std.log.info("Disconnecting from stream", .{});
 }
 
 fn extractMessageStart(

@@ -272,7 +272,6 @@ fn onScreenCaptureSuccess(width: u32, height: u32) void {
         height,
     });
     enable_preview = true;
-    screencast_init_complete = true;
     is_draw_required = true;
 }
 
@@ -290,8 +289,6 @@ var preview_quad: *QuadFace = undefined;
 var preview_reserved_texture_extent: geometry.Extent2D(u32) = undefined;
 
 var last_preview_update_frame_index: u64 = std.math.maxInt(u64);
-var screencast_init_thread: std.Thread = undefined;
-var screencast_init_complete: bool = false;
 
 fn appLoop(allocator: std.mem.Allocator) !void {
     preview_reserved_texture_extent = try renderer.texture_atlas.reserve(
@@ -316,53 +313,40 @@ fn appLoop(allocator: std.mem.Allocator) !void {
     while (!wayland_client.is_shutdown_requested) {
         app_loop_iteration += 1;
 
-        if (screencast_init_complete) {
-            screencast_init_complete = false;
-            screencast_init_thread.join();
-        }
+        const screencast_state = screencast.state();
 
-        if (enable_preview_checkbox_opt) |enable_preview_checkbox| {
-            const state = enable_preview_checkbox.state();
-            if (state.left_click_release) {
+        if (enable_preview_checkbox) |checkbox| {
+            const checkbox_state = checkbox.state();
+            if (checkbox_state.left_click_release) {
                 enable_preview = !enable_preview;
-                const screen_stream_state = wayland_client.screen_stream.state();
-                if (enable_preview and screen_stream_state == .uninitialized) {
+                if (enable_preview) {
                     //
-                    // TODO: We don't want to start reading frames yet,
-                    //       should use another variable here
+                    // Open or Resume preview
                     //
-                    enable_preview = false;
-                    std.log.info("Starting Screen Capture stream..", .{});
-
-                    screencast_init_thread = std.Thread.spawn(.{}, screencast.open, .{
-                        onScreenCaptureSuccess,
-                        onScreenCaptureError,
-                    }) catch |err| {
-                        std.log.err("app: Failed to open screen capure stream. Error: {}", .{err});
-                        return;
-                    };
-
-                    // screencast.open(
-                    //     onScreenCaptureSuccess,
-                    //     onScreenCaptureError,
-                    // ) catch |err| {
-                    //     std.log.err("app: Failed to open screen capure stream. Error: {}", .{err});
-                    // };
-                    // wayland_client.screen_stream.open(
-                    //     onScreenCaptureSuccess,
-                    //     onScreenCaptureError,
-                    // ) catch |err| {
-                    //     std.log.err("app: Failed to open screen capure stream. Error: {}", .{err});
-                    // };
+                    std.debug.assert(screencast_state != .closed);
+                    std.debug.assert(screencast_state != .open);
+                    switch (screencast_state) {
+                        .paused => screencast.unpause(),
+                        .uninitialized => try screencast.open(
+                            onScreenCaptureSuccess,
+                            onScreenCaptureError,
+                        ),
+                        else => {},
+                    }
+                } else {
+                    //
+                    // Pause preview
+                    //
+                    std.debug.assert(screencast_state == .open);
+                    screencast.pause();
                 }
                 is_draw_required = true;
                 std.log.info("Enable preview: {}", .{enable_preview});
             }
         }
 
-        if (wayland_client.awaiting_frame and enable_preview) {
+        if (wayland_client.awaiting_frame and screencast_state == .open) {
             if (frames_presented_count != last_preview_update_frame_index) {
-                // if (wayland_client.screen_stream.nextFrameImage()) |screen_capture| {
                 if (screencast.nextFrameImage()) |screen_capture| {
                     last_preview_update_frame_index = frames_presented_count;
                     var gpu_texture = try renderer.textureGet();
@@ -498,6 +482,11 @@ fn appLoop(allocator: std.mem.Allocator) !void {
             wayland_client.is_mouse_moved = false;
             event_system.handleMouseMovement(&mouse_position);
         }
+    }
+
+    const screencast_state = screencast.state();
+    if (screencast_state != .uninitialized and screencast_state != .closed) {
+        screencast.close();
     }
 
     const app_end = std.time.nanoTimestamp();
@@ -650,7 +639,7 @@ const white = graphics.RGB(f32).fromInt(255, 255, 255);
 const Dropdown = widget.Dropdown;
 
 const Checkbox = widget.Checkbox;
-var enable_preview_checkbox_opt: ?Checkbox = null;
+var enable_preview_checkbox: ?Checkbox = null;
 var enable_preview: bool = false;
 
 /// Our example draw function
@@ -663,8 +652,8 @@ fn draw(allocator: std.mem.Allocator) !void {
     try drawDecorations();
 
     {
-        if (enable_preview_checkbox_opt == null)
-            enable_preview_checkbox_opt = try Checkbox.create();
+        if (enable_preview_checkbox == null)
+            enable_preview_checkbox = try Checkbox.create();
 
         const preview_margin_left: f64 = style.screen_preview.margin_left_pixels * wayland_client.screen_scale.horizontal;
         const checkbox_radius_pixels = 11;
@@ -673,7 +662,7 @@ fn draw(allocator: std.mem.Allocator) !void {
             .x = -1.0 + (preview_margin_left + (checkbox_width / 2)),
             .y = -0.3,
         };
-        try enable_preview_checkbox_opt.?.draw(
+        try enable_preview_checkbox.?.draw(
             center,
             checkbox_radius_pixels,
             wayland_client.screen_scale,
@@ -699,7 +688,8 @@ fn draw(allocator: std.mem.Allocator) !void {
     }
 
     try drawScreenCaptureBackground();
-    if (enable_preview) {
+    const screencast_state = screencast.state();
+    if (screencast_state == .open) {
         try drawScreenCapture();
     }
 
