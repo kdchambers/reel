@@ -66,7 +66,6 @@ pub var screen_scale: geometry.ScaleFactor2D(f64) = undefined;
 pub var button_clicked: ButtonClicked = .none;
 pub var button_state: wl.Pointer.ButtonState = undefined;
 pub var is_mouse_moved: bool = false;
-pub var awaiting_frame: bool = true;
 
 pub var framebuffer_resized: bool = true;
 pub var is_mouse_in_screen: bool = true;
@@ -75,6 +74,9 @@ pub var draw_window_decorations_requested: bool = false;
 pub var frame_start_ns: i128 = undefined;
 pub var is_fullscreen: bool = true;
 pub var is_draw_requested: bool = false;
+
+pub var pending_swapchain_images_count: u32 = 1;
+pub var frame_index: u32 = 0;
 
 //
 // Internal Variables
@@ -98,9 +100,6 @@ var cursor: *wl.Cursor = undefined;
 var cursor_surface: *wl.Surface = undefined;
 var xcursor: [:0]const u8 = undefined;
 var shared_memory: *wl.Shm = undefined;
-
-var frame_index: u32 = 0;
-var last_captured_frame_index: u32 = std.math.maxInt(u32);
 
 //
 // Public Interface
@@ -196,23 +195,11 @@ pub fn pollEvents() bool {
         if (errno != .SUCCESS)
             std.log.warn("wayland_client: failed reading events. Errno: {}", .{errno});
     } else {
+        std.log.info("Cancel read", .{});
         display.cancelRead();
     }
 
     _ = display.dispatchPending();
-
-    if (awaiting_frame) {
-        if (frame_index == last_captured_frame_index)
-            return false;
-
-        if (screen_stream_backend.state == .open) {
-            std.debug.assert(frame_index != last_captured_frame_index);
-            screen_stream_backend.captureFrame(frame_index) catch |err| {
-                std.log.warn("wayland_client: Failed to capture screen frame. Error: {}", .{err});
-            };
-            last_captured_frame_index = frame_index;
-        }
-    }
 
     return false;
 }
@@ -304,7 +291,6 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
                     // TODO: This is kind of a hack but we need to force a redraw
                     //       when the screen is made fullscreen
                     //
-                    awaiting_frame = true;
                     is_fullscreen = true;
                 }
             }
@@ -325,11 +311,12 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, _: *const voi
             callback.destroy();
             frame_callback = surface.frame() catch |err| {
                 std.log.err("Failed to create new wayland frame -> {}", .{err});
+                std.debug.assert(false);
                 return;
             };
             frame_callback.setListener(*const void, frameListener, &{});
-            awaiting_frame = true;
             frame_index += 1;
+            pending_swapchain_images_count += 1;
         },
     }
 }
