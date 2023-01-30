@@ -36,7 +36,7 @@ pub const RequestOpenErrorSet = backend_pipewire.InitErrorSet;
 
 pub const RequestOpenFn = fn (onSuccess: *const OpenOnSuccessFn, onError: *const OpenOnErrorFn) RequestOpenErrorSet!void;
 pub const StateFn = fn () State;
-pub const NextFrameImageFn = fn () ?FrameImage;
+pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
 pub const PauseFn = fn () void;
 pub const UnpauseFn = fn () void;
 pub const CloseFn = fn () void;
@@ -47,7 +47,6 @@ pub const Interface = struct {
     //
     requestOpen: *const RequestOpenFn,
     state: *const StateFn,
-    nextFrameImage: *const NextFrameImageFn,
     pause: *const PauseFn,
     unpause: *const UnpauseFn,
     close: *const CloseFn,
@@ -55,9 +54,9 @@ pub const Interface = struct {
 
 var backend_buffer: [2]Backend = undefined;
 
-pub fn createInterface(backend: Backend) !Interface {
+pub fn createInterface(backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
     return switch (backend) {
-        .pipewire => backend_pipewire.createInterface(),
+        .pipewire => backend_pipewire.createInterface(onFrameReady),
         //
         // TODO: Implement other backends
         //
@@ -65,7 +64,7 @@ pub fn createInterface(backend: Backend) !Interface {
     };
 }
 
-pub fn createBestInterface() ?Interface {
+pub fn createBestInterface(onFrameReady: *const OnFrameReadyFn) ?Interface {
     const backends = detectBackends();
     var best_match_index: u16 = std.math.maxInt(u16);
     for (backends) |backend| {
@@ -76,7 +75,7 @@ pub fn createBestInterface() ?Interface {
         @tagName(selected_backend),
     });
     return switch (selected_backend) {
-        .pipewire => backend_pipewire.createInterface(),
+        .pipewire => backend_pipewire.createInterface(onFrameReady),
         .wlr => null,
         else => null,
     };

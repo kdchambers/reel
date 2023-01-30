@@ -3,7 +3,6 @@
 
 const std = @import("std");
 const dbus = @import("../../dbus.zig");
-// const dbus = @import("../../dbus-bindings.zig");
 
 const graphics = @import("../../graphics.zig");
 const screencast = @import("../../screencast.zig");
@@ -27,6 +26,9 @@ const pw = @cImport({
 //
 extern fn parseStreamFormat(params: [*c]const pw.spa_pod) callconv(.C) StreamFormat;
 extern fn buildPipewireParams(builder: *pw.spa_pod_builder) callconv(.C) *pw.spa_pod;
+
+const session_handle_chars_max = 256;
+var session_handle_buffer: [session_handle_chars_max]u8 = undefined;
 
 const bus_name = "org.freedesktop.portal.Desktop";
 const object_path = "/org/freedesktop/portal/desktop";
@@ -77,18 +79,14 @@ const stream_events = pw.pw_stream_events{
 
 pub var stream_format: StreamFormat = undefined;
 pub var stream_state: screencast.State = .uninitialized;
-pub var pixel_buffer: []graphics.RGBA(u8) = undefined;
-pub var buffer_size: usize = 0;
+
+pub var frameReadyCallback: *const screencast.OnFrameReadyFn = undefined;
 
 var stream_listener: pw.spa_hook = undefined;
 var stream: *pw.pw_stream = undefined;
 var thread_loop: *pw.pw_thread_loop = undefined;
 var server_version_sync: i32 = undefined;
 
-// TODO: Doesn't need to be a buffer
-var start_response_buffer: [16]StartResponse = undefined;
-
-const allocator = std.heap.c_allocator;
 var request_count: u32 = 0;
 var session_count: u32 = 0;
 
@@ -98,11 +96,13 @@ var onOpenErrorCallback: *const screencast.OpenOnErrorFn = undefined;
 var init_thread: std.Thread = undefined;
 var once: bool = true;
 
-pub fn createInterface() screencast.Interface {
+pub fn createInterface(
+    onFrameReadyCallback: *const screencast.OnFrameReadyFn,
+) screencast.Interface {
+    frameReadyCallback = onFrameReadyCallback;
     return .{
         .requestOpen = open,
         .state = state,
-        .nextFrameImage = nextFrameImage,
         .pause = pause,
         .unpause = unpause,
         .close = close,
@@ -159,14 +159,6 @@ pub fn unpause() void {
     // TODO: Handle return
     _ = pw.pw_stream_set_active(stream, true);
     stream_state = .open;
-}
-
-pub fn nextFrameImage() ?screencast.FrameImage {
-    return screencast.FrameImage{
-        .pixels = pixel_buffer.ptr,
-        .width = @intCast(u16, stream_format.width),
-        .height = @intCast(u16, stream_format.height),
-    };
 }
 
 pub fn state() screencast.State {
@@ -949,7 +941,24 @@ pub fn init() !void {
     _ = create_session_request_path;
 
     const session_handle_ref = try pollForResponse(connection);
-    const session_handle = try allocator.dupeZ(u8, std.mem.span(session_handle_ref));
+    const session_handle_len = std.mem.indexOfSentinel(u8, 0, session_handle_ref);
+
+    if (session_handle_len >= session_handle_chars_max) {
+        std.log.err("Session handle '{s}' is too large. Maximum supported length {d} but value is {d}.", .{
+            session_handle_ref,
+            session_handle_chars_max,
+            session_handle_len,
+        });
+        return error.SessionHandleExceedsBuffer;
+    }
+
+    @memcpy(
+        &session_handle_buffer,
+        session_handle_ref,
+        session_handle_len,
+    );
+    const session_handle: [*:0]const u8 = session_handle_buffer[0..session_handle_len :0];
+    std.debug.assert(std.mem.indexOfSentinel(u8, 0, session_handle) == session_handle_len);
 
     var request_suffix_buffer: [64]u8 = undefined;
     const select_source_request_suffix = try generateRequestToken(&request_suffix_buffer);
@@ -1134,7 +1143,7 @@ pub fn init() !void {
 
     const start_response_signature = dbus.messageGetSignature(start_stream_response);
     _ = start_response_signature;
-    const start_responses = try extractMessageStart(connection, start_stream_response);
+    const start_responses = try extractMessageStart(start_stream_response);
 
     const pipewire_fd = try openPipewireRemote(
         connection,
@@ -1228,12 +1237,15 @@ pub fn init() !void {
 }
 
 fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
-    const buffer = pw.pw_stream_dequeue_buffer(stream);
     std.debug.assert(stream_state == .open);
-    @memcpy(
-        @ptrCast([*]u8, pixel_buffer.ptr),
-        @ptrCast([*]const u8, buffer.*.buffer.*.datas[0].data.?),
-        buffer_size,
+    const buffer = pw.pw_stream_dequeue_buffer(stream);
+    const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
+    const alignment = @alignOf(screencast.PixelType);
+    const buffer_pixels = @ptrCast([*]const screencast.PixelType, @alignCast(alignment, buffer_bytes));
+    frameReadyCallback(
+        stream_format.width,
+        stream_format.height,
+        buffer_pixels,
     );
     _ = pw.pw_stream_queue_buffer(stream, buffer);
 }
@@ -1243,15 +1255,7 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod)
         return;
 
     if (id == pw.SPA_PARAM_Format) {
-        stream_state = .init_failed;
         stream_format = parseStreamFormat(params);
-        const pixel_count = @intCast(usize, stream_format.width) * stream_format.height;
-        buffer_size = pixel_count * @sizeOf(screencast.PixelType);
-        pixel_buffer = allocator.alloc(screencast.PixelType, @sizeOf(screencast.PixelType) * pixel_count) catch {
-            std.log.err("screencast_pipewire: Failed to allocator pixel buffer", .{});
-            onOpenErrorCallback();
-            return;
-        };
         stream_state = .open;
         onOpenSuccessCallback(stream_format.width, stream_format.height);
     }
@@ -1293,20 +1297,17 @@ fn teardownPipewire() void {
 }
 
 fn extractMessageStart(
-    connection: *dbus.Connection,
     start_stream_response: *dbus.Message,
 ) !StartResponse {
-    _ = connection;
     var start_stream_response_iter: dbus.MessageIter = undefined;
     _ = dbus.messageIterInit(start_stream_response, &start_stream_response_iter);
 
-    var entry = &start_response_buffer[0];
-
+    var result: StartResponse = undefined;
     if (dbus.messageIterGetArgType(&start_stream_response_iter) != c.DBUS_TYPE_UINT32) {
         return error.InvalidResponse;
     }
 
-    dbus.messageIterGetBasic(&start_stream_response_iter, @ptrCast(*void, &entry.pipewire_node_id));
+    dbus.messageIterGetBasic(&start_stream_response_iter, @ptrCast(*void, &result.pipewire_node_id));
     _ = dbus.messageIterNext(&start_stream_response_iter);
 
     var next_type: i32 = dbus.messageIterGetArgType(&start_stream_response_iter);
@@ -1349,7 +1350,7 @@ fn extractMessageStart(
 
     std.debug.assert(next_type == c.DBUS_TYPE_UINT32);
 
-    dbus.messageIterGetBasic(&struct_iter, @ptrCast(*void, &entry.pipewire_node_id));
+    dbus.messageIterGetBasic(&struct_iter, @ptrCast(*void, &result.pipewire_node_id));
     _ = dbus.messageIterNext(&struct_iter);
     next_type = dbus.messageIterGetArgType(&struct_iter);
 
@@ -1385,13 +1386,13 @@ fn extractMessageStart(
                         next_type = dbus.messageIterGetArgType(&size_struct_iter);
                         std.debug.assert(next_type == c.DBUS_TYPE_INT32);
 
-                        dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &entry.dimensions[0]));
+                        dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &result.dimensions[0]));
                         _ = dbus.messageIterNext(&size_struct_iter);
 
                         next_type = dbus.messageIterGetArgType(&size_struct_iter);
                         std.debug.assert(next_type == c.DBUS_TYPE_INT32);
 
-                        dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &entry.dimensions[1]));
+                        dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &result.dimensions[1]));
                     }
                     if (c.strncmp("id", option_label, 2) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
@@ -1403,7 +1404,7 @@ fn extractMessageStart(
                         next_type = dbus.messageIterGetArgType(&id_variant_iter);
                         std.debug.assert(next_type == c.DBUS_TYPE_STRING);
 
-                        dbus.messageIterGetBasic(&id_variant_iter, @ptrCast(*void, &entry.id));
+                        dbus.messageIterGetBasic(&id_variant_iter, @ptrCast(*void, &result.id));
                     }
                 }
 
@@ -1421,5 +1422,5 @@ fn extractMessageStart(
     }
     dbus.messageUnref(start_stream_response);
 
-    return start_response_buffer[0];
+    return result;
 }
