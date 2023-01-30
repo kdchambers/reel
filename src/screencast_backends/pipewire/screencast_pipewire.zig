@@ -1287,6 +1287,10 @@ fn onCoreDoneCallback(_: ?*anyopaque, id: u32, seq: i32) callconv(.C) void {
 
 fn teardownPipewire() void {
     stream_state = .closed;
+    // TODO: Use a mutex
+    //       It's possible that we're still using a pipewire buffer when entering this
+    //       function as the onFrameReady callback is on a separate thread
+    std.time.sleep(10);
     // TODO: Handle return
     _ = pw.pw_stream_disconnect(stream);
     pw.pw_stream_destroy(stream);

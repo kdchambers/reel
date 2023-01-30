@@ -22,6 +22,7 @@ pub const AV_OPT_SEARCH_CHILDREN = libav.AV_OPT_SEARCH_CHILDREN;
 pub const AVIO_FLAG_WRITE = libav.AVIO_FLAG_WRITE;
 pub const ERROR_EOF = libav.AVERROR_EOF;
 pub const AV_PICTURE_TYPE_NONE = libav.AV_PICTURE_TYPE_NONE;
+pub const PIXEL_FORMAT_RGB0 = libav.AV_PIX_FMT_RGB0;
 
 pub const CodecContext = libav.AVCodecContext;
 pub const CodecParameters = libav.AVCodecParameters;
