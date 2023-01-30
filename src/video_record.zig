@@ -9,17 +9,6 @@ const geometry = @import("geometry.zig");
 
 const libav = @import("libav.zig");
 
-// const libav = @cImport({
-//     @cInclude("libavcodec/avcodec.h");
-//     @cInclude("libavutil/opt.h");
-//     @cInclude("libavutil/imgutils.h");
-//     @cInclude("libavdevice/avdevice.h");
-//     @cInclude("libswscale/swscale.h");
-//     @cInclude("libavfilter/avfilter.h");
-//     @cInclude("libavfilter/buffersink.h");
-//     @cInclude("libavfilter/buffersrc.h");
-// });
-
 const EAGAIN: i32 = -11;
 const EINVAL: i32 = -22;
 
@@ -62,12 +51,6 @@ var once: bool = true;
 
 pub var state: State = .uninitialized;
 
-fn waitFence(fence: u32, timeout_ns: u64) bool {
-    _ = timeout_ns;
-    _ = fence;
-    //
-}
-
 fn RingBuffer(comptime T: type, comptime capacity: usize) type {
     return struct {
         mutex: std.Thread.Mutex,
@@ -88,12 +71,16 @@ fn RingBuffer(comptime T: type, comptime capacity: usize) type {
 
             if (self.len == 0)
                 return null;
+
             return self.buffer[self.head];
         }
 
         pub fn push(self: *@This(), value: T) !void {
             self.mutex.lock();
             defer self.mutex.unlock();
+
+            if (self.len == capacity)
+                return error.Full;
 
             const dst_index: usize = (self.head + self.len) % capacity;
             self.buffer[dst_index] = value;
@@ -106,9 +93,11 @@ fn RingBuffer(comptime T: type, comptime capacity: usize) type {
 
             if (self.len == 0)
                 return null;
+
             const index = self.head;
-            self.head += 1;
+            self.head = (self.head + 1) % @as(u16, capacity);
             self.len -= 1;
+
             return self.buffer[index];
         }
     };
@@ -120,7 +109,7 @@ const Context = struct {
 var context: Context = undefined;
 
 const Frame = struct {
-    pixels: [*]PixelType,
+    pixels: [*]const PixelType,
     frame_index: u64,
 };
 
@@ -139,16 +128,20 @@ fn eventLoop() void {
     finishVideoStream();
 }
 
-pub fn write(pixels: [*]graphics.RGBA(u8), frame_index: u64) !void {
-    try ring_buffer.push(.{
+pub fn write(pixels: [*]const graphics.RGBA(u8), frame_index: u64) !void {
+    ring_buffer.push(.{
         .pixels = pixels,
         .frame_index = frame_index,
-    });
+    }) catch {
+        std.log.warn("Buffer full, failed to write frame", .{});
+    };
 }
 
 pub fn close() void {
     request_close = true;
     processing_thread.join();
+    state = .closed;
+    std.log.info("Video stream complete", .{});
 }
 
 pub fn open(options: RecordOptions) !void {
@@ -242,7 +235,6 @@ pub fn open(options: RecordOptions) !void {
         return error.OpenAVIOContextFailed;
     }
 
-    // var dummy_dict: ?*libav.Dictionary = null;
     ret_code = libav.formatWriteHeader(
         format_context,
         null,
@@ -252,9 +244,8 @@ pub fn open(options: RecordOptions) !void {
         return error.WriteFormatHeaderFailed;
     }
 
-    // libav.dictFree(&dummy_dict);
-
     processing_thread = try std.Thread.spawn(.{}, eventLoop, .{});
+    state = .encoding;
 }
 
 fn finishVideoStream() void {
@@ -270,7 +261,7 @@ fn finishVideoStream() void {
     // TODO: Audit. This is changing type from AVFormatContext
     // was opened by avio_open ?
     //
-    _ = libav.ioClosep(@ptrCast(**libav.IOContext, &format_context.pb[0]));
+    // _ = libav.ioClosep(@ptrCast(**libav.IOContext, &format_context.pb[0]));
 
     _ = libav.codecFreeContext(&video_codec_context);
     _ = libav.formatFreeContext(format_context);
@@ -278,16 +269,21 @@ fn finishVideoStream() void {
     std.log.info("Terminated cleanly", .{});
 }
 
-fn writeFrame(pixels: [*]PixelType, frame_index: u32) !void {
+fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
     //
     // Prepare frame
     //
     const stride = [1]i32{4 * @intCast(i32, context.dimensions.width)};
     video_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
 
-    video_frame.data[0] = @ptrCast([*]u8, pixels);
+    //
+    // NOTE: intToPtr used here instead of ptrCast to get rid of const qualifier.
+    //       The pixels won't be modified, but I'd need to port AVFrame to zig
+    //       to add that constaint and appease the type system
+    //
+    video_frame.data[0] = @intToPtr([*]u8, @ptrToInt(pixels));
     video_frame.linesize[0] = stride[0];
-    video_frame.format = @enumToInt(libav.PixelFormat.RGB0);
+    video_frame.format = libav.PIXEL_FORMAT_RGB0; // @enumToInt(libav.PixelFormat.RGB0);
     video_frame.width = @intCast(i32, context.dimensions.width);
     video_frame.height = @intCast(i32, context.dimensions.height);
 
@@ -377,7 +373,7 @@ fn initVideoFilters(options: RecordOptions) !void {
         .{
             1920,
             1080,
-            @enumToInt(libav.PixelFormat.RGB0),
+            libav.PIXEL_FORMAT_RGB0,
             1000,
             options.fps * 1000,
         },
