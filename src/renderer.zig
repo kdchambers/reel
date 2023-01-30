@@ -18,8 +18,7 @@ const texture_layer_dimensions = defines.texture_layer_dimensions;
 const print_vulkan_objects = defines.print_vulkan_objects;
 const transparancy_enabled = defines.transparancy_enabled;
 const memory_size = defines.memory_size;
-const indices_range_size = defines.indices_range_size;
-const vertices_range_size = defines.vertices_range_size;
+
 const ScreenNormalizedBaseType = defines.ScreenNormalizedBaseType;
 const TextureNormalizedBaseType = defines.TextureNormalizedBaseType;
 
@@ -102,6 +101,324 @@ pub const ImageHandle = packed struct(u64) {
 pub const Surface = opaque {};
 pub const Display = opaque {};
 
+const VideoCanvasHandle = packed struct(u64) {
+    const texture_size = 2048;
+
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+
+    pub inline fn extent(self: @This()) geometry.Extent2D(f32) {
+        return .{
+            .x = @intToFloat(f32, self.x) / texture_size,
+            .y = @intToFloat(f32, self.y) / texture_size,
+            .width = @intToFloat(f32, self._width) / texture_size,
+            .height = @intToFloat(f32, self._height) / texture_size,
+        };
+    }
+};
+
+var video_stream: ?VideoCanvasHandle = null;
+
+pub const VideoFrameBuffer = struct {
+    pixels: [*]graphics.RGBA(u8),
+    width: u32,
+    height: u32,
+};
+
+pub var video_stream_dimensions: geometry.Dimensions2D(f32) = .{ .width = 1920, .height = 1080 };
+pub var video_stream_placement: geometry.Coordinates2D(f32) = .{ .x = -0.8, .y = -0.8 };
+pub var video_stream_output_dimensions: geometry.Dimensions2D(f32) = .{ .width = (1920.0 / 4.0), .height = (1080 / 4.0) };
+pub var video_stream_enabled: bool = false;
+
+pub fn videoFrame() VideoFrameBuffer {
+    return .{
+        .pixels = texture_pipeline.memory_map.ptr,
+        .width = defines.pipeline_video.framebuffer_dimensions.width,
+        .height = defines.pipeline_video.framebuffer_dimensions.height,
+    };
+}
+
+pub fn placeVideoStream(coordinates: geometry.Coordinates2D(f32)) void {
+    video_stream_placement = coordinates;
+}
+
+pub fn init(
+    allocator: std.mem.Allocator,
+    wayland_display: *Display,
+    wayland_surface: *Surface,
+    atlas: *Atlas,
+) !void {
+    texture_atlas = atlas;
+
+    const screen_dimensions = defines.initial_screen_dimensions;
+
+    try vulkan_core.init(
+        @ptrCast(*vk.wl_display, wayland_display),
+        @ptrCast(*vk.wl_surface, wayland_surface),
+    );
+
+    //
+    // Alias for readability
+    //
+    const v_instance = vulkan_core.instance_dispatch;
+    const v_device = vulkan_core.device_dispatch;
+
+    // Query and select appropriate surface format for swapchain
+
+    const surface_format_opt = try selectSurfaceFormat(allocator, .srgb_nonlinear_khr, .b8g8r8a8_unorm);
+    if (surface_format_opt) |format| {
+        swapchain_surface_format = format;
+    } else {
+        return error.RequiredSurfaceFormatUnavailable;
+    }
+
+    const mesh_memory_index: u32 = blk: {
+        // Find the best memory type for storing mesh + texture data
+        // Requirements:
+        //   - Sufficient space (20mib)
+        //   - Host visible (Host refers to CPU. Allows for direct access without needing DMA)
+        // Preferable
+        //  - Device local (Memory on the GPU / APU)
+
+        const memory_properties = v_instance.getPhysicalDeviceMemoryProperties(vulkan_core.physical_device);
+        if (print_vulkan_objects.memory_type_all) {
+            std.debug.print("\n** Memory heaps found on system **\n\n", .{});
+            printVulkanMemoryHeaps(memory_properties, 0);
+            std.debug.print("\n", .{});
+        }
+
+        const kib: u32 = 1024;
+        const mib: u32 = kib * 1024;
+        const minimum_space_required: u32 = mib * 20;
+
+        var memory_type_index: u32 = 0;
+        var memory_type_count = memory_properties.memory_type_count;
+
+        var suitable_memory_type_index_opt: ?u32 = null;
+
+        while (memory_type_index < memory_type_count) : (memory_type_index += 1) {
+            const memory_entry = memory_properties.memory_types[memory_type_index];
+            const heap_index = memory_entry.heap_index;
+
+            if (heap_index == memory_properties.memory_heap_count) {
+                std.log.warn("Invalid heap index {d} for memory type at index {d}. Skipping", .{ heap_index, memory_type_index });
+                continue;
+            }
+
+            const heap_size = memory_properties.memory_heaps[heap_index].size;
+
+            if (heap_size < minimum_space_required) {
+                continue;
+            }
+
+            const memory_flags = memory_entry.property_flags;
+            if (memory_flags.host_visible_bit) {
+                suitable_memory_type_index_opt = memory_type_index;
+                if (memory_flags.device_local_bit) {
+                    std.log.info("Selected memory for mesh buffer: Heap index ({d}) Memory index ({d})", .{ heap_index, memory_type_index });
+                    break :blk memory_type_index;
+                }
+            }
+        }
+
+        if (suitable_memory_type_index_opt) |suitable_memory_type_index| {
+            break :blk suitable_memory_type_index;
+        }
+
+        return error.NoValidVulkanMemoryTypes;
+    };
+
+    // TODO:
+    selected_memory_index = mesh_memory_index;
+
+    const surface_capabilities = try v_instance.getPhysicalDeviceSurfaceCapabilitiesKHR(vulkan_core.physical_device, vulkan_core.surface);
+
+    if (print_vulkan_objects.surface_abilties) {
+        std.debug.print("** Selected surface capabilites **\n\n", .{});
+        printSurfaceCapabilities(surface_capabilities, 1);
+        std.debug.print("\n", .{});
+    }
+
+    if (transparancy_enabled) {
+        // Check to see if the compositor supports transparent windows and what
+        // transparency mode needs to be set when creating the swapchain
+        const supported = surface_capabilities.supported_composite_alpha;
+        if (supported.pre_multiplied_bit_khr) {
+            alpha_mode = .{ .pre_multiplied_bit_khr = true };
+        } else if (supported.post_multiplied_bit_khr) {
+            alpha_mode = .{ .post_multiplied_bit_khr = true };
+        } else if (supported.inherit_bit_khr) {
+            alpha_mode = .{ .inherit_bit_khr = true };
+        } else {
+            std.log.info("Alpha windows not supported", .{});
+        }
+    }
+
+    if (surface_capabilities.current_extent.width == 0xFFFFFFFF or surface_capabilities.current_extent.height == 0xFFFFFFFF) {
+        swapchain_extent.width = screen_dimensions.width;
+        swapchain_extent.height = screen_dimensions.height;
+    }
+
+    std.debug.assert(swapchain_extent.width >= surface_capabilities.min_image_extent.width);
+    std.debug.assert(swapchain_extent.height >= surface_capabilities.min_image_extent.height);
+
+    std.debug.assert(swapchain_extent.width <= surface_capabilities.max_image_extent.width);
+    std.debug.assert(swapchain_extent.height <= surface_capabilities.max_image_extent.height);
+
+    swapchain_min_image_count = surface_capabilities.min_image_count + 1;
+
+    // TODO: Perhaps more flexibily should be allowed here. I'm unsure if an application is
+    //       supposed to match the rotation of the system / monitor, but I would assume not..
+    //       It is also possible that the inherit_bit_khr bit would be set in place of identity_bit_khr
+    if (surface_capabilities.current_transform.identity_bit_khr == false) {
+        std.log.err("Selected surface does not have the option to leave framebuffer image untransformed." ++
+            "This is likely a vulkan bug.", .{});
+        return error.VulkanSurfaceTransformInvalid;
+    }
+
+    swapchain = try v_device.createSwapchainKHR(vulkan_core.logical_device, &vk.SwapchainCreateInfoKHR{
+        .surface = vulkan_core.surface,
+        .min_image_count = swapchain_min_image_count,
+        .image_format = swapchain_surface_format.format,
+        .image_color_space = swapchain_surface_format.color_space,
+        .image_extent = swapchain_extent,
+        .image_array_layers = 1,
+        .image_usage = .{ .color_attachment_bit = true, .transfer_src_bit = true },
+        .image_sharing_mode = .exclusive,
+        // NOTE: Only valid when `image_sharing_mode` is CONCURRENT
+        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkSwapchainCreateInfoKHR.html
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .pre_transform = .{ .identity_bit_khr = true },
+        .composite_alpha = alpha_mode,
+        // NOTE: FIFO_KHR is required to be available for all vulkan capable devices
+        //       For that reason we don't need to query for it on our selected device
+        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkPresentModeKHR.html
+        .present_mode = .fifo_khr,
+        .clipped = vk.TRUE,
+        .flags = .{},
+        .old_swapchain = .null_handle,
+    }, null);
+
+    swapchain_images = blk: {
+        var image_count: u32 = undefined;
+        if (.success != (try v_device.getSwapchainImagesKHR(vulkan_core.logical_device, swapchain, &image_count, null))) {
+            return error.FailedToGetSwapchainImagesCount;
+        }
+
+        var images = try allocator.alloc(vk.Image, image_count);
+        if (.success != (try v_device.getSwapchainImagesKHR(vulkan_core.logical_device, swapchain, &image_count, images.ptr))) {
+            return error.FailedToGetSwapchainImages;
+        }
+
+        break :blk images;
+    };
+
+    swapchain_image_views = try allocator.alloc(vk.ImageView, swapchain_images.len);
+    try createSwapchainImageViews();
+
+    try render_pass.init(swapchain_extent, swapchain_surface_format.format, selected_memory_index);
+
+    {
+        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+            .command_pool = vulkan_core.command_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        try v_device.allocateCommandBuffers(
+            vulkan_core.logical_device,
+            &command_buffer_allocate_info,
+            @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
+        );
+    }
+
+    {
+        command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain_images.len);
+        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+            .command_pool = vulkan_core.command_pool,
+            .level = .primary,
+            .command_buffer_count = @intCast(u32, command_buffers.len),
+        };
+        try v_device.allocateCommandBuffers(
+            vulkan_core.logical_device,
+            &command_buffer_allocate_info,
+            command_buffers.ptr,
+        );
+    }
+
+    var mesh_memory = try v_device.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
+        .allocation_size = memory_size,
+        .memory_type_index = mesh_memory_index,
+    }, null);
+
+    mapped_device_memory = @ptrCast([*]u8, (try v_device.mapMemory(vulkan_core.logical_device, mesh_memory, 0, memory_size, .{})).?);
+
+    images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
+    renders_finished = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
+    inflight_fences = try allocator.alloc(vk.Fence, max_frames_in_flight);
+
+    const semaphore_create_info = vk.SemaphoreCreateInfo{
+        .flags = .{},
+    };
+
+    // TODO: Audit
+    const fence_create_info = vk.FenceCreateInfo{
+        .flags = .{ .signaled_bit = true },
+    };
+
+    var i: u32 = 0;
+    while (i < max_frames_in_flight) {
+        images_available[i] = try v_device.createSemaphore(vulkan_core.logical_device, &semaphore_create_info, null);
+        renders_finished[i] = try v_device.createSemaphore(vulkan_core.logical_device, &semaphore_create_info, null);
+        inflight_fences[i] = try v_device.createFence(vulkan_core.logical_device, &fence_create_info, null);
+        i += 1;
+    }
+
+    std.debug.assert(swapchain_images.len > 0);
+
+    try createFramebuffers(allocator, screen_dimensions);
+
+    try texture_pipeline.init(
+        .{ .width = 2048, .height = 2048 },
+        mesh_memory_index,
+        @intCast(u32, swapchain_images.len),
+        defines.initial_screen_dimensions,
+        mesh_memory,
+        defines.pipeline_video.memory_range_start,
+        defines.pipeline_video.indices_range_size,
+        defines.pipeline_video.vertices_range_size,
+        mapped_device_memory,
+    );
+
+    try generic_pipeline.init(
+        allocator,
+        mesh_memory_index,
+        jobs_command_buffer,
+        vulkan_core.graphics_present_queue,
+        @intCast(u32, swapchain_images.len),
+        mesh_memory,
+        0, // mesh_offset
+        defines.pipeline_generic.indices_range_size,
+        defines.pipeline_generic.vertices_range_size,
+        mapped_device_memory,
+    );
+}
+
+pub fn createVideoCanvas(width: u32, height: u32) !VideoCanvasHandle {
+    std.debug.assert(width <= std.math.maxInt(u16));
+    std.debug.assert(height <= std.math.maxInt(u16));
+    const result = VideoCanvasHandle{
+        .x = 0,
+        .y = 0,
+        .width = @intCast(u16, width),
+        .height = @intCast(u16, height),
+    };
+    video_stream = result;
+    return result;
+}
+
 pub fn faceWriter() graphics.FaceWriter {
     return graphics.FaceWriter.init(
         generic_pipeline.vertices_buffer,
@@ -124,15 +441,6 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
     );
 
     try render_pass.resizeSwapchain(screen_dimensions);
-
-    //
-    // Destroy and recreate multisampled image
-    //
-    // device_dispatch.destroyImage(logical_device, multisampled_image, null);
-    // device_dispatch.destroyImageView(logical_device, multisampled_image_view, null);
-    // device_dispatch.freeMemory(logical_device, multisampled_image_memory, null);
-
-    // try createMultiSampledImage(screen_dimensions.width, screen_dimensions.height, selected_memory_index);
 
     for (swapchain_image_views) |image_view| {
         device_dispatch.destroyImageView(logical_device, image_view, null);
@@ -254,6 +562,54 @@ pub fn recordRenderPass(
         },
     };
 
+    {
+        //
+        // Screen coordinates
+        //
+        const vertex_x: f32 = video_stream_placement.x;
+        const vertex_y: f32 = video_stream_placement.y;
+        const vertex_width: f32 = video_stream_output_dimensions.width * (2.0 / @intToFloat(f32, screen_dimensions.width));
+        const vertex_height: f32 = video_stream_output_dimensions.height * (2.0 / @intToFloat(f32, screen_dimensions.height));
+        var vertex_top_left = &texture_pipeline.vertices_buffer[0];
+        var vertex_top_right = &texture_pipeline.vertices_buffer[1];
+        var vertex_bottom_right = &texture_pipeline.vertices_buffer[2];
+        var vertex_bottom_left = &texture_pipeline.vertices_buffer[3];
+        vertex_top_left.x = vertex_x;
+        vertex_top_left.y = vertex_y;
+        vertex_top_right.x = vertex_x + vertex_width;
+        vertex_top_right.y = vertex_y;
+        vertex_bottom_right.x = vertex_x + vertex_width;
+        vertex_bottom_right.y = vertex_y + vertex_height;
+        vertex_bottom_left.x = vertex_x;
+        vertex_bottom_left.y = vertex_y + vertex_height;
+        //
+        // UV coordinates
+        //
+        const texture_x: f32 = 0;
+        const texture_y: f32 = 0;
+        const texture_width: f32 = video_stream_dimensions.width / @as(f32, defines.pipeline_video.framebuffer_dimensions.width);
+        const texture_height: f32 = video_stream_dimensions.height / @as(f32, defines.pipeline_video.framebuffer_dimensions.height);
+        std.debug.assert(texture_width <= 1.0);
+        std.debug.assert(texture_width >= 0.0);
+        vertex_top_left.u = texture_x;
+        vertex_top_left.v = texture_y;
+        vertex_top_right.u = texture_x + texture_width;
+        vertex_top_right.v = texture_y;
+        vertex_bottom_right.u = texture_x + texture_width;
+        vertex_bottom_right.v = texture_y + texture_height;
+        vertex_bottom_left.u = texture_x;
+        vertex_bottom_left.v = texture_y + texture_height;
+        //
+        // Indices
+        //
+        texture_pipeline.indices_buffer[0] = 0;
+        texture_pipeline.indices_buffer[1] = 1;
+        texture_pipeline.indices_buffer[2] = 2;
+        texture_pipeline.indices_buffer[3] = 0;
+        texture_pipeline.indices_buffer[4] = 2;
+        texture_pipeline.indices_buffer[5] = 3;
+    }
+
     for (command_buffers) |command_buffer, i| {
         try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
             .flags = .{},
@@ -338,6 +694,61 @@ pub fn recordRenderPass(
             &push_constant,
         );
         device_dispatch.cmdDrawIndexed(command_buffer, indices_count, 1, 0, 0, 0);
+
+        //
+        // Video pipeline
+        //
+        if (video_stream_enabled) {
+            device_dispatch.cmdBindPipeline(
+                command_buffer,
+                .graphics,
+                texture_pipeline.graphics_pipeline,
+            );
+
+            {
+                const viewports = [1]vk.Viewport{
+                    vk.Viewport{
+                        .x = 0.0,
+                        .y = 0.0,
+                        .width = @intToFloat(f32, screen_dimensions.width),
+                        .height = @intToFloat(f32, screen_dimensions.height),
+                        .min_depth = 0.0,
+                        .max_depth = 1.0,
+                    },
+                };
+                device_dispatch.cmdSetViewport(command_buffer, 0, 1, @ptrCast([*]const vk.Viewport, &viewports));
+            }
+            {
+                const scissors = [1]vk.Rect2D{
+                    vk.Rect2D{
+                        .offset = vk.Offset2D{
+                            .x = 0,
+                            .y = 0,
+                        },
+                        .extent = vk.Extent2D{
+                            .width = screen_dimensions.width,
+                            .height = screen_dimensions.height,
+                        },
+                    },
+                };
+                device_dispatch.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissors));
+            }
+
+            const video_vertex_buffers = [_]vk.Buffer{texture_pipeline.vulkan_vertices_buffer};
+            device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &video_vertex_buffers, &[1]vk.DeviceSize{0});
+            device_dispatch.cmdBindIndexBuffer(command_buffer, texture_pipeline.vulkan_indices_buffer, 0, .uint16);
+            device_dispatch.cmdBindDescriptorSets(
+                command_buffer,
+                .graphics,
+                texture_pipeline.pipeline_layout,
+                0,
+                1,
+                &[1]vk.DescriptorSet{texture_pipeline.descriptor_set_buffer[i]},
+                0,
+                undefined,
+            );
+            device_dispatch.cmdDrawIndexed(command_buffer, 6, 1, 0, 0, 0);
+        }
 
         device_dispatch.cmdEndRenderPass(command_buffer);
         try device_dispatch.endCommandBuffer(command_buffer);
@@ -522,14 +933,14 @@ fn transitionTextureToOptimal() !void {
         .p_signal_semaphores = undefined,
     }};
 
-    const job_fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{ .signaled_bit = false } }, null);
+    const job_fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{} }, null);
     try device_dispatch.queueSubmit(vulkan_core.graphics_present_queue, 1, &submit_command_infos, job_fence);
     _ = try device_dispatch.waitForFences(
         logical_device,
         1,
         @ptrCast([*]const vk.Fence, &job_fence),
         vk.TRUE,
-        std.time.ns_per_s * 2,
+        std.time.ns_per_s * 4,
     );
     device_dispatch.destroyFence(logical_device, job_fence, null);
     device_dispatch.freeCommandBuffers(
@@ -769,6 +1180,8 @@ pub fn deinit(allocator: std.mem.Allocator) void {
 
     cleanupSwapchain(allocator);
 
+    generic_pipeline.deinit(allocator);
+
     allocator.free(images_available);
     allocator.free(renders_finished);
     allocator.free(inflight_fences);
@@ -817,261 +1230,6 @@ fn selectSurfaceFormat(
         }
     }
     return null;
-}
-
-pub fn init(
-    allocator: std.mem.Allocator,
-    wayland_display: *Display,
-    wayland_surface: *Surface,
-    atlas: *Atlas,
-) !void {
-    texture_atlas = atlas;
-
-    const screen_dimensions = defines.initial_screen_dimensions;
-
-    try vulkan_core.init(
-        @ptrCast(*vk.wl_display, wayland_display),
-        @ptrCast(*vk.wl_surface, wayland_surface),
-    );
-
-    //
-    // Alias for readability
-    //
-    const v_instance = vulkan_core.instance_dispatch;
-    const v_device = vulkan_core.device_dispatch;
-
-    // Query and select appropriate surface format for swapchain
-
-    const surface_format_opt = try selectSurfaceFormat(allocator, .srgb_nonlinear_khr, .b8g8r8a8_unorm);
-    if (surface_format_opt) |format| {
-        swapchain_surface_format = format;
-    } else {
-        return error.RequiredSurfaceFormatUnavailable;
-    }
-
-    const mesh_memory_index: u32 = blk: {
-        // Find the best memory type for storing mesh + texture data
-        // Requirements:
-        //   - Sufficient space (20mib)
-        //   - Host visible (Host refers to CPU. Allows for direct access without needing DMA)
-        // Preferable
-        //  - Device local (Memory on the GPU / APU)
-
-        const memory_properties = v_instance.getPhysicalDeviceMemoryProperties(vulkan_core.physical_device);
-        if (print_vulkan_objects.memory_type_all) {
-            std.debug.print("\n** Memory heaps found on system **\n\n", .{});
-            printVulkanMemoryHeaps(memory_properties, 0);
-            std.debug.print("\n", .{});
-        }
-
-        const kib: u32 = 1024;
-        const mib: u32 = kib * 1024;
-        const minimum_space_required: u32 = mib * 20;
-
-        var memory_type_index: u32 = 0;
-        var memory_type_count = memory_properties.memory_type_count;
-
-        var suitable_memory_type_index_opt: ?u32 = null;
-
-        while (memory_type_index < memory_type_count) : (memory_type_index += 1) {
-            const memory_entry = memory_properties.memory_types[memory_type_index];
-            const heap_index = memory_entry.heap_index;
-
-            if (heap_index == memory_properties.memory_heap_count) {
-                std.log.warn("Invalid heap index {d} for memory type at index {d}. Skipping", .{ heap_index, memory_type_index });
-                continue;
-            }
-
-            const heap_size = memory_properties.memory_heaps[heap_index].size;
-
-            if (heap_size < minimum_space_required) {
-                continue;
-            }
-
-            const memory_flags = memory_entry.property_flags;
-            if (memory_flags.host_visible_bit) {
-                suitable_memory_type_index_opt = memory_type_index;
-                if (memory_flags.device_local_bit) {
-                    std.log.info("Selected memory for mesh buffer: Heap index ({d}) Memory index ({d})", .{ heap_index, memory_type_index });
-                    break :blk memory_type_index;
-                }
-            }
-        }
-
-        if (suitable_memory_type_index_opt) |suitable_memory_type_index| {
-            break :blk suitable_memory_type_index;
-        }
-
-        return error.NoValidVulkanMemoryTypes;
-    };
-
-    // TODO:
-    selected_memory_index = mesh_memory_index;
-
-    const surface_capabilities = try v_instance.getPhysicalDeviceSurfaceCapabilitiesKHR(vulkan_core.physical_device, vulkan_core.surface);
-
-    if (print_vulkan_objects.surface_abilties) {
-        std.debug.print("** Selected surface capabilites **\n\n", .{});
-        printSurfaceCapabilities(surface_capabilities, 1);
-        std.debug.print("\n", .{});
-    }
-
-    if (transparancy_enabled) {
-        // Check to see if the compositor supports transparent windows and what
-        // transparency mode needs to be set when creating the swapchain
-        const supported = surface_capabilities.supported_composite_alpha;
-        if (supported.pre_multiplied_bit_khr) {
-            alpha_mode = .{ .pre_multiplied_bit_khr = true };
-        } else if (supported.post_multiplied_bit_khr) {
-            alpha_mode = .{ .post_multiplied_bit_khr = true };
-        } else if (supported.inherit_bit_khr) {
-            alpha_mode = .{ .inherit_bit_khr = true };
-        } else {
-            std.log.info("Alpha windows not supported", .{});
-        }
-    }
-
-    if (surface_capabilities.current_extent.width == 0xFFFFFFFF or surface_capabilities.current_extent.height == 0xFFFFFFFF) {
-        swapchain_extent.width = screen_dimensions.width;
-        swapchain_extent.height = screen_dimensions.height;
-    }
-
-    std.debug.assert(swapchain_extent.width >= surface_capabilities.min_image_extent.width);
-    std.debug.assert(swapchain_extent.height >= surface_capabilities.min_image_extent.height);
-
-    std.debug.assert(swapchain_extent.width <= surface_capabilities.max_image_extent.width);
-    std.debug.assert(swapchain_extent.height <= surface_capabilities.max_image_extent.height);
-
-    swapchain_min_image_count = surface_capabilities.min_image_count + 1;
-
-    // TODO: Perhaps more flexibily should be allowed here. I'm unsure if an application is
-    //       supposed to match the rotation of the system / monitor, but I would assume not..
-    //       It is also possible that the inherit_bit_khr bit would be set in place of identity_bit_khr
-    if (surface_capabilities.current_transform.identity_bit_khr == false) {
-        std.log.err("Selected surface does not have the option to leave framebuffer image untransformed." ++
-            "This is likely a vulkan bug.", .{});
-        return error.VulkanSurfaceTransformInvalid;
-    }
-
-    swapchain = try v_device.createSwapchainKHR(vulkan_core.logical_device, &vk.SwapchainCreateInfoKHR{
-        .surface = vulkan_core.surface,
-        .min_image_count = swapchain_min_image_count,
-        .image_format = swapchain_surface_format.format,
-        .image_color_space = swapchain_surface_format.color_space,
-        .image_extent = swapchain_extent,
-        .image_array_layers = 1,
-        .image_usage = .{ .color_attachment_bit = true, .transfer_src_bit = true },
-        .image_sharing_mode = .exclusive,
-        // NOTE: Only valid when `image_sharing_mode` is CONCURRENT
-        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkSwapchainCreateInfoKHR.html
-        .queue_family_index_count = 0,
-        .p_queue_family_indices = undefined,
-        .pre_transform = .{ .identity_bit_khr = true },
-        .composite_alpha = alpha_mode,
-        // NOTE: FIFO_KHR is required to be available for all vulkan capable devices
-        //       For that reason we don't need to query for it on our selected device
-        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkPresentModeKHR.html
-        .present_mode = .fifo_khr,
-        .clipped = vk.TRUE,
-        .flags = .{},
-        .old_swapchain = .null_handle,
-    }, null);
-
-    swapchain_images = blk: {
-        var image_count: u32 = undefined;
-        if (.success != (try v_device.getSwapchainImagesKHR(vulkan_core.logical_device, swapchain, &image_count, null))) {
-            return error.FailedToGetSwapchainImagesCount;
-        }
-
-        var images = try allocator.alloc(vk.Image, image_count);
-        if (.success != (try v_device.getSwapchainImagesKHR(vulkan_core.logical_device, swapchain, &image_count, images.ptr))) {
-            return error.FailedToGetSwapchainImages;
-        }
-
-        break :blk images;
-    };
-
-    swapchain_image_views = try allocator.alloc(vk.ImageView, swapchain_images.len);
-    try createSwapchainImageViews();
-
-    try render_pass.init(swapchain_extent, swapchain_surface_format.format, selected_memory_index);
-
-    {
-        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-            .command_pool = vulkan_core.command_pool,
-            .level = .primary,
-            .command_buffer_count = 1,
-        };
-        try v_device.allocateCommandBuffers(
-            vulkan_core.logical_device,
-            &command_buffer_allocate_info,
-            @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-        );
-    }
-
-    {
-        command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain_images.len);
-        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-            .command_pool = vulkan_core.command_pool,
-            .level = .primary,
-            .command_buffer_count = @intCast(u32, command_buffers.len),
-        };
-        try v_device.allocateCommandBuffers(
-            vulkan_core.logical_device,
-            &command_buffer_allocate_info,
-            command_buffers.ptr,
-        );
-    }
-
-    var mesh_memory = try v_device.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
-        .allocation_size = memory_size,
-        .memory_type_index = mesh_memory_index,
-    }, null);
-
-    mapped_device_memory = @ptrCast([*]u8, (try v_device.mapMemory(vulkan_core.logical_device, mesh_memory, 0, memory_size, .{})).?);
-
-    images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
-    renders_finished = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
-    inflight_fences = try allocator.alloc(vk.Fence, max_frames_in_flight);
-
-    const semaphore_create_info = vk.SemaphoreCreateInfo{
-        .flags = .{},
-    };
-
-    // TODO: Audit
-    const fence_create_info = vk.FenceCreateInfo{
-        .flags = .{ .signaled_bit = true },
-    };
-
-    var i: u32 = 0;
-    while (i < max_frames_in_flight) {
-        images_available[i] = try v_device.createSemaphore(vulkan_core.logical_device, &semaphore_create_info, null);
-        renders_finished[i] = try v_device.createSemaphore(vulkan_core.logical_device, &semaphore_create_info, null);
-        inflight_fences[i] = try v_device.createFence(vulkan_core.logical_device, &fence_create_info, null);
-        i += 1;
-    }
-
-    std.debug.assert(swapchain_images.len > 0);
-
-    try createFramebuffers(allocator, screen_dimensions);
-
-    std.log.info("Generic pipeline init begin", .{});
-    try generic_pipeline.init(
-        allocator,
-        mesh_memory_index,
-        jobs_command_buffer,
-        vulkan_core.graphics_present_queue,
-        @intCast(u32, swapchain_images.len),
-        mesh_memory,
-        0, // mesh_offset
-        indices_range_size,
-        vertices_range_size,
-        // command_pool,
-        mapped_device_memory,
-    );
-    std.log.info("Generic pipeline init end", .{});
-
-    std.log.info("Renderer init end", .{});
 }
 
 //

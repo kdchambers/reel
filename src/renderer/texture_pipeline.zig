@@ -5,30 +5,33 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 
+const vulkan_core = @import("vulkan_core.zig");
 const vulkan_config = @import("vulkan_config.zig");
 const shaders = @import("shaders");
 const geometry = @import("../geometry.zig");
 const graphics = @import("../graphics.zig");
 
+const shared_render_pass = @import("render_pass.zig");
+
 const Pixel = graphics.RGBA(u8);
 
-const Vertex = extern struct {
+pub const Vertex = extern struct {
     x: f32,
     y: f32,
     u: f32,
     v: f32,
 };
 
-var descriptor_set_layout_buffer: [8]vk.DescriptorSetLayout = undefined;
-var descriptor_set_layout_count: u32 = 0;
+pub var descriptor_set_layout_buffer: [8]vk.DescriptorSetLayout = undefined;
+pub var descriptor_set_layout_count: u32 = 0;
 
-var descriptor_set_buffer: [8]vk.DescriptorSet = undefined;
-var descriptor_set_count: u32 = 0;
+pub var descriptor_set_buffer: [8]vk.DescriptorSet = undefined;
+pub var descriptor_set_count: u32 = 0;
 var descriptor_pool: vk.DescriptorPool = undefined;
 
 var sampler: vk.Sampler = undefined;
 
-var pipeline_layout: vk.PipelineLayout = undefined;
+pub var pipeline_layout: vk.PipelineLayout = undefined;
 pub var graphics_pipeline: vk.Pipeline = undefined;
 
 var vertex_shader_module: vk.ShaderModule = undefined;
@@ -37,20 +40,29 @@ var fragment_shader_module: vk.ShaderModule = undefined;
 var texture_image: vk.Image = undefined;
 var texture_image_view: vk.ImageView = undefined;
 
-var memory_map: []Pixel = undefined;
+pub var vertices_buffer: []Vertex = undefined;
+pub var indices_buffer: []u16 = undefined;
+pub var vulkan_vertices_buffer: vk.Buffer = undefined;
+pub var vulkan_indices_buffer: vk.Buffer = undefined;
+
+pub var memory_map: []Pixel = undefined;
 
 pub fn init(
-    device_dispatch: vulkan_config.DeviceDispatch,
-    logical_device: vk.Device,
-    render_pass: vk.RenderPass,
     texture_dimensions: geometry.Dimensions2D(u32),
     texture_memory_index: u32,
-    command_buffer: vk.CommandBuffer,
-    queue: vk.Queue,
     swapchain_image_count: u32,
-    initial_viewport_dimensions: geometry.Dimensions2D(u32),
+    initial_viewport_dimensions: geometry.Dimensions2D(u16),
+    mesh_memory: vk.DeviceMemory,
+    memory_offset: u32,
+    indices_range_size: u32,
+    vertices_range_size: u32,
+    mapped_device_memory: [*]u8,
 ) !void {
-    const texture_pixel_count = @intCast(usize, texture_dimensions.width) + texture_dimensions.height;
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+    const queue = vulkan_core.graphics_present_queue;
+
+    const texture_pixel_count = @intCast(usize, texture_dimensions.width) * texture_dimensions.height;
     const texture_size_bytes: usize = texture_pixel_count * @sizeOf(Pixel);
 
     {
@@ -66,7 +78,7 @@ pub fn init(
             },
             .mip_levels = 1,
             .array_layers = 1,
-            .initial_layout = .undefined,
+            .initial_layout = .preinitialized,
             .usage = .{ .sampled_bit = true },
             .samples = .{ .@"1_bit" = true },
             .sharing_mode = .exclusive,
@@ -84,6 +96,24 @@ pub fn init(
         .memory_type_index = texture_memory_index,
     }, null);
 
+    try device_dispatch.bindImageMemory(logical_device, texture_image, image_memory, 0);
+    const mapped_memory_opt = (try device_dispatch.mapMemory(
+        logical_device,
+        image_memory,
+        0,
+        texture_size_bytes,
+        .{},
+    ));
+
+    if (mapped_memory_opt == null) {
+        std.log.err("renderer: Failed to map shader memory", .{});
+        return error.MapMemoryFail;
+    }
+
+    memory_map = @ptrCast([*]Pixel, mapped_memory_opt.?)[0..texture_pixel_count];
+    // Clear isn't required
+    // std.mem.set(Pixel, memory_map, .{ .r = 0, .g = 0, .b = 0, .a = 0 });
+
     texture_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
         .flags = .{},
         .image = texture_image,
@@ -99,34 +129,64 @@ pub fn init(
         .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
     }, null);
 
-    //
-    // Bind memory
-    //
-
-    try device_dispatch.bindImageMemory(logical_device, texture_image, image_memory, 0);
-
-    const mapped_memory_opt = (try device_dispatch.mapMemory(
-        logical_device,
-        image_memory,
-        0,
-        texture_size_bytes,
-        .{},
-    ));
-
-    if (mapped_memory_opt == 0) {
-        std.log.err("renderer: Failed to map shader memory", .{});
-        return error.MapMemoryFail;
-    }
-
-    memory_map = @ptrCast([*]Pixel, mapped_memory_opt.?)[0..texture_pixel_count];
-    std.mem.set(Pixel, memory_map, .{ .r = 0, .g = 0, .b = 0, .a = 0 });
-
-    const transition_layout_fence = try layoutToOptimal(
+    try layoutToOptimal(
         device_dispatch,
         logical_device,
-        command_buffer,
         queue,
     );
+
+    {
+        const buffer_create_info = vk.BufferCreateInfo{
+            .size = vertices_range_size,
+            .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
+            .sharing_mode = .exclusive,
+            // NOTE: Only valid when `sharing_mode` is CONCURRENT
+            // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+            .flags = .{},
+        };
+
+        vulkan_vertices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
+        try device_dispatch.bindBufferMemory(
+            logical_device,
+            vulkan_vertices_buffer,
+            mesh_memory,
+            memory_offset,
+        );
+    }
+
+    {
+        const buffer_create_info = vk.BufferCreateInfo{
+            .size = indices_range_size,
+            .usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
+            .sharing_mode = .exclusive,
+            // NOTE: Only valid when `sharing_mode` is CONCURRENT
+            // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+            .flags = .{},
+        };
+
+        vulkan_indices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
+        try device_dispatch.bindBufferMemory(
+            logical_device,
+            vulkan_indices_buffer,
+            mesh_memory,
+            memory_offset + vertices_range_size,
+        );
+    }
+
+    const indices_range_index_begin = memory_offset + vertices_range_size;
+    const indices_range_count = @divExact(indices_range_size, @sizeOf(u16));
+    const vertices_range_count = @divExact(vertices_range_size, @sizeOf(Vertex));
+
+    {
+        const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &mapped_device_memory[memory_offset]));
+        vertices_buffer = vertex_ptr[0..vertices_range_count];
+        const indices_ptr = @ptrCast([*]u16, @alignCast(16, &mapped_device_memory[indices_range_index_begin]));
+        indices_buffer = indices_ptr[0..indices_range_count];
+    }
 
     vertex_shader_module = try createVertexShaderModule(device_dispatch, logical_device);
     fragment_shader_module = try createFragmentShaderModule(device_dispatch, logical_device);
@@ -140,32 +200,18 @@ pub fn init(
         .p_push_constant_ranges = undefined,
         .flags = .{},
     };
-    pipeline_layout = device_dispatch.createPipelineLayout(logical_device, &pipeline_layout_create_info, null);
 
+    pipeline_layout = try device_dispatch.createPipelineLayout(logical_device, &pipeline_layout_create_info, null);
     try createDescriptorPool(device_dispatch, logical_device, swapchain_image_count);
     try createDescriptorSets(device_dispatch, logical_device, swapchain_image_count);
-
-    try createGraphicsPipeline(device_dispatch, logical_device, render_pass, initial_viewport_dimensions);
-
-    _ = try device_dispatch.waitForFences(
-        logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &transition_layout_fence),
-        vk.TRUE,
-        std.time.ns_per_s * 3,
-    );
-    device_dispatch.destroyFence(logical_device, transition_layout_fence, null);
-
-    //
-    // TODO: Make sure command_buffer is dealt with properly
-    //
+    try createGraphicsPipeline(device_dispatch, logical_device, initial_viewport_dimensions);
 }
 
 fn createDescriptorPool(
     device_dispatch: vulkan_config.DeviceDispatch,
     logical_device: vk.Device,
     create_count: u32,
-) !vk.DescriptorPool {
+) !void {
     const descriptor_pool_sizes = [_]vk.DescriptorPoolSize{
         .{
             .type = .combined_image_sampler,
@@ -253,7 +299,7 @@ fn createDescriptorSets(
     while (i < create_count) : (i += 1) {
         const descriptor_image_info = [_]vk.DescriptorImageInfo{
             .{
-                .image_layout = .shader_read_only_optimal,
+                .image_layout = .general,
                 .image_view = texture_image_view,
                 .sampler = sampler,
             },
@@ -275,15 +321,32 @@ fn createDescriptorSets(
 fn layoutToOptimal(
     device_dispatch: vulkan_config.DeviceDispatch,
     logical_device: vk.Device,
-    command_buffer: vk.CommandBuffer,
     queue: vk.Queue,
-) vk.Fence {
+) !void {
+    const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+        .command_pool = vulkan_core.command_pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    };
+
+    var command_buffer: vk.CommandBuffer = undefined;
+    try device_dispatch.allocateCommandBuffers(
+        logical_device,
+        &command_buffer_allocate_info,
+        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+    );
+
+    try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+        .flags = .{ .one_time_submit_bit = true },
+        .p_inheritance_info = null,
+    });
+
     const barrier = [_]vk.ImageMemoryBarrier{
         .{
             .src_access_mask = .{},
             .dst_access_mask = .{ .shader_read_bit = true },
-            .old_layout = .undefined,
-            .new_layout = .shader_read_only_optimal,
+            .old_layout = .preinitialized,
+            .new_layout = .general,
             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .image = texture_image,
@@ -322,12 +385,12 @@ fn layoutToOptimal(
         .p_wait_semaphores = undefined,
         .p_wait_dst_stage_mask = undefined,
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
         .signal_semaphore_count = 0,
         .p_signal_semaphores = undefined,
     }};
 
-    const fence = try device_dispatch.createFence(logical_device, &.{}, null);
+    const fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{} }, null);
 
     try device_dispatch.queueSubmit(
         queue,
@@ -336,14 +399,30 @@ fn layoutToOptimal(
         fence,
     );
 
-    return fence;
+    //
+    // TODO: Check return
+    //
+    _ = try device_dispatch.waitForFences(
+        logical_device,
+        1,
+        @ptrCast([*]const vk.Fence, &fence),
+        vk.TRUE,
+        std.time.ns_per_s * 4,
+    );
+
+    device_dispatch.destroyFence(logical_device, fence, null);
+    device_dispatch.freeCommandBuffers(
+        logical_device,
+        vulkan_core.command_pool,
+        1,
+        @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+    );
 }
 
 fn createGraphicsPipeline(
     device_dispatch: vulkan_config.DeviceDispatch,
     logical_device: vk.Device,
-    render_pass: vk.RenderPass,
-    initial_viewport_dimensions: geometry.Dimensions2D(u32),
+    initial_viewport_dimensions: geometry.Dimensions2D(u16),
 ) !void {
     const vertex_input_attribute_descriptions = [_]vk.VertexInputAttributeDescription{
         vk.VertexInputAttributeDescription{ // inPosition
@@ -390,7 +469,7 @@ fn createGraphicsPipeline(
     };
 
     const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
-        .vertex_binding_description_count = @intCast(u32, vertex_input_binding_descriptions.size),
+        .vertex_binding_description_count = @intCast(u32, vertex_input_binding_descriptions.len),
         .vertex_attribute_description_count = @intCast(u32, vertex_input_attribute_descriptions.len),
         .p_vertex_binding_descriptions = &vertex_input_binding_descriptions,
         .p_vertex_attribute_descriptions = &vertex_input_attribute_descriptions,
@@ -451,7 +530,7 @@ fn createGraphicsPipeline(
 
     const multisampling = vk.PipelineMultisampleStateCreateInfo{
         .sample_shading_enable = vk.FALSE,
-        .rasterization_samples = .@"1_bit",
+        .rasterization_samples = shared_render_pass.antialias_sample_count,
         .min_sample_shading = 0.0,
         .p_sample_mask = null,
         .alpha_to_coverage_enable = vk.FALSE,
@@ -501,7 +580,7 @@ fn createGraphicsPipeline(
             .p_color_blend_state = &color_blending,
             .p_dynamic_state = &dynamic_state_create_info,
             .layout = pipeline_layout,
-            .render_pass = render_pass,
+            .render_pass = shared_render_pass.pass,
             .subpass = 0,
             .base_pipeline_handle = .null_handle,
             .base_pipeline_index = 0,

@@ -4,29 +4,58 @@
 const geometry = @import("../geometry.zig");
 const graphics = @import("../graphics.zig");
 
+const video_pipeline = @import("texture_pipeline.zig");
+
 pub const ScreenPixelBaseType = u16;
 pub const ScreenNormalizedBaseType = f32;
 
 pub const TexturePixelBaseType = u16;
 pub const TextureNormalizedBaseType = f32;
 
-pub const indices_range_index_begin = 0;
-pub const indices_range_size = max_texture_quads_per_render * @sizeOf(u16) * 6; // 12 kb
-pub const indices_range_count = indices_range_size / @sizeOf(u16);
-pub const vertices_range_index_begin = indices_range_size;
-pub const vertices_range_size = max_texture_quads_per_render * @sizeOf(graphics.GenericVertex) * 4; // 80 kb
-pub const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericVertex);
-pub const memory_size = indices_range_size + vertices_range_size;
+pub const pipeline_generic = struct {
+    /// Determines the memory allocated for storing mesh data
+    /// Represents the number of quads that will be able to be drawn
+    /// This can be a colored quad, or a textured quad such as a charactor
+    pub const max_texture_quads_per_render: u32 = 1024;
+
+    pub const indices_range_index_begin = 0;
+    pub const indices_range_size = max_texture_quads_per_render * @sizeOf(u16) * 6; // 12 kb
+    pub const indices_range_count = indices_range_size / @sizeOf(u16);
+    pub const vertices_range_index_begin = indices_range_size;
+    pub const vertices_range_size = max_texture_quads_per_render * @sizeOf(graphics.GenericVertex) * 4; // 80 kb
+    pub const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericVertex);
+    pub const memory_size = indices_range_size + vertices_range_size;
+
+    pub const memory_range_end = pipeline_generic.memory_size;
+};
+
+pub const pipeline_video = struct {
+    const Vertex = video_pipeline.Vertex;
+    pub const max_texture_quads_per_render: u32 = 10;
+    pub const memory_range_start = pipeline_generic.memory_range_end;
+
+    pub const indices_range_index_begin = memory_range_start;
+    pub const indices_range_size = max_texture_quads_per_render * @sizeOf(u16) * 6;
+    pub const indices_range_count = indices_range_size / @sizeOf(u16);
+
+    pub const vertices_range_index_begin = indices_range_size;
+    pub const vertices_range_size = max_texture_quads_per_render * @sizeOf(Vertex) * 4;
+    pub const vertices_range_count = vertices_range_size / @sizeOf(Vertex);
+
+    pub const memory_size = indices_range_size + vertices_range_size;
+
+    pub const framebuffer_dimensions = struct {
+        pub const width = 2048;
+        pub const height = 2048;
+    };
+};
+
+pub const memory_size = pipeline_generic.memory_size + pipeline_video.memory_size;
 
 pub const initial_screen_dimensions = geometry.Dimensions2D(u16){
     .width = 1040,
     .height = 640,
 };
-
-/// Determines the memory allocated for storing mesh data
-/// Represents the number of quads that will be able to be drawn
-/// This can be a colored quad, or a textured quad such as a charactor
-pub const max_texture_quads_per_render: u32 = 1024;
 
 /// Maximum number of screen framebuffers to use
 /// 2-3 would be recommented to avoid screen tearing
@@ -71,7 +100,3 @@ pub const point_top_left = ScreenPoint{ .x = -1.0, .y = -1.0 };
 pub const point_top_right = ScreenPoint{ .x = 1.0, .y = -1.0 };
 pub const point_bottom_left = ScreenPoint{ .x = -1.0, .y = 1.0 };
 pub const point_bottom_right = ScreenPoint{ .x = 1.0, .y = 1.0 };
-
-const A: if (vertices_range_index_begin + vertices_range_size <= memory_size) void else @compileError("") = undefined;
-
-// std.debug.assert(vertices_range_index_begin + vertices_range_size <= memory_size);

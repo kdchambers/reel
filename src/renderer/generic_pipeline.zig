@@ -71,7 +71,7 @@ pub fn init(
             .mip_levels = 1,
             .array_layers = 1,
             .initial_layout = .undefined,
-            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true },
+            .usage = .{ .sampled_bit = true },
             .samples = .{ .@"1_bit" = true },
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
@@ -166,7 +166,7 @@ pub fn init(
 
     {
         const fence_create_info = vk.FenceCreateInfo{
-            .flags = .{ .signaled_bit = false },
+            .flags = .{},
         };
         const fence = try device_dispatch.createFence(logical_device, &fence_create_info, null);
 
@@ -254,7 +254,6 @@ pub fn init(
     const indices_range_count = @divExact(indices_range_size, @sizeOf(u16));
     const vertices_range_count = @divExact(vertices_range_size, @sizeOf(graphics.GenericVertex));
 
-    // const mesh_size = vertices_range_size + indices_range_size;
     {
         const Vertex = graphics.GenericVertex;
         const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &mapped_device_memory[memory_offset]));
@@ -275,6 +274,11 @@ pub fn init(
         logical_device,
         initial_viewport_dimensions,
     );
+}
+
+pub fn deinit(allocator: std.mem.Allocator) void {
+    allocator.free(descriptor_set_layouts);
+    allocator.free(descriptor_sets);
 }
 
 fn createDescriptorSets(
