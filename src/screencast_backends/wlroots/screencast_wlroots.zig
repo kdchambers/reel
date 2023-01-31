@@ -185,6 +185,23 @@ fn finishedInitializationCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Scre
             display_info.stride = buffer.stride;
             display_info.format = buffer.format;
 
+            //
+            // TODO: This should be part of pixel format validation and will be inside
+            //       a switch prong for the specific type
+            //
+            std.debug.assert(display_info.stride == display_info.width * 4);
+            switch (display_info.format) {
+                .xbgr8888 => {},
+                else => {
+                    std.log.err("screencast: Pixel format conversion from {s} to rgba8888 not implemented", .{
+                        @tagName(buffer.format),
+                    });
+                    return onOpenErrorCallback();
+                },
+            }
+
+            std.log.info("screencast: Source pixel format: {s}", .{@tagName(buffer.format)});
+
             const bytes_per_frame = buffer.stride * buffer.height;
             const pool_size_bytes = bytes_per_frame * buffer_entry_count;
 
@@ -231,6 +248,14 @@ fn frameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFram
         .ready => {
             const buffer_memory = buffer_allocator.mappedMemoryForBuffer(&entry.buffer);
             const unconverted_pixels = @ptrCast([*]PixelType, buffer_memory.ptr);
+            switch (display_info.format) {
+                //
+                // Nothing to do
+                //
+                .xbgr8888 => {},
+                else => unreachable,
+            }
+
             entry.frame_index = invalid_frame;
             frameReadyCallback(display_info.width, display_info.height, unconverted_pixels);
         },
