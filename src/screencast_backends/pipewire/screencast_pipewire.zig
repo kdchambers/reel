@@ -113,14 +113,11 @@ pub fn detectSupport() bool {
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
     var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
-    if (dbus.errorIsSet(&err)) {
-        std.log.err("Failed to open a dbus connection. Error: '{s}'", .{
-            err.message,
-        });
+    if (dbus.errorIsSet(&err) != 0) {
         return false;
     }
     const source_mode_flags = getProperty(u32, connection, "AvailableSourceTypes") catch return false;
-    return source_mode_flags.window;
+    return (@bitCast(SourceTypeFlags, source_mode_flags).window == true);
 }
 
 pub fn open(
@@ -212,7 +209,7 @@ pub fn getProperty(
         &err,
     ) orelse {
         const error_message = if (dbus.errorIsSet(&err) != 0) err.message else "unknown";
-        std.log.err("dbus_client: dbus.connectionSendWithReplyAndBlock( failed. Error: {s}", .{
+        std.log.err("dbus_client: dbus.connectionSendWithReplyAndBlock failed. Error: {s}", .{
             error_message,
         });
         return error.SendAndAwaitMessageFail;

@@ -14,8 +14,6 @@ const wlr = wayland.client.zwlr;
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 
-const screen_stream_backend = @import("wayland_client/screen_stream.zig");
-
 const XCursor = struct {
     const hidden = "hidden";
     const left_ptr = "left_ptr";
@@ -90,8 +88,8 @@ var pointer: *wl.Pointer = undefined;
 var frame_callback: *wl.Callback = undefined;
 var xdg_toplevel: *xdg.Toplevel = undefined;
 var xdg_surface: *xdg.Surface = undefined;
-var screencopy_manager: *wlr.ScreencopyManagerV1 = undefined;
-var output_opt: ?*wl.Output = undefined;
+pub var screencopy_manager_opt: ?*wlr.ScreencopyManagerV1 = null;
+pub var output_opt: ?*wl.Output = null;
 
 var wayland_fd: i32 = undefined;
 
@@ -99,7 +97,17 @@ var cursor_theme: *wl.CursorTheme = undefined;
 var cursor: *wl.Cursor = undefined;
 var cursor_surface: *wl.Surface = undefined;
 var xcursor: [:0]const u8 = undefined;
-var shared_memory: *wl.Shm = undefined;
+pub var shared_memory: *wl.Shm = undefined;
+
+pub const OnFrameTickCallbackFn = fn (frame_index: u32, data: *void) void;
+
+pub const OnFrameTickCallbackEntry = struct {
+    callback: *const OnFrameTickCallbackFn,
+    data: *void,
+};
+
+var frame_tick_callback_buffer: [2]OnFrameTickCallbackEntry = undefined;
+var frame_tick_callback_count: u32 = 0;
 
 //
 // Public Interface
@@ -110,6 +118,21 @@ var shared_memory: *wl.Shm = undefined;
 // fn: mouseCoordinatesNDCR
 // ns: screen_stream
 //
+
+pub fn addFrameTickCallback(entry: OnFrameTickCallbackEntry) !u32 {
+    if (frame_tick_callback_count == frame_tick_callback_buffer.len)
+        return error.BufferFull;
+    const index_handle = frame_tick_callback_count;
+    frame_tick_callback_buffer[frame_tick_callback_count] = entry;
+    frame_tick_callback_count += 1;
+    return index_handle;
+}
+
+pub fn removeFrameTickCallback(index: u32) void {
+    std.debug.assert(index < frame_tick_callback_count);
+    frame_tick_callback_buffer[index] = frame_tick_callback_buffer[frame_tick_callback_count - 1];
+    frame_tick_callback_count -= 1;
+}
 
 pub fn init(app_name: [*:0]const u8) !void {
     display = try wl.Display.connect(null);
@@ -211,39 +234,6 @@ pub fn mouseCoordinatesNDCR() geometry.Coordinates2D(f64) {
     };
 }
 
-pub const screen_stream = struct {
-    const PixelType = graphics.RGBA(u8);
-    const FrameImage = graphics.Image(PixelType);
-
-    const OpenOnSuccessFn = screen_stream_backend.OpenOnSuccessFn;
-    const OpenOnErrorFn = screen_stream_backend.OpenOnErrorFn;
-
-    pub inline fn open(
-        on_success_cb: *const OpenOnSuccessFn,
-        on_error_cb: *const OpenOnErrorFn,
-    ) !void {
-        try screen_stream_backend.open(
-            output_opt.?,
-            screencopy_manager,
-            shared_memory,
-            on_success_cb,
-            on_error_cb,
-        );
-    }
-
-    pub inline fn close() void {
-        screen_stream_backend.close();
-    }
-
-    pub inline fn nextFrameImage() ?FrameImage {
-        return screen_stream_backend.nextFrameImage();
-    }
-
-    pub inline fn state() screen_stream_backend.State {
-        return screen_stream_backend.state;
-    }
-};
-
 //
 // Private Interface
 //
@@ -315,6 +305,12 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, _: *const voi
                 return;
             };
             frame_callback.setListener(*const void, frameListener, &{});
+
+            var i: usize = 0;
+            while (i < frame_tick_callback_count) : (i += 1) {
+                const entry_ptr = frame_tick_callback_buffer[i];
+                entry_ptr.callback(frame_index, entry_ptr.data);
+            }
             frame_index += 1;
             pending_swapchain_images_count += 1;
         },
@@ -493,7 +489,7 @@ fn registryListener(registry_ref: *wl.Registry, event: wl.Registry.Event, _: *co
             } else if (std.cstr.cmp(global.interface, wl.Shm.getInterface().name) == 0) {
                 shared_memory = registry_ref.bind(global.name, wl.Shm, 1) catch return;
             } else if (std.cstr.cmp(global.interface, wlr.ScreencopyManagerV1.getInterface().name) == 0) {
-                screencopy_manager = registry_ref.bind(global.name, wlr.ScreencopyManagerV1, 3) catch return;
+                screencopy_manager_opt = registry_ref.bind(global.name, wlr.ScreencopyManagerV1, 3) catch return;
             } else if (std.cstr.cmp(global.interface, wl.Output.getInterface().name) == 0) {
                 output_opt = registry_ref.bind(global.name, wl.Output, 2) catch return;
             } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {

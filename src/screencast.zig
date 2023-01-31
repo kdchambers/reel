@@ -5,12 +5,14 @@ const std = @import("std");
 const graphics = @import("graphics.zig");
 
 const backend_pipewire = @import("screencast_backends/pipewire/screencast_pipewire.zig");
+const backend_wlroots = @import("screencast_backends/wlroots/screencast_wlroots.zig");
 
 pub const State = enum(u8) {
     uninitialized,
     init_pending,
     init_failed,
     open,
+    fatal_error,
     closed,
     paused,
 };
@@ -24,7 +26,7 @@ pub const FrameImage = graphics.Image(PixelType);
 /// List of backends for screencasting, ordered in terms of preference
 /// Top of the list being the most preferable
 pub const Backend = enum(u16) {
-    wlr,
+    wlroots,
     pipewire,
     invalid = std.math.maxInt(u16),
 };
@@ -57,6 +59,7 @@ var backend_buffer: [2]Backend = undefined;
 pub fn createInterface(backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
     return switch (backend) {
         .pipewire => backend_pipewire.createInterface(onFrameReady),
+        .wlroots => backend_wlroots.createInterface(onFrameReady),
         //
         // TODO: Implement other backends
         //
@@ -76,13 +79,22 @@ pub fn createBestInterface(onFrameReady: *const OnFrameReadyFn) ?Interface {
     });
     return switch (selected_backend) {
         .pipewire => backend_pipewire.createInterface(onFrameReady),
-        .wlr => null,
+        .wlroots => backend_wlroots.createInterface(onFrameReady),
         else => null,
     };
 }
 
-// TODO: Implement properly
 pub fn detectBackends() []Backend {
-    backend_buffer[0] = .pipewire;
-    return backend_buffer[0..1];
+    var index: usize = 0;
+    const have_wlroots = backend_wlroots.detectSupport();
+    const have_pipewire = backend_pipewire.detectSupport();
+    if (have_wlroots) {
+        backend_buffer[index] = .wlroots;
+        index += 1;
+    }
+    if (have_pipewire) {
+        backend_buffer[index] = .pipewire;
+        index += 1;
+    }
+    return backend_buffer[0..index];
 }
