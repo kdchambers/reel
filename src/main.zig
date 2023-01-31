@@ -13,6 +13,8 @@ const geometry = @import("geometry.zig");
 const event_system = @import("event_system.zig");
 const screencast = @import("screencast.zig");
 
+const video_encoder = @import("video_record.zig");
+
 const fontana = @import("fontana");
 const Atlas = fontana.Atlas;
 const Font = fontana.Font(.freetype_harfbuzz, .{
@@ -136,7 +138,6 @@ var is_record_requested: bool = true;
 
 // Used to collecting some basic performance data
 var app_loop_iteration: u64 = 0;
-var frames_presented_count: u64 = 0;
 var slowest_frame_ns: u64 = 0;
 var fastest_frame_ns: u64 = std.math.maxInt(u64);
 var frame_duration_total_ns: u64 = 0;
@@ -180,11 +181,26 @@ var app_runtime_start: i128 = undefined;
 var top_reserved_pixels: u16 = 0;
 var screencast_interface: ?screencast.Interface = null;
 
+const Checkbox = widget.Checkbox;
+var enable_preview_checkbox: ?Checkbox = null;
+
+var gpu_texture_mutex: std.Thread.Mutex = undefined;
+
+const StreamState = enum(u8) {
+    idle,
+    preview,
+    record,
+    record_preview,
+};
+var stream_state: StreamState = .idle;
+var video_stream_frame_index: u32 = 0;
+
 pub fn main() !void {
     app_runtime_start = std.time.nanoTimestamp();
 
     try init();
     try appLoop(general_allocator);
+
     deinit();
 }
 
@@ -192,7 +208,7 @@ pub fn init() !void {
     general_allocator = if (builtin.mode == .Debug) stdlib_gpa.allocator() else std.heap.c_allocator;
 
     font = Font.initFromFile(general_allocator, asset_path_font) catch |err| {
-        std.log.err("app: Failed to initialize fonts. Is Freetype library installed? Error code: {}", .{err});
+        std.log.err("app: Failed to initialize fonts. Is Freetype installed? Error code: {}", .{err});
         return err;
     };
     errdefer font.deinit(general_allocator);
@@ -253,7 +269,9 @@ pub fn init() !void {
         &wayland_client.is_mouse_in_screen,
     );
 
-    screencast_interface = screencast.createBestInterface();
+    screencast_interface = screencast.createBestInterface(
+        writeScreencastPixelBufferCallback,
+    );
     if (screencast_interface == null) {
         std.log.warn("No screencast backends detected", .{});
     }
@@ -272,38 +290,93 @@ fn deinit() void {
     }
 }
 
+//
+// Callbacks
+//
+
+fn writeScreencastPixelBufferCallback(width: u32, height: u32, pixels: [*]const screencast.PixelType) void {
+    if (screencast_interface.?.state() != .open)
+        return;
+
+    gpu_texture_mutex.lock();
+    defer gpu_texture_mutex.unlock();
+
+    const convert_image_start = std.time.nanoTimestamp();
+
+    switch (stream_state) {
+        .preview => {
+            var video_frame = renderer.videoFrame();
+            var y: usize = 0;
+            var src_index: usize = 0;
+            var dst_index: usize = 0;
+            while (y < height) : (y += 1) {
+                @memcpy(
+                    @ptrCast([*]u8, &video_frame.pixels[dst_index]),
+                    @ptrCast([*]const u8, &pixels[src_index]),
+                    width * @sizeOf(screencast.PixelType),
+                );
+                src_index += width;
+                dst_index += video_frame.width;
+            }
+        },
+        .record_preview => {
+            std.debug.assert(video_encoder.state == .encoding);
+            video_encoder.write(pixels, video_stream_frame_index) catch |err| {
+                std.log.err("app: Failed to write frame to video_encoder buffer. Error: {}", .{err});
+            };
+            video_stream_frame_index += 1;
+            var video_frame = renderer.videoFrame();
+            var y: usize = 0;
+            var src_index: usize = 0;
+            var dst_index: usize = 0;
+            while (y < height) : (y += 1) {
+                @memcpy(
+                    @ptrCast([*]u8, &video_frame.pixels[dst_index]),
+                    @ptrCast([*]const u8, &pixels[src_index]),
+                    width * @sizeOf(screencast.PixelType),
+                );
+                src_index += width;
+                dst_index += video_frame.width;
+            }
+        },
+        .record => {
+            std.debug.assert(video_encoder.state == .encoding);
+            video_encoder.write(pixels, video_stream_frame_index) catch |err| {
+                std.log.err("app: Failed to write frame to video_encoder buffer. Error: {}", .{err});
+            };
+            video_stream_frame_index += 1;
+        },
+        else => unreachable,
+    }
+
+    const convert_image_end = std.time.nanoTimestamp();
+    const convert_image_duration = @intCast(u64, convert_image_end - convert_image_start);
+    _ = convert_image_duration;
+    is_render_requested = true;
+}
+
 fn onScreenCaptureSuccess(width: u32, height: u32) void {
     std.log.info("app: Screen capture stream opened. Dimensions {d}x{d}", .{
         width,
         height,
     });
-    enable_preview = true;
+
+    stream_state = switch (stream_state) {
+        .idle => .preview,
+        .record => .record_preview,
+        else => unreachable,
+    };
+
     is_draw_required = true;
+    renderer.video_stream_enabled = true;
 }
 
 fn onScreenCaptureError() void {
     std.log.err("app: Failed to open screen capture stream", .{});
-    enable_preview = false;
+    stream_state = .idle;
 }
 
-const preview_dimensions = geometry.Dimensions2D(u32){
-    .width = @divExact(1920, 4),
-    .height = @divExact(1080, 4),
-};
-
-var preview_quad: *QuadFace = undefined;
-var preview_reserved_texture_extent: geometry.Extent2D(u32) = undefined;
-
-var last_preview_update_frame_index: u64 = std.math.maxInt(u64);
-
 fn appLoop(allocator: std.mem.Allocator) !void {
-    preview_reserved_texture_extent = try renderer.texture_atlas.reserve(
-        geometry.Extent2D(u32),
-        allocator,
-        preview_dimensions.width,
-        preview_dimensions.height,
-    );
-
     wayland_client.screen_dimensions.width = @intCast(u16, renderer.swapchain_extent.width);
     wayland_client.screen_dimensions.height = @intCast(u16, renderer.swapchain_extent.height);
 
@@ -316,7 +389,12 @@ fn appLoop(allocator: std.mem.Allocator) !void {
     const app_initialization_duration = @intCast(u64, app_loop_start - app_runtime_start);
     std.log.info("App initialized in {s}", .{std.fmt.fmtDuration(app_initialization_duration)});
 
+    const input_fps = 60;
+    const input_latency_ns: u64 = std.time.ns_per_s / input_fps;
+
     while (!wayland_client.is_shutdown_requested) {
+        const loop_begin = std.time.nanoTimestamp();
+
         app_loop_iteration += 1;
 
         if (screencast_interface) |interface| {
@@ -324,110 +402,53 @@ fn appLoop(allocator: std.mem.Allocator) !void {
             if (enable_preview_checkbox) |checkbox| {
                 const checkbox_state = checkbox.state();
                 if (checkbox_state.left_click_release) {
-                    enable_preview = !enable_preview;
-                    if (enable_preview) {
+                    switch (stream_state) {
                         //
                         // Open or Resume preview
                         //
-                        std.debug.assert(screencast_state != .closed);
-                        std.debug.assert(screencast_state != .open);
-                        switch (screencast_state) {
-                            .paused => interface.unpause(),
-                            .uninitialized => try interface.requestOpen(
-                                onScreenCaptureSuccess,
-                                onScreenCaptureError,
-                            ),
-                            else => {},
-                        }
-                    } else {
+                        .idle => {
+                            std.debug.assert(screencast_state != .closed);
+                            std.debug.assert(screencast_state != .open);
+                            switch (screencast_state) {
+                                .paused => {
+                                    interface.unpause();
+                                    stream_state = .preview;
+                                },
+                                .uninitialized => try interface.requestOpen(
+                                    onScreenCaptureSuccess,
+                                    onScreenCaptureError,
+                                ),
+                                else => {},
+                            }
+                        },
                         //
                         // Pause preview
                         //
-                        std.debug.assert(screencast_state == .open);
-                        interface.pause();
+                        .preview => {
+                            std.debug.assert(screencast_state == .open);
+                            interface.pause();
+                            stream_state = .idle;
+                            std.debug.assert(interface.state() == .paused);
+                        },
+                        //
+                        // Pause but don't inturrupt recording
+                        //
+                        .record_preview => {
+                            std.debug.assert(screencast_state == .open);
+                            interface.pause();
+                            stream_state = .record;
+                            std.debug.assert(interface.state() == .paused);
+                        },
+                        //
+                        // Enable preview while recording
+                        //
+                        .record => {
+                            interface.unpause();
+                            stream_state = .record_preview;
+                            std.debug.assert(interface.state() == .open);
+                        },
                     }
                     is_draw_required = true;
-                    std.log.info("Enable preview: {}", .{enable_preview});
-                }
-            }
-
-            if (wayland_client.awaiting_frame and screencast_state == .open) {
-                if (frames_presented_count != last_preview_update_frame_index) {
-                    if (interface.nextFrameImage()) |screen_capture| {
-                        last_preview_update_frame_index = frames_presented_count;
-                        var gpu_texture = try renderer.textureGet();
-
-                        //
-                        // TODO: Not sure if this can happen, but handle dimensions
-                        //       changing mid-stream
-                        //
-                        std.debug.assert((preview_dimensions.width * 4) == screen_capture.width);
-                        std.debug.assert((preview_dimensions.height * 4) == screen_capture.height);
-
-                        var src_pixels = screen_capture.pixels;
-                        var dst_pixels = gpu_texture.pixels;
-
-                        const convert_image_start = std.time.nanoTimestamp();
-
-                        const src_stride: usize = screen_capture.width * 4;
-                        var y: usize = 0;
-                        var y_base: usize = 0;
-                        while (y < preview_dimensions.height) : (y += 1) {
-                            var x: usize = 0;
-                            while (x < preview_dimensions.width) : (x += 1) {
-                                //
-                                // Combine a block of 4 pixels into using an average sum
-                                //
-                                const index_hi = (x * 4) + y_base;
-                                const index_lo = index_hi + screen_capture.width;
-
-                                const c0: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 0]);
-                                const c1: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_hi + 1]);
-                                const c2: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 0]);
-                                const c3: @Vector(4, u32) = @bitCast([4]u8, src_pixels[index_lo + 1]);
-
-                                const out_i = c0 + c1 + c2 + c3;
-                                var out_f = @Vector(4, f32){
-                                    @intToFloat(f32, out_i[0]),
-                                    @intToFloat(f32, out_i[1]),
-                                    @intToFloat(f32, out_i[2]),
-                                    @intToFloat(f32, out_i[3]),
-                                };
-
-                                //
-                                // NOTE: Have noticed substancial performance loss here, switching to mult helps
-                                //       @intToFloat(f32, rgb) / 255) / 4.0
-                                //
-                                const mult = comptime (1.0 / 4.0) * (1.0 / 255.0);
-                                const mult_vec = @Vector(4, f32){ mult, mult, mult, 1.0 };
-
-                                out_f *= mult_vec;
-
-                                const pixel = graphics.RGBA(f32){
-                                    .r = out_f[0],
-                                    .g = out_f[1],
-                                    .b = out_f[2],
-                                    .a = 1.0,
-                                };
-
-                                const dst_x = x + preview_reserved_texture_extent.x;
-                                const dst_y = y + preview_reserved_texture_extent.y;
-                                dst_pixels[dst_x + (dst_y * gpu_texture.width)] = pixel;
-                            }
-                            y_base += src_stride;
-                        }
-
-                        const convert_image_end = std.time.nanoTimestamp();
-                        const convert_image_duration = @intCast(u64, convert_image_end - convert_image_start);
-                        _ = convert_image_duration;
-
-                        // std.log.info("converted image in {s}", .{std.fmt.fmtDuration(convert_image_duration)});
-
-                        try renderer.textureCommit();
-                        is_render_requested = true;
-                    } else {
-                        std.log.info("app: Screen capture frame not ready", .{});
-                    }
                 }
             }
         }
@@ -442,11 +463,68 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                 record_button.setColor(record_button_color_normal);
                 is_render_requested = true;
             }
+
+            if (state.left_click_release) {
+                switch (video_encoder.state) {
+                    //
+                    // Start new recording
+                    //
+                    .uninitialized => {
+                        //
+                        // Start screencast stream if preview isn't already open
+                        //
+                        if (stream_state == .idle) blk: {
+                            screencast_interface.?.requestOpen(
+                                onScreenCaptureSuccess,
+                                onScreenCaptureError,
+                            ) catch |err| {
+                                std.log.err("app: Failed to start video stream. Error: {}", .{err});
+                                break :blk;
+                            };
+                        }
+                        const options = video_encoder.RecordOptions{
+                            .output_path = "reel_test.mp4",
+                            .dimensions = .{
+                                .width = 1920,
+                                .height = 1080,
+                            },
+                            .fps = 60,
+                            .base_index = wayland_client.frame_index,
+                        };
+                        video_encoder.open(options) catch |err| {
+                            std.log.err("app: Failed to start video encoder. Error: {}", .{err});
+                        };
+                        video_stream_frame_index = 0;
+                        stream_state = switch (stream_state) {
+                            .idle => .record,
+                            .preview => .record_preview,
+                            else => unreachable,
+                        };
+                    },
+                    //
+                    // Stop current recording
+                    //
+                    .encoding => {
+                        video_encoder.close();
+                        switch (stream_state) {
+                            .record => {
+                                stream_state = .idle;
+                                screencast_interface.?.pause();
+                            },
+                            .record_preview => stream_state = .preview,
+                            else => unreachable,
+                        }
+                    },
+                    else => unreachable,
+                }
+                is_draw_required = true;
+            }
         }
 
         is_draw_required = (is_draw_required or wayland_client.is_draw_requested);
-        if (is_draw_required and wayland_client.awaiting_frame) {
+        if (is_draw_required) {
             is_draw_required = false;
+            wayland_client.is_draw_requested = false;
             try draw(allocator);
             is_record_requested = true;
         }
@@ -459,17 +537,23 @@ fn appLoop(allocator: std.mem.Allocator) !void {
             is_render_requested = true;
         }
 
-        if (wayland_client.awaiting_frame and is_render_requested) {
-            frames_presented_count += 1;
-            wayland_client.awaiting_frame = false;
-            is_render_requested = false;
-            try renderer.renderFrame(wayland_client.screen_dimensions);
+        if (wayland_client.pending_swapchain_images_count > 0) {
+            if (is_render_requested) {
+                is_render_requested = false;
+
+                wayland_client.pending_swapchain_images_count -= 1;
+                gpu_texture_mutex.lock();
+                defer gpu_texture_mutex.unlock();
+
+                try renderer.renderFrame(wayland_client.screen_dimensions);
+            }
         }
 
         _ = wayland_client.pollEvents();
 
         if (wayland_client.framebuffer_resized) {
             wayland_client.framebuffer_resized = false;
+
             renderer.recreateSwapchain(wayland_client.screen_dimensions) catch |err| {
                 std.log.err("Failed to recreate swapchain. Error: {}", .{err});
             };
@@ -489,24 +573,41 @@ fn appLoop(allocator: std.mem.Allocator) !void {
             wayland_client.is_mouse_moved = false;
             event_system.handleMouseMovement(&mouse_position);
         }
+
+        const loop_end = std.time.nanoTimestamp();
+        const loop_duration = @intCast(u64, loop_end - loop_begin);
+        if (loop_duration < input_latency_ns) {
+            const sleep_period_ns = input_latency_ns - loop_duration;
+            std.time.sleep(sleep_period_ns);
+        }
     }
+
+    std.log.info("Terminating application", .{});
 
     if (screencast_interface) |interface| {
         const screencast_state = interface.state();
         if (screencast_state != .uninitialized and screencast_state != .closed) {
+            std.log.info("Closing screencast stream", .{});
             interface.close();
         }
+    }
+
+    if (video_encoder.state == .encoding) {
+        std.log.info("Closing video stream", .{});
+        video_encoder.close();
     }
 
     const app_end = std.time.nanoTimestamp();
     const app_duration = @intCast(u64, app_end - app_loop_start);
 
-    std.log.info("Run time: {d}", .{std.fmt.fmtDuration(app_duration)});
+    const print = std.debug.print;
     const runtime_seconds: f64 = @intToFloat(f64, app_duration) / std.time.ns_per_s;
-    std.log.info("Frame count: {d}", .{frames_presented_count});
-    std.log.info("Input loop count: {d}", .{app_loop_iteration});
-    std.log.info("Lazy FPS: {d}", .{@intToFloat(f64, frames_presented_count) / runtime_seconds});
-    std.log.info("Fixed FPS: {d}", .{@intToFloat(f64, app_loop_iteration) / runtime_seconds});
+    const frames_per_s: f64 = @intToFloat(f64, wayland_client.frame_index) / @intToFloat(f64, app_duration / std.time.ns_per_s);
+    print("\n== Runtime Statistics ==\n\n", .{});
+    print("runtime:     {d:.2}s\n", .{runtime_seconds});
+    print("display fps: {d:.2}\n", .{frames_per_s});
+    print("input fps:   {d:.2}\n", .{@intToFloat(f64, app_loop_iteration) / runtime_seconds});
+    print("\n", .{});
 }
 
 fn drawDecorations() !void {
@@ -588,68 +689,50 @@ fn drawTexture() !void {
     );
 }
 
-fn drawScreenCaptureBackground() !void {
-    //
-    // Draw preview background
-    //
-    const y_offset = @intToFloat(f64, top_reserved_pixels) * wayland_client.screen_scale.vertical;
-    const margin_top_pixels = style.screen_preview.margin_top_pixels;
-    const margin_left_pixels = style.screen_preview.margin_left_pixels;
+fn drawScreenCapture() !void {
+    calculatePreviewExtent();
+
     const border_width_pixels = style.screen_preview.border_width_pixels;
+    const screen_scale = wayland_client.screen_scale;
+
+    const border_width_horizontal: f64 = border_width_pixels * screen_scale.horizontal;
+    const border_width_vertical: f64 = border_width_pixels * screen_scale.vertical;
+    const background_width: f64 = (renderer.video_stream_output_dimensions.width * screen_scale.horizontal) + (border_width_horizontal * 2.0);
+    const background_height: f64 = (renderer.video_stream_output_dimensions.height * screen_scale.vertical) + (border_width_vertical * 2.0);
     {
-        const margin_top = margin_top_pixels * wayland_client.screen_scale.vertical;
-        const margin_left = margin_left_pixels * wayland_client.screen_scale.horizontal;
-        const background_width = @intToFloat(f64, preview_dimensions.width + (border_width_pixels * 2));
-        const background_height = @intToFloat(f64, preview_dimensions.height + (border_width_pixels * 2));
         const extent = geometry.Extent2D(f32){
-            .x = @floatCast(f32, -1.0 + margin_left),
-            .y = @floatCast(f32, -1.0 + margin_top + y_offset),
-            .width = @floatCast(f32, background_width * wayland_client.screen_scale.horizontal),
-            .height = @floatCast(f32, background_height * wayland_client.screen_scale.vertical),
+            .x = @floatCast(f32, renderer.video_stream_placement.x - border_width_horizontal),
+            .y = @floatCast(f32, renderer.video_stream_placement.y - border_width_vertical),
+            .width = @floatCast(f32, background_width),
+            .height = @floatCast(f32, background_height),
         };
         const color = graphics.RGB(f32).fromInt(120, 120, 120);
         (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, color.toRGBA(), .top_left);
     }
 }
 
-fn drawScreenCapture() !void {
-    //
-    // Draw actual preview
-    //
+fn calculatePreviewExtent() void {
     const y_offset = @intToFloat(f64, top_reserved_pixels) * wayland_client.screen_scale.vertical;
     const margin_top_pixels = style.screen_preview.margin_top_pixels;
     const margin_left_pixels = style.screen_preview.margin_left_pixels;
-    {
-        const y_top: f64 = (margin_top_pixels + 1) * wayland_client.screen_scale.vertical;
-        const x_left: f64 = (margin_left_pixels + 1) * wayland_client.screen_scale.horizontal;
-        preview_quad = try face_writer.create(QuadFace);
-        const screen_extent = geometry.Extent2D(f32){
-            .x = @floatCast(f32, -1.0 + x_left),
-            .y = @floatCast(f32, -1.0 + y_top + y_offset),
-            .width = @floatCast(f32, @intToFloat(f64, preview_dimensions.width) * wayland_client.screen_scale.horizontal),
-            .height = @floatCast(f32, @intToFloat(f64, preview_dimensions.height) * wayland_client.screen_scale.vertical),
-        };
-        const texture_extent = geometry.Extent2D(f32){
-            .x = @intToFloat(f32, preview_reserved_texture_extent.x) / 512,
-            .y = @intToFloat(f32, preview_reserved_texture_extent.y) / 512,
-            .width = @intToFloat(f32, preview_reserved_texture_extent.width) / 512,
-            .height = @intToFloat(f32, preview_reserved_texture_extent.height) / 512,
-        };
-        preview_quad.* = graphics.quadTextured(
-            screen_extent,
-            texture_extent,
-            .top_left,
-        );
-    }
+
+    const width_min_pixels = 200;
+    const width_max_pixels = 1920 / 2;
+
+    const screen_dimensions = wayland_client.screen_dimensions;
+    const wanted_width: f64 = @intToFloat(f64, screen_dimensions.width) * 0.8;
+    const clamped_width: f64 = @min(@max(wanted_width, width_min_pixels), width_max_pixels);
+    const screencast_dimensions = renderer.video_stream_dimensions;
+    const scale_ratio: f64 = clamped_width / screencast_dimensions.width;
+    std.debug.assert(scale_ratio <= 1.0);
+
+    renderer.video_stream_output_dimensions.width = @floatCast(f32, clamped_width);
+    renderer.video_stream_output_dimensions.height = @floatCast(f32, screencast_dimensions.height * scale_ratio);
+    const y_top: f64 = (margin_top_pixels + 1) * wayland_client.screen_scale.vertical;
+    const x_left: f64 = (margin_left_pixels + 1) * wayland_client.screen_scale.horizontal;
+    renderer.video_stream_placement.x = @floatCast(f32, -1.0 + x_left);
+    renderer.video_stream_placement.y = @floatCast(f32, -1.0 + y_top + y_offset);
 }
-
-const white = graphics.RGB(f32).fromInt(255, 255, 255);
-
-const Dropdown = widget.Dropdown;
-
-const Checkbox = widget.Checkbox;
-var enable_preview_checkbox: ?Checkbox = null;
-var enable_preview: bool = false;
 
 /// Our example draw function
 /// This will run anytime the screen is resized
@@ -669,14 +752,15 @@ fn draw(allocator: std.mem.Allocator) !void {
         const checkbox_width = checkbox_radius_pixels * wayland_client.screen_scale.horizontal * 2;
         const center = geometry.Coordinates2D(f64){
             .x = -1.0 + (preview_margin_left + (checkbox_width / 2)),
-            .y = -0.3,
+            .y = 0.0,
         };
+        const is_set = (stream_state == .preview or stream_state == .record_preview);
         try enable_preview_checkbox.?.draw(
             center,
             checkbox_radius_pixels,
             wayland_client.screen_scale,
             style.checkbox_checked_color.toRGBA(),
-            enable_preview,
+            is_set,
         );
 
         // TODO: Vertically aligning label will require knowing it's height
@@ -696,13 +780,7 @@ fn draw(allocator: std.mem.Allocator) !void {
         );
     }
 
-    try drawScreenCaptureBackground();
-    if (screencast_interface) |interface| {
-        const screencast_state = interface.state();
-        if (screencast_state == .open) {
-            try drawScreenCapture();
-        }
-    }
+    try drawScreenCapture();
 
     if (record_button_opt == null) {
         record_button_opt = try Button.create();
@@ -748,7 +826,7 @@ fn draw(allocator: std.mem.Allocator) !void {
         try record_button.draw(
             extent,
             record_button_color_normal,
-            "Record",
+            if (video_encoder.state == .encoding) "Stop" else "Record",
             &pen,
             wayland_client.screen_scale,
             .{ .rounding_radius = 5 },
