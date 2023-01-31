@@ -116,9 +116,10 @@ const Frame = struct {
 var ring_buffer = RingBuffer(Frame, 4).init;
 
 fn eventLoop() void {
-    while (!request_close) {
+    outer: while (true) {
         while (ring_buffer.len == 0) {
             std.time.sleep(std.time.ns_per_ms * 8);
+            if (request_close) break :outer;
         }
         const entry = ring_buffer.pop() orelse continue;
         writeFrame(entry.pixels, @intCast(u32, entry.frame_index)) catch |err| {
@@ -139,9 +140,10 @@ pub fn write(pixels: [*]const graphics.RGBA(u8), frame_index: u64) !void {
 
 pub fn close() void {
     request_close = true;
+    std.log.info("video_encoder: waiting for video_record thread to terminate..", .{});
     processing_thread.join();
     state = .closed;
-    std.log.info("Video stream complete", .{});
+    std.log.info("video_encoder: shutdown successful", .{});
 }
 
 pub fn open(options: RecordOptions) !void {
@@ -265,8 +267,6 @@ fn finishVideoStream() void {
 
     _ = libav.codecFreeContext(&video_codec_context);
     _ = libav.formatFreeContext(format_context);
-
-    std.log.info("Terminated cleanly", .{});
 }
 
 fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
