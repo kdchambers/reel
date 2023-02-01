@@ -587,8 +587,8 @@ pub fn recordRenderPass(
         //
         const texture_x: f32 = 0;
         const texture_y: f32 = 0;
-        const texture_width: f32 = video_stream_dimensions.width / @as(f32, defines.pipeline_video.framebuffer_dimensions.width);
-        const texture_height: f32 = video_stream_dimensions.height / @as(f32, defines.pipeline_video.framebuffer_dimensions.height);
+        const texture_width: f32 = video_stream_output_dimensions.width / @as(f32, defines.pipeline_video.framebuffer_dimensions.width);
+        const texture_height: f32 = video_stream_output_dimensions.height / @as(f32, defines.pipeline_video.framebuffer_dimensions.height);
         std.debug.assert(texture_width <= 1.0);
         std.debug.assert(texture_width >= 0.0);
         vertex_top_left.u = texture_x;
@@ -615,6 +615,49 @@ pub fn recordRenderPass(
             .flags = .{},
             .p_inheritance_info = null,
         });
+
+        if (video_stream_enabled) {
+            //
+            // Rescale image from unscaled to texture
+            //
+            const subresource_layers = vk.ImageSubresourceLayers{
+                .aspect_mask = .{ .color_bit = true },
+                .layer_count = 1,
+                .mip_level = 0,
+                .base_array_layer = 0,
+            };
+
+            var src_region_offsets = [2]vk.Offset3D{
+                .{ .x = 0, .y = 0, .z = 0 },
+                .{ .x = 1920, .y = 1080, .z = 1 },
+            };
+            const dst_region_offsets = [2]vk.Offset3D{
+                .{ .x = 0, .y = 0, .z = 0 },
+                .{
+                    .x = @floatToInt(i32, @floor(video_stream_output_dimensions.width)),
+                    .y = @floatToInt(i32, @floor(video_stream_output_dimensions.height)),
+                    .z = 1,
+                },
+            };
+
+            const regions = [_]vk.ImageBlit{.{
+                .src_subresource = subresource_layers,
+                .src_offsets = src_region_offsets,
+                .dst_subresource = subresource_layers,
+                .dst_offsets = dst_region_offsets,
+            }};
+
+            device_dispatch.cmdBlitImage(
+                command_buffer,
+                texture_pipeline.unscaled_image,
+                .general,
+                texture_pipeline.texture_image,
+                .general,
+                1,
+                &regions,
+                .linear,
+            );
+        }
 
         device_dispatch.cmdBeginRenderPass(command_buffer, &vk.RenderPassBeginInfo{
             .render_pass = render_pass.pass,
@@ -749,7 +792,6 @@ pub fn recordRenderPass(
             );
             device_dispatch.cmdDrawIndexed(command_buffer, 6, 1, 0, 0, 0);
         }
-
         device_dispatch.cmdEndRenderPass(command_buffer);
         try device_dispatch.endCommandBuffer(command_buffer);
     }

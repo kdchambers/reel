@@ -37,8 +37,10 @@ pub var graphics_pipeline: vk.Pipeline = undefined;
 var vertex_shader_module: vk.ShaderModule = undefined;
 var fragment_shader_module: vk.ShaderModule = undefined;
 
-var texture_image: vk.Image = undefined;
-var texture_image_view: vk.ImageView = undefined;
+pub var texture_image: vk.Image = undefined;
+pub var texture_image_view: vk.ImageView = undefined;
+
+pub var unscaled_image: vk.Image = undefined;
 
 pub var vertices_buffer: []Vertex = undefined;
 pub var indices_buffer: []u16 = undefined;
@@ -46,6 +48,167 @@ pub var vulkan_vertices_buffer: vk.Buffer = undefined;
 pub var vulkan_indices_buffer: vk.Buffer = undefined;
 
 pub var memory_map: []Pixel = undefined;
+
+pub fn createUnscaledImage(memory_index: u32) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+    const queue = vulkan_core.graphics_present_queue;
+
+    // TODO:
+    const unscaled_image_dimensions = geometry.Dimensions2D(u32){
+        .width = 2000,
+        .height = 1100,
+    };
+
+    const texture_pixel_count = @intCast(usize, unscaled_image_dimensions.width) * unscaled_image_dimensions.height;
+    const texture_size_bytes: usize = texture_pixel_count * @sizeOf(Pixel);
+
+    {
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = .r8g8b8a8_unorm,
+            .tiling = .linear,
+            .extent = vk.Extent3D{
+                .width = unscaled_image_dimensions.width,
+                .height = unscaled_image_dimensions.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = .preinitialized,
+            .usage = .{ .transfer_src_bit = true },
+            .samples = .{ .@"1_bit" = true },
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+
+        unscaled_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+    }
+
+    const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, unscaled_image);
+
+    var memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
+        .allocation_size = memory_requirements.size,
+        .memory_type_index = memory_index,
+    }, null);
+
+    try device_dispatch.bindImageMemory(logical_device, unscaled_image, memory, 0);
+    const mapped_memory_opt = (try device_dispatch.mapMemory(
+        logical_device,
+        memory,
+        0,
+        texture_size_bytes,
+        .{},
+    ));
+
+    if (mapped_memory_opt == null) {
+        std.log.err("renderer: Failed to map shader memory", .{});
+        return error.MapMemoryFail;
+    }
+
+    memory_map = @ptrCast([*]Pixel, mapped_memory_opt.?)[0..texture_pixel_count];
+    std.mem.set(Pixel, memory_map, .{ .r = 0, .g = 0, .b = 0, .a = 255 });
+
+    //
+    // Transition from preinitialized to general
+    //
+    const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+        .command_pool = vulkan_core.command_pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    };
+
+    var command_buffer: vk.CommandBuffer = undefined;
+    try device_dispatch.allocateCommandBuffers(
+        logical_device,
+        &command_buffer_allocate_info,
+        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+    );
+
+    try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+        .flags = .{ .one_time_submit_bit = true },
+        .p_inheritance_info = null,
+    });
+
+    const barrier = [_]vk.ImageMemoryBarrier{
+        .{
+            .src_access_mask = .{},
+            .dst_access_mask = .{},
+            .old_layout = .preinitialized,
+            .new_layout = .general,
+            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .image = unscaled_image,
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        },
+    };
+
+    {
+        const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
+        const dst_stage = vk.PipelineStageFlags{ .bottom_of_pipe_bit = true };
+        const dependency_flags = vk.DependencyFlags{};
+        device_dispatch.cmdPipelineBarrier(
+            command_buffer,
+            src_stage,
+            dst_stage,
+            dependency_flags,
+            0,
+            undefined,
+            0,
+            undefined,
+            1,
+            &barrier,
+        );
+    }
+
+    try device_dispatch.endCommandBuffer(command_buffer);
+
+    const submit_command_infos = [_]vk.SubmitInfo{.{
+        .wait_semaphore_count = 0,
+        .p_wait_semaphores = undefined,
+        .p_wait_dst_stage_mask = undefined,
+        .command_buffer_count = 1,
+        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+        .signal_semaphore_count = 0,
+        .p_signal_semaphores = undefined,
+    }};
+
+    const fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{} }, null);
+
+    try device_dispatch.queueSubmit(
+        queue,
+        1,
+        &submit_command_infos,
+        fence,
+    );
+
+    //
+    // TODO: Check return
+    //
+    _ = try device_dispatch.waitForFences(
+        logical_device,
+        1,
+        @ptrCast([*]const vk.Fence, &fence),
+        vk.TRUE,
+        std.time.ns_per_s * 4,
+    );
+
+    device_dispatch.destroyFence(logical_device, fence, null);
+    device_dispatch.freeCommandBuffers(
+        logical_device,
+        vulkan_core.command_pool,
+        1,
+        @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+    );
+}
 
 pub fn init(
     texture_dimensions: geometry.Dimensions2D(u32),
@@ -62,8 +225,7 @@ pub fn init(
     const logical_device = vulkan_core.logical_device;
     const queue = vulkan_core.graphics_present_queue;
 
-    const texture_pixel_count = @intCast(usize, texture_dimensions.width) * texture_dimensions.height;
-    const texture_size_bytes: usize = texture_pixel_count * @sizeOf(Pixel);
+    try createUnscaledImage(texture_memory_index);
 
     {
         const image_create_info = vk.ImageCreateInfo{
@@ -79,7 +241,7 @@ pub fn init(
             .mip_levels = 1,
             .array_layers = 1,
             .initial_layout = .preinitialized,
-            .usage = .{ .sampled_bit = true },
+            .usage = .{ .sampled_bit = true, .transfer_dst_bit = true },
             .samples = .{ .@"1_bit" = true },
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
@@ -97,23 +259,6 @@ pub fn init(
     }, null);
 
     try device_dispatch.bindImageMemory(logical_device, texture_image, image_memory, 0);
-    const mapped_memory_opt = (try device_dispatch.mapMemory(
-        logical_device,
-        image_memory,
-        0,
-        texture_size_bytes,
-        .{},
-    ));
-
-    if (mapped_memory_opt == null) {
-        std.log.err("renderer: Failed to map shader memory", .{});
-        return error.MapMemoryFail;
-    }
-
-    memory_map = @ptrCast([*]Pixel, mapped_memory_opt.?)[0..texture_pixel_count];
-    // Clear isn't required
-    // std.mem.set(Pixel, memory_map, .{ .r = 0, .g = 0, .b = 0, .a = 0 });
-
     texture_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
         .flags = .{},
         .image = texture_image,
