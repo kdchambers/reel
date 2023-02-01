@@ -12,6 +12,8 @@ pub fn Index(comptime Type: type) type {
     return packed struct(u16) {
         const alignment = @alignOf(Type);
 
+        pub const invalid = @This(){ .index = std.math.maxInt(u16) };
+
         index: u16,
 
         pub inline fn isNull(self: @This()) bool {

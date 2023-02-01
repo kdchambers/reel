@@ -55,17 +55,52 @@ pub fn init(
     is_mouse_in_screen_ref = is_mouse_in_screen;
 }
 
-pub const Checkbox = packed struct(u64) {
-    background_vertex_index: u16,
+pub const Dropdown = packed struct(u64) {
     state_index: Index(HoverZoneState),
     extent_index: Index(geometry.Extent2D(f32)),
+    opened_extent_index: Index(geometry.Extent2D(f32)),
     reserved: u16 = 0,
 
     pub fn create() !@This() {
         const state_index = event_system.reserveState();
         state_index.getPtr().reset();
         return @This(){
-            .background_vertex_index = std.math.maxInt(u16),
+            .state_index = state_index,
+            .extent_index = .{ .index = std.math.maxInt(u16) },
+            .opened_extent_index = .{ .index = std.math.maxInt(u16) },
+        };
+    }
+
+    pub fn draw(
+        self: *@This(),
+        extent: Extent2D(f32),
+        labels: []const []const u8,
+        selected_index: u32,
+        pen: anytype,
+        screen_scale: ScaleFactor2D(f64),
+        color: graphics.RGBA(f32),
+        is_open: bool,
+    ) !void {
+        if (!is_open) {
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent, color, .bottom_left);
+
+            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+            try pen.writeCentered(labels[selected_index], extent, screen_scale, &text_writer_interface);
+
+            const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+            event_system.bindStateToMouseEvent(self.state_index, extent, &self.extent_index, bind_options);
+        }
+    }
+};
+
+pub const Checkbox = packed struct(u32) {
+    state_index: Index(HoverZoneState),
+    extent_index: Index(geometry.Extent2D(f32)),
+
+    pub fn create() !@This() {
+        const state_index = event_system.reserveState();
+        state_index.getPtr().reset();
+        return @This(){
             .state_index = state_index,
             .extent_index = .{ .index = std.math.maxInt(u16) },
         };
@@ -269,6 +304,106 @@ pub const Button = packed struct(u64) {
         }
     }
 };
+
+pub fn drawCross(
+    extent: Extent2D(f32),
+    width_horizontal: f32,
+    width_vertical: f32,
+    color: RGBA(f32),
+) !void {
+    const point_topleft = geometry.Coordinates2D(f32){
+        .x = extent.x,
+        .y = extent.y - extent.height,
+    };
+    const point_topright = geometry.Coordinates2D(f32){
+        .x = extent.x + extent.width,
+        .y = extent.y - extent.height,
+    };
+    const point_bottomleft = geometry.Coordinates2D(f32){
+        .x = extent.x,
+        .y = extent.y,
+    };
+    const point_bottomright = geometry.Coordinates2D(f32){
+        .x = extent.x + extent.width,
+        .y = extent.y,
+    };
+    const vertices_index: u16 = face_writer_ref.vertices_used;
+    const indices_index: u16 = face_writer_ref.indices_used;
+
+    const half_width_v: f32 = width_vertical / 2.0;
+    const half_width_h: f32 = width_horizontal / 2.0;
+
+    // Top right upper
+    face_writer_ref.vertices[vertices_index + 0] = Vertex{
+        .x = point_topright.x - half_width_h,
+        .y = point_topright.y,
+        .color = color,
+    };
+    // Top right lower
+    face_writer_ref.vertices[vertices_index + 1] = Vertex{
+        .x = point_topright.x,
+        .y = point_topright.y + half_width_v,
+        .color = color,
+    };
+
+    // bottom left lower
+    face_writer_ref.vertices[vertices_index + 2] = Vertex{
+        .x = point_bottomleft.x + half_width_h,
+        .y = point_bottomleft.y,
+        .color = color,
+    };
+
+    // bottom left upper
+    face_writer_ref.vertices[vertices_index + 3] = Vertex{
+        .x = point_bottomleft.x,
+        .y = point_bottomleft.y - half_width_v,
+        .color = color,
+    };
+
+    face_writer_ref.indices[indices_index + 0] = vertices_index + 0; // TRU
+    face_writer_ref.indices[indices_index + 1] = vertices_index + 1; // TRL
+    face_writer_ref.indices[indices_index + 2] = vertices_index + 2; // BLL
+
+    face_writer_ref.indices[indices_index + 3] = vertices_index + 2; // BBL
+    face_writer_ref.indices[indices_index + 4] = vertices_index + 3; // BLU
+    face_writer_ref.indices[indices_index + 5] = vertices_index + 0; // TRU
+
+    // Top left lower
+    face_writer_ref.vertices[vertices_index + 4] = Vertex{
+        .x = point_topleft.x,
+        .y = point_topleft.y + half_width_v,
+        .color = color,
+    };
+    // Top left upper
+    face_writer_ref.vertices[vertices_index + 5] = Vertex{
+        .x = point_topleft.x + half_width_h,
+        .y = point_topleft.y,
+        .color = color,
+    };
+    // Bottom right upper
+    face_writer_ref.vertices[vertices_index + 6] = Vertex{
+        .x = point_bottomright.x,
+        .y = point_bottomright.y - half_width_v,
+        .color = color,
+    };
+    // Bottom right lower
+    face_writer_ref.vertices[vertices_index + 7] = Vertex{
+        .x = point_bottomright.x - half_width_h,
+        .y = point_bottomright.y,
+        .color = color,
+    };
+
+    face_writer_ref.indices[indices_index + 6] = vertices_index + 4; // TLL
+    face_writer_ref.indices[indices_index + 7] = vertices_index + 5; // TLU
+    face_writer_ref.indices[indices_index + 8] = vertices_index + 6; // BRU
+
+    face_writer_ref.indices[indices_index + 9] = vertices_index + 6; // BRU
+    face_writer_ref.indices[indices_index + 10] = vertices_index + 7; // BRL
+    face_writer_ref.indices[indices_index + 11] = vertices_index + 4; // TLL
+
+    face_writer_ref.vertices_used += 8;
+    face_writer_ref.indices_used += 12;
+}
 
 pub fn drawRoundRect(
     extent: Extent2D(f32),

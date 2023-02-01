@@ -12,6 +12,7 @@ const style = @import("app_styling.zig");
 const geometry = @import("geometry.zig");
 const event_system = @import("event_system.zig");
 const screencast = @import("screencast.zig");
+const mini_heap = @import("mini_heap.zig");
 
 const video_encoder = @import("video_record.zig");
 
@@ -43,12 +44,121 @@ const application_name = "reel";
 const background_color = graphics.RGBA(f32).fromInt(u8, 90, 90, 90, 255);
 
 const window_decorations = struct {
-    const height_pixels = 40;
+    const height_pixels = 30;
     const color = graphics.RGBA(f32).fromInt(u8, 200, 200, 200, 255);
     const exit_button = struct {
         const size_pixels = 24;
         const color_hovered = graphics.RGBA(f32).fromInt(u8, 180, 180, 180, 255);
     };
+};
+
+const button_close = struct {
+    const Index = mini_heap.Index;
+    const HoverZoneState = event_system.HoverZoneState;
+
+    const background_color_hovered = graphics.RGBA(f32){
+        .r = 0.7,
+        .g = 0.7,
+        .b = 0.7,
+        .a = 1.0,
+    };
+    const background_color = graphics.RGBA(f32){
+        .r = 0.0,
+        .g = 0.0,
+        .b = 0.0,
+        .a = 0.0,
+    };
+    const foreground_color = graphics.RGBA(f32){
+        .r = 0.0,
+        .g = 0.0,
+        .b = 0.0,
+        .a = 1.0,
+    };
+
+    const background_padding_pixels = 4;
+    const size_pixels = 18;
+    const width_pixels = 3;
+    const vertex_count = 4;
+
+    var state_index: Index(HoverZoneState) = undefined;
+    var extent_index = Index(geometry.Extent2D(f32)).invalid;
+    var vertex_index: u16 = 0;
+
+    pub fn init() void {
+        button_close.state_index = event_system.reserveState();
+        button_close.state_index.getPtr().reset();
+    }
+
+    pub fn draw() !void {
+        const margin = (window_decorations.height_pixels - size_pixels) / 2.0;
+        const scale = wayland_client.screen_scale;
+        const size_horizontal: f64 = size_pixels * scale.horizontal;
+        const size_vertical: f64 = size_pixels * scale.vertical;
+        const x_offset = (margin * scale.horizontal * 2.0) + size_horizontal;
+        const y_offset = (margin * scale.vertical) + size_vertical;
+        const extent = geometry.Extent2D(f32){
+            .x = @floatCast(f32, 1.0 - x_offset),
+            .y = @floatCast(f32, -1.0 + y_offset),
+            .width = @floatCast(f32, size_horizontal),
+            .height = @floatCast(f32, size_vertical),
+        };
+
+        vertex_index = face_writer.vertices_used;
+
+        const padding_horizontal = background_padding_pixels * scale.horizontal;
+        const padding_vertical = background_padding_pixels * scale.vertical;
+        const background_extent = geometry.Extent2D(f32){
+            .x = @floatCast(f32, extent.x - padding_horizontal),
+            .y = @floatCast(f32, extent.y + padding_vertical),
+            .width = @floatCast(f32, extent.width + (padding_horizontal * 2.0)),
+            .height = @floatCast(f32, extent.height + (padding_vertical * 2.0)),
+        };
+
+        (try face_writer.create(QuadFace)).* = graphics.quadColored(
+            background_extent,
+            button_close.background_color,
+            .bottom_left,
+        );
+
+        try widget.drawCross(
+            extent,
+            @floatCast(f32, width_pixels * scale.horizontal),
+            @floatCast(f32, width_pixels * scale.vertical),
+            button_close.foreground_color,
+        );
+        event_system.bindStateToMouseEvent(
+            button_close.state_index,
+            extent,
+            &button_close.extent_index,
+            .{
+                .enable_hover = true,
+                .start_active = false,
+            },
+        );
+    }
+
+    pub inline fn state() HoverZoneState {
+        const state_copy = button_close.state_index.get();
+        button_close.state_index.getPtr().clear();
+        return state_copy;
+    }
+
+    pub fn setHovered(is_hovered: bool) void {
+        if (is_hovered)
+            button_close.setColor(button_close.background_color_hovered)
+        else
+            button_close.setColor(button_close.background_color);
+
+        is_render_requested = true;
+    }
+
+    pub fn setColor(color: graphics.RGBA(f32)) void {
+        var i = button_close.vertex_index;
+        const end_index = button_close.vertex_index + button_close.vertex_count;
+        while (i < end_index) : (i += 1) {
+            face_writer.vertices[i].color = color;
+        }
+    }
 };
 
 var draw_window_decorations_requested: bool = true;
@@ -204,6 +314,8 @@ pub fn main() !void {
     deinit();
 }
 
+var close_icon_handle: renderer.ImageHandle = undefined;
+
 pub fn init() !void {
     general_allocator = if (builtin.mode == .Debug) stdlib_gpa.allocator() else std.heap.c_allocator;
 
@@ -238,6 +350,16 @@ pub fn init() !void {
         &texture_atlas,
     );
     errdefer renderer.deinit(general_allocator);
+
+    var close_icon = try img.Image.fromFilePath(general_allocator, icon_path_list[@enumToInt(IconType.close)]);
+    defer close_icon.deinit();
+
+    close_icon_handle = try renderer.addTexture(
+        general_allocator,
+        @intCast(u32, close_icon.width),
+        @intCast(u32, close_icon.height),
+        @ptrCast([*]const graphics.RGBA(u8), close_icon.pixels.rgba32.ptr),
+    );
 
     {
         const PixelType = graphics.RGBA(f32);
@@ -275,6 +397,8 @@ pub fn init() !void {
     if (screencast_interface == null) {
         std.log.warn("No screencast backends detected", .{});
     }
+
+    button_close.init();
 }
 
 fn deinit() void {
@@ -451,6 +575,16 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                     is_draw_required = true;
                 }
             }
+        }
+
+        {
+            const state = button_close.state();
+            if (state.hover_enter)
+                button_close.setHovered(true);
+            if (state.hover_exit)
+                button_close.setHovered(false);
+            if (state.left_click_release)
+                wayland_client.shutdown();
         }
 
         if (record_button_opt) |record_button| {
@@ -742,6 +876,7 @@ fn draw(allocator: std.mem.Allocator) !void {
     face_writer.reset();
 
     try drawDecorations();
+    try button_close.draw();
 
     {
         if (enable_preview_checkbox == null)
@@ -788,30 +923,18 @@ fn draw(allocator: std.mem.Allocator) !void {
 
     // if (image_button_opt == null) {
     //     image_button_opt = try ImageButton.create();
-
-    //     var icon = try img.Image.fromFilePath(allocator, icon_path_list[0]);
-    //     defer icon.deinit();
-
-    //     add_icon_opt = try renderer.addTexture(
-    //         allocator,
-    //         @intCast(u32, icon.width),
-    //         @intCast(u32, icon.height),
-    //         @ptrCast([*]graphics.RGBA(u8), icon.pixels.rgba32.ptr),
-    //     );
     // }
 
     // if (image_button_opt) |*image_button| {
-    //     if (add_icon_opt) |add_icon| {
-    //         const width_pixels = @intToFloat(f32, add_icon.width());
-    //         const height_pixels = @intToFloat(f32, add_icon.height());
-    //         const extent = geometry.Extent2D(f32){
-    //             .x = 0.4,
-    //             .y = 0.8,
-    //             .width = @floatCast(f32, width_pixels * wayland_client.screen_scale.horizontal),
-    //             .height = @floatCast(f32, height_pixels * wayland_client.screen_scale.vertical),
-    //         };
-    //         try image_button.draw(extent, image_button_background_color, add_icon.extent());
-    //     }
+    //     const width_pixels = @intToFloat(f32, close_icon_handle.width());
+    //     const height_pixels = @intToFloat(f32, close_icon_handle.height());
+    //     const extent = geometry.Extent2D(f32){
+    //         .x = 0.4,
+    //         .y = 0.8,
+    //         .width = @floatCast(f32, width_pixels * wayland_client.screen_scale.horizontal),
+    //         .height = @floatCast(f32, height_pixels * wayland_client.screen_scale.vertical),
+    //     };
+    //     try image_button.draw(extent, image_button_background_color, close_icon_handle.extent());
     // }
 
     if (record_button_opt) |*record_button| {
