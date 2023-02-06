@@ -993,48 +993,53 @@ fn transitionTextureToOptimal() !void {
     );
 }
 
-// pub fn addTexture(
-//     allocator: std.mem.Allocator,
-//     width: u32,
-//     height: u32,
-//     pixels: [*]graphics.RGBA(u8),
-// ) !ImageHandle {
-//     _ = try device_dispatch.waitForFences(
-//         logical_device,
-//         1,
-//         @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
-//         vk.TRUE,
-//         std.math.maxInt(u64),
-//     );
-//     try transitionTextureToGeneral();
+pub fn addTexture(
+    allocator: std.mem.Allocator,
+    width: u32,
+    height: u32,
+    pixels: [*]const graphics.RGBA(u8),
+) !ImageHandle {
+    _ = try vulkan_core.device_dispatch.waitForFences(
+        vulkan_core.logical_device,
+        1,
+        @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
+        vk.TRUE,
+        std.math.maxInt(u64),
+    );
+    try transitionTextureToGeneral();
 
-//     const dst_extent = try texture_atlas.reserve(geometry.Extent2D(u32), allocator, width, height);
-//     var src_y: u32 = 0;
-//     while (src_y < height) : (src_y += 1) {
-//         var src_x: u32 = 0;
-//         while (src_x < width) : (src_x += 1) {
-//             const src_index = src_x + (src_y * width);
-//             const dst_index = dst_extent.x + src_x + ((dst_extent.y + src_y) * texture_layer_dimensions.width);
-//             texture_memory_map[dst_index].r = 1.0; // @intToFloat(f32, pixels[src_index].r) / 255;
-//             texture_memory_map[dst_index].g = 1.0; // @intToFloat(f32, pixels[src_index].g) / 255;
-//             texture_memory_map[dst_index].b = 1.0; // @intToFloat(f32, pixels[src_index].b) / 255;
-//             texture_memory_map[dst_index].a = @intToFloat(f32, pixels[src_index].a) / 255;
-//         }
-//     }
-//     std.debug.assert(dst_extent.width == width);
-//     std.debug.assert(dst_extent.height == height);
+    const dst_extent = try texture_atlas.reserve(geometry.Extent2D(u32), allocator, width, height);
+    var src_y: u32 = 0;
+    while (src_y < height) : (src_y += 1) {
+        var src_x: u32 = 0;
+        while (src_x < width) : (src_x += 1) {
+            const src_index = src_x + (src_y * width);
+            const dst_index = dst_extent.x + src_x + ((dst_extent.y + src_y) * texture_layer_dimensions.width);
+            // const pixel = pixels[src_index];
+            // _ = pixel;
+            // const value: f32 = @intToFloat(f32, @intCast(u16, pixel.r) + @intCast(u16, pixel.g) + @intCast(u16, pixel.b)) / @as(f32, 255.0 * 3.0);
+            // std.debug.assert(value <= 1.0);
+            // std.debug.assert(value >= 0.0);
+            generic_pipeline.texture_memory_map[dst_index].r = 1.0; // @intToFloat(f32, pixels[src_index].r) / 255;
+            generic_pipeline.texture_memory_map[dst_index].g = 1.0; // @intToFloat(f32, pixels[src_index].g) / 255;
+            generic_pipeline.texture_memory_map[dst_index].b = 1.0; // @intToFloat(f32, pixels[src_index].b) / 255;
+            generic_pipeline.texture_memory_map[dst_index].a = @intToFloat(f32, pixels[src_index].a) / 255;
+        }
+    }
+    std.debug.assert(dst_extent.width == width);
+    std.debug.assert(dst_extent.height == height);
 
-//     try transitionTextureToOptimal();
+    try transitionTextureToOptimal();
 
-//     return ImageHandle{
-//         .texture_array_index = 0,
-//         .x = @intCast(u12, dst_extent.x),
-//         .y = @intCast(u12, dst_extent.y),
-//         ._width = @intCast(u12, dst_extent.width),
-//         ._height = @intCast(u12, dst_extent.height),
-//         .reserved = 0,
-//     };
-// }
+    return ImageHandle{
+        .texture_array_index = 0,
+        .x = @intCast(u12, dst_extent.x),
+        .y = @intCast(u12, dst_extent.y),
+        ._width = @intCast(u12, dst_extent.width),
+        ._height = @intCast(u12, dst_extent.height),
+        .reserved = 0,
+    };
+}
 
 pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
     const device_dispatch = vulkan_core.device_dispatch;
