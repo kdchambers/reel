@@ -21,6 +21,8 @@ pub const OpenErrors = error{
     PulseContextCreateFail,
 };
 
+var stream_state: audio.State = .closed;
+
 var onReadSamplesCallback: *const audio.OnReadSamplesFn = undefined;
 
 pub fn createInterface(read_samples_callback: *const audio.OnReadSamplesFn) audio.Interface {
@@ -28,7 +30,12 @@ pub fn createInterface(read_samples_callback: *const audio.OnReadSamplesFn) audi
     return .{
         .open = &open,
         .close = &close,
+        .state = &state,
     };
+}
+
+pub fn state() audio.State {
+    return stream_state;
 }
 
 const pa_mainloop_api = opaque {};
@@ -270,6 +277,7 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
             if (pa_stream_connect_record(_stream, device, &buffer_attributes, flags) < 0) {
                 std.log.err("Failed to connect to recording stream", .{});
             }
+            stream_state = .open;
             initialized = true;
         },
         .terminated => {

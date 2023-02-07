@@ -14,11 +14,19 @@ pub const OpenError = pulse.OpenErrors || error{Unknown};
 
 pub const OpenFn = fn () OpenError!void;
 pub const CloseFn = fn () void;
+pub const GetStateFn = fn () State;
+
 pub const OnReadSamplesFn = fn (samples: []i16) void;
+
+pub const State = enum {
+    closed,
+    open,
+};
 
 pub const Interface = struct {
     open: *const OpenFn,
     close: *const CloseFn,
+    state: *const GetStateFn,
 };
 
 // TODO: Support more backends
