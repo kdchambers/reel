@@ -186,6 +186,79 @@ pub const Checkbox = packed struct(u32) {
     }
 };
 
+pub const AudioVolumeLevel = struct {
+    vertex_index: u32,
+    extent: geometry.Extent2D(f32),
+
+    pub fn setDecibelLevel(self: *@This(), decibels: f64) void {
+        var overlay_quad = @ptrCast(*graphics.QuadFace, &face_writer_ref.vertices[self.vertex_index]);
+        const percentage = decibelToPercent(decibels);
+        const overlay_extent = geometry.Extent2D(f32){
+            .x = self.extent.x,
+            .y = self.extent.y - @floatCast(f32, self.extent.height * percentage),
+            .width = self.extent.width,
+            .height = self.extent.height * @floatCast(f32, 1.0 - percentage),
+        };
+        overlay_quad.* = graphics.generateQuad(graphics.GenericVertex, overlay_extent, .bottom_left);
+        const color_black = graphics.RGBA(f32){ .r = 0, .g = 0, .b = 0.0, .a = 1.0 };
+        overlay_quad[0].color = color_black; // Top left
+        overlay_quad[1].color = color_black; // Top right
+        overlay_quad[2].color = color_black; // Bottom right
+        overlay_quad[3].color = color_black; // Bottom left
+        overlay_quad[0].color.a = 0.5;
+        overlay_quad[1].color.a = 0.5;
+        overlay_quad[2].color.a = 0.5;
+        overlay_quad[3].color.a = 0.5;
+    }
+
+    inline fn decibelToPercent(decibels: f64) f64 {
+        const decibel_range_min = 13.0;
+        const decibel_range_max = 8.0;
+        const decibel_range_total = decibel_range_max - decibel_range_min;
+        return @max(@min((-decibels - decibel_range_min) / decibel_range_total, 1.0), 0.0);
+    }
+
+    pub fn init(self: *@This()) !void {
+        const percentage = 1.0;
+        self.extent = geometry.Extent2D(f32){
+            .x = 0.5,
+            .y = 0.8,
+            .width = 0.025,
+            .height = 0.1,
+        };
+        const color_green = graphics.RGBA(f32){ .r = 0, .g = 1.0, .b = 0.0, .a = 1.0 };
+        const color_red = graphics.RGBA(f32){ .r = 1, .g = 0.0, .b = 0.0, .a = 1.0 };
+        const color_black = graphics.RGBA(f32){ .r = 0, .g = 0, .b = 0.0, .a = 1.0 };
+
+        var overlay_quad = try face_writer_ref.create(QuadFace);
+        overlay_quad.* = graphics.generateQuad(graphics.GenericVertex, self.extent, .bottom_left);
+        overlay_quad[0].color = color_green; // Top left
+        overlay_quad[1].color = color_green; // Top right
+        overlay_quad[2].color = color_red; // Bottom right
+        overlay_quad[3].color = color_red; // Bottom left
+
+        self.vertex_index = face_writer_ref.vertices_used;
+
+        var background_quad = try face_writer_ref.create(QuadFace);
+        const background_extent = geometry.Extent2D(f32){
+            .x = self.extent.x,
+            .y = self.extent.y - @floatCast(f32, self.extent.height * percentage),
+            .width = self.extent.width,
+            .height = self.extent.height * @floatCast(f32, 1.0 - percentage),
+        };
+        background_quad.* = graphics.generateQuad(graphics.GenericVertex, background_extent, .bottom_left);
+
+        background_quad[0].color = color_black; // Top left
+        background_quad[1].color = color_black; // Top right
+        background_quad[2].color = color_black; // Bottom right
+        background_quad[3].color = color_black; // Bottom left
+        background_quad[0].color.a = 0.5;
+        background_quad[1].color.a = 0.5;
+        background_quad[2].color.a = 0.5;
+        background_quad[3].color.a = 0.5;
+    }
+};
+
 pub const ImageButton = packed struct(u64) {
     background_vertex_index: u16,
     state_index: Index(HoverZoneState),
