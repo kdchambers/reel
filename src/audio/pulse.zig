@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const audio = @import("../audio.zig");
 const DynLib = std.DynLib;
 
 pub const Simple = opaque {};
@@ -11,6 +12,24 @@ pub const StreamDirection = enum(i32) {
     record = 2,
     upload = 3,
 };
+
+pub const OpenErrors = error{
+    PulseConnectServerFail,
+    PulseThreadedLoopStartFail,
+    PulseThreadedLoopCreateFail,
+    PulseThreadedLoopGetApiFail,
+    PulseContextCreateFail,
+};
+
+var onReadSamplesCallback: *const audio.OnReadSamplesFn = undefined;
+
+pub fn createInterface(read_samples_callback: *const audio.OnReadSamplesFn) audio.Interface {
+    onReadSamplesCallback = read_samples_callback;
+    return .{
+        .open = &open,
+        .close = &close,
+    };
+}
 
 const pa_mainloop_api = opaque {};
 const pa_threaded_mainloop = opaque {};
@@ -166,9 +185,18 @@ const StreamState = enum(i32) {
 
 var initialized: bool = false;
 
+// fn aWeight(sample: f64) f64 {
+//     const sample2: f64 = sample * sample;
+//     return (1.2588966 * 148840000 * sample2 * sample2) / ((sample2 * 424.36) * std.math.sqrt(sample2 + 11599.29) * (sample2 + 544496.41) * (sample2 + 148840000));
+
+//     //    	var f2 = f*f;
+//     // return 1.2588966 * 148840000 * f2*f2 /
+//     // ((f2 + 424.36) * Math.sqrt((f2 + 11599.29) * (f2 + 544496.41)) * (f2 + 148840000));
+// }
+
 fn streamReadCallback(stream: *pa_stream, bytes_available_count: u64, userdata: ?*void) callconv(.C) void {
     _ = userdata;
-    var pcm_buffer_opt: ?*i16 = undefined;
+    var pcm_buffer_opt: ?[*]i16 = undefined;
     var bytes_read_count: u64 = bytes_available_count;
     const ret_code = pa_stream_peek(stream, @ptrCast(*?*void, &pcm_buffer_opt), &bytes_read_count);
     if (ret_code < 0) {
@@ -178,12 +206,7 @@ fn streamReadCallback(stream: *pa_stream, bytes_available_count: u64, userdata: 
     }
 
     if (pcm_buffer_opt) |pcm_buffer| {
-        //
-        // Do things
-        //
-        _ = pcm_buffer;
-        std.debug.assert(bytes_read_count > 0);
-        std.log.info("Read {d} bytes", .{bytes_read_count});
+        onReadSamplesCallback(pcm_buffer[0..@divExact(bytes_read_count, @sizeOf(i16))]);
     } else {
         //
         // There's no input data to read
@@ -230,9 +253,13 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
             pa_stream_set_state_callback(_stream, onStreamStateCallback, null);
             pa_stream_set_read_callback(_stream, streamReadCallback, null);
 
+            const target_fps = 30;
+            const bytes_per_sample = 2 * @sizeOf(i16);
+            const bytes_per_second = 44100 * bytes_per_sample;
+            const buffer_size: u32 = @divFloor(bytes_per_second, target_fps);
+
             const device: ?[*:0]const u8 = null;
             const flags: StreamFlags = .{};
-            const buffer_size: u32 = 44100 / 2;
             const buffer_attributes = BufferAttr{
                 .max_length = std.math.maxInt(u32),
                 .tlength = std.math.maxInt(u32),
@@ -257,7 +284,7 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
     }
 }
 
-pub fn open() !void {
+pub fn open() OpenErrors!void {
     comptime {
         const c = @cImport(@cInclude("pulse/pulseaudio.h"));
         const assert = std.debug.assert;
@@ -269,20 +296,20 @@ pub fn open() !void {
         assert(c.PA_CONTEXT_FAILED == @enumToInt(ContextState.failed));
         assert(c.PA_CONTEXT_TERMINATED == @enumToInt(ContextState.terminated));
     }
-    _thread_loop = pa_threaded_mainloop_new() orelse return error.CreateThreadLoopFail;
-    _loop_api = pa_threaded_mainloop_get_api(_thread_loop) orelse return error.PulseFatal;
-    _context = pa_context_new(_loop_api, "Reel") orelse return error.PulseFatal;
+    _thread_loop = pa_threaded_mainloop_new() orelse return error.PulseThreadedLoopCreateFail;
+    _loop_api = pa_threaded_mainloop_get_api(_thread_loop) orelse return error.PulseThreadedLoopGetApiFail;
+    _context = pa_context_new(_loop_api, "Reel") orelse return error.PulseContextCreateFail;
 
     if (pa_context_connect(_context, null, .{}, null) < 0) {
         std.log.err("Failed to connect to pulse server", .{});
-        return error.ConnectPulseServerFail;
+        return error.PulseConnectServerFail;
     }
 
     pa_context_set_state_callback(_context, onContextStateChangedCallback, null);
 
     if (pa_threaded_mainloop_start(_thread_loop) != 0) {
         std.log.err("Failed to start pulse client loop", .{});
-        return error.StartLoopFail;
+        return error.PulseThreadedLoopStartFail;
     }
 
     std.log.info("Pulse opened", .{});
