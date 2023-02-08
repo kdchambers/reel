@@ -114,7 +114,22 @@ const pa_spawn_api = extern struct {
 };
 const pa_operation = opaque {};
 
-const pa_sink_info_cb_t = fn (context: *pa_context, info: *const pa_sink_info, userdata: ?*void) callconv(.C) void;
+const pa_sink_info_cb_t = fn (context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*void) callconv(.C) void;
+const pa_source_info_cb_t = fn (context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*void) callconv(.C) void;
+
+fn handleSourceInfo(context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*void) callconv(.C) void {
+    _ = context;
+    _ = userdata;
+    if (eol > 0) return;
+    std.log.info("Source: {s}", .{info.name});
+}
+
+fn handleSinkInfo(context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*void) callconv(.C) void {
+    _ = context;
+    _ = userdata;
+    if (eol > 0) return;
+    std.log.info("Sink: {s}", .{info.name});
+}
 
 const PA_CHANNELS_MAX = 32;
 
@@ -177,6 +192,15 @@ const pa_sink_port_info = extern struct {
     type: u32,
 };
 
+const pa_source_port_info = extern struct {
+    name: [*:0]const u8,
+    description: [*:0]const u8,
+    priority: u32,
+    available: i32,
+    availability_group: ?[*:0]const u8,
+    type: u32,
+};
+
 const pa_format_info = extern struct {
     encoding: pa_encoding_t,
     plist: *pa_proplist,
@@ -214,11 +238,81 @@ const pa_sink_info = extern struct {
     configured_latency: pa_usec_t,
     base_volume: pa_volume_t,
     state: pa_sink_state_t,
-    n_volume_state: u32,
+    n_volume_steps: u32,
     card: u32,
     n_ports: u32,
     ports: **pa_sink_port_info,
     active_port: *pa_sink_port_info,
+    n_formats: u8,
+    formats: **pa_format_info,
+};
+
+const pa_source_flags_t = packed struct(u32) {
+    hw_volume_control: bool = false,
+    latency: bool = false,
+    hardware: bool = false,
+    network: bool = false,
+    hw_mute_ctrl: bool = false,
+    decibel_volume: bool = false,
+    dynamic_volume: bool = false,
+    dynamic_latency: bool = false,
+    reserved_bit_8: bool = false,
+    reserved_bit_9: bool = false,
+    reserved_bit_10: bool = false,
+    reserved_bit_11: bool = false,
+    reserved_bit_12: bool = false,
+    reserved_bit_13: bool = false,
+    reserved_bit_14: bool = false,
+    reserved_bit_15: bool = false,
+    reserved_bit_16: bool = false,
+    reserved_bit_17: bool = false,
+    reserved_bit_18: bool = false,
+    reserved_bit_19: bool = false,
+    reserved_bit_20: bool = false,
+    reserved_bit_21: bool = false,
+    reserved_bit_22: bool = false,
+    reserved_bit_23: bool = false,
+    reserved_bit_24: bool = false,
+    reserved_bit_25: bool = false,
+    reserved_bit_26: bool = false,
+    reserved_bit_27: bool = false,
+    reserved_bit_28: bool = false,
+    reserved_bit_29: bool = false,
+    reserved_bit_30: bool = false,
+    reserved_bit_31: bool = false,
+};
+
+const pa_source_state_t = enum(i32) {
+    invalid_state = -1,
+    running = 0,
+    idle = 1,
+    suspended = 2,
+};
+
+const pa_source_info = extern struct {
+    name: [*:0]const u8,
+    index: u32,
+    description: [*:0]const u8,
+    sample_spec: pa_sample_spec,
+    channel_map: pa_channel_map,
+    owner_module: u32,
+    volume: pa_cvolume,
+    mute: i32,
+    monitor_of_sink: u32,
+    monitor_of_sink_name: [*:0]const u8,
+    latency: pa_usec_t,
+    driver: [*:0]const u8,
+    flags: pa_source_flags_t,
+    proplist: *pa_proplist,
+
+    configured_latency: pa_usec_t,
+    base_volume: pa_volume_t,
+    state: pa_source_state_t,
+    n_volume_steps: u32,
+    card: u32,
+    n_ports: u32,
+    ports: **pa_source_port_info,
+    active_port: *pa_source_port_info,
     n_formats: u8,
     formats: **pa_format_info,
 };
@@ -230,6 +324,7 @@ extern fn pa_context_unref(context: *pa_context) callconv(.C) void;
 extern fn pa_context_set_state_callback(context: *pa_context, state_callback: *const ContextSuccessFn, userdata: ?*void) callconv(.C) void;
 extern fn pa_context_get_state(context: *const pa_context) callconv(.C) ContextState;
 extern fn pa_context_get_sink_info_list(context: *const pa_context, callback: *const pa_sink_info_cb_t, userdata: ?*void) callconv(.C) *const pa_operation;
+extern fn pa_context_get_source_info_list(context: *const pa_context, callback: *const pa_source_info_cb_t, userdata: ?*void) callconv(.C) *const pa_operation;
 
 //
 // Stream
@@ -388,6 +483,8 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
             if (pa_stream_connect_record(_stream, device, &buffer_attributes, flags) < 0) {
                 std.log.err("Failed to connect to recording stream", .{});
             }
+            _ = pa_context_get_sink_info_list(_context, handleSinkInfo, null);
+            _ = pa_context_get_source_info_list(_context, handleSourceInfo, null);
             stream_state = .open;
             initialized = true;
         },
