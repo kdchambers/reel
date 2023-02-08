@@ -19,11 +19,18 @@ pub const OpenErrors = error{
     PulseThreadedLoopCreateFail,
     PulseThreadedLoopGetApiFail,
     PulseContextCreateFail,
+    PulseContextStartFail,
+    PulseStreamCreateFail,
+    PulseStreamStartFail,
+    PulseStreamConnectFail,
 };
 
 var stream_state: audio.State = .closed;
 
 var onReadSamplesCallback: *const audio.OnReadSamplesFn = undefined;
+
+var onOpenFailCallback: *const audio.OpenFailCallbackFn = undefined;
+var onOpenSuccessCallback: *const audio.OpenSuccessCallbackFn = undefined;
 
 pub fn createInterface(read_samples_callback: *const audio.OnReadSamplesFn) audio.Interface {
     onReadSamplesCallback = read_samples_callback;
@@ -31,11 +38,25 @@ pub fn createInterface(read_samples_callback: *const audio.OnReadSamplesFn) audi
         .open = &open,
         .close = &close,
         .state = &state,
+        .inputList = &inputList,
     };
 }
 
-pub fn state() audio.State {
+fn state() audio.State {
     return stream_state;
+}
+
+var inputListCallbackFn: *const audio.InputListCallbackFn = undefined;
+var input_list_allocator: std.mem.Allocator = undefined;
+
+var input_devices: [32][]const u8 = undefined;
+var input_device_count: u32 = undefined;
+
+fn inputList(allocator: std.mem.Allocator, callback: *const audio.InputListCallbackFn) void {
+    inputListCallbackFn = callback;
+    input_list_allocator = allocator;
+    input_device_count = 0;
+    _ = pa_context_get_source_info_list(_context, handleSourceInfo, null);
 }
 
 const pa_mainloop_api = opaque {};
@@ -116,19 +137,88 @@ const pa_operation = opaque {};
 
 const pa_sink_info_cb_t = fn (context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*void) callconv(.C) void;
 const pa_source_info_cb_t = fn (context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*void) callconv(.C) void;
+const pa_card_info_cb_t = fn (context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*void) callconv(.C) void;
+
+const pa_card_profile_info = extern struct {
+    name: [*:0]const u8,
+    description: [*:0]const u8,
+    n_sinks: u32,
+    n_sources: u32,
+    priority: u32,
+};
+
+const pa_card_profile_info2 = extern struct {
+    name: [*:0]const u8,
+    description: [*:0]const u8,
+    n_sinks: u32,
+    n_sources: u32,
+    priority: u32,
+    available: i32,
+};
+
+const pa_card_port_info = extern struct {
+    name: [*:0]const u8,
+    description: [*:0]const u8,
+    priority: u32,
+    available: i32,
+    direction: i32,
+    n_profiles: u32,
+    profiles: **pa_card_profile_info,
+    proplist: *pa_proplist,
+    latency_offest: u64,
+    profiles2: **pa_card_profile_info2,
+    availability_group: [*:0]const u8,
+    type: u32,
+};
+
+const pa_card_info = extern struct {
+    index: u32,
+    name: [*:0]const u8,
+    owner_module: u32,
+    driver: [*:0]const u8,
+    n_profiles: u32,
+    profiles: [*]pa_card_profile_info,
+    active_profile: *pa_card_profile_info,
+    proplist: *pa_proplist,
+    n_ports: u32,
+    ports: **pa_card_port_info,
+    profiles2: **pa_card_profile_info2,
+    active_profile2: *pa_card_profile_info2,
+};
+
+fn handleCardInfo(context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*void) callconv(.C) void {
+    _ = context;
+    _ = userdata;
+    if (eol > 0) return;
+    std.log.info("Card: {s}", .{info.name});
+}
 
 fn handleSourceInfo(context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*void) callconv(.C) void {
     _ = context;
     _ = userdata;
-    if (eol > 0) return;
-    std.log.info("Source: {s}", .{info.name});
+    if (eol > 0) {
+        inputListCallbackFn(input_devices[0..input_device_count]);
+        return;
+    }
+
+    if (input_device_count >= input_devices.len) {
+        std.log.warn("pulse: Internal input device buffer full. Ignoring device", .{});
+        return;
+    }
+
+    const len = std.mem.len(info.description);
+    input_devices[input_device_count] = input_list_allocator.dupe(u8, info.description[0..len]) catch {
+        std.log.err("pulse: Out of memory failure", .{});
+        return;
+    };
+    input_device_count += 1;
 }
 
 fn handleSinkInfo(context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*void) callconv(.C) void {
     _ = context;
     _ = userdata;
     if (eol > 0) return;
-    std.log.info("Sink: {s}", .{info.name});
+    std.log.info("Sink: {s} {s}", .{ info.name, info.description });
 }
 
 const PA_CHANNELS_MAX = 32;
@@ -323,8 +413,9 @@ extern fn pa_context_connect(context: *pa_context, server: ?[*:0]const u8, flags
 extern fn pa_context_unref(context: *pa_context) callconv(.C) void;
 extern fn pa_context_set_state_callback(context: *pa_context, state_callback: *const ContextSuccessFn, userdata: ?*void) callconv(.C) void;
 extern fn pa_context_get_state(context: *const pa_context) callconv(.C) ContextState;
-extern fn pa_context_get_sink_info_list(context: *const pa_context, callback: *const pa_sink_info_cb_t, userdata: ?*void) callconv(.C) *const pa_operation;
-extern fn pa_context_get_source_info_list(context: *const pa_context, callback: *const pa_source_info_cb_t, userdata: ?*void) callconv(.C) *const pa_operation;
+extern fn pa_context_get_sink_info_list(context: *const pa_context, callback: *const pa_sink_info_cb_t, userdata: ?*void) callconv(.C) *pa_operation;
+extern fn pa_context_get_source_info_list(context: *const pa_context, callback: *const pa_source_info_cb_t, userdata: ?*void) callconv(.C) *pa_operation;
+extern fn pa_context_get_card_info_list(context: *const pa_context, callback: *const pa_card_info_cb_t, userdata: ?*void) callconv(.C) *pa_operation;
 
 //
 // Stream
@@ -441,11 +532,9 @@ fn onStreamStateCallback(stream: *pa_stream, userdata: ?*void) callconv(.C) void
     _ = userdata;
     switch (pa_stream_get_state(stream)) {
         .creating, .terminated => {},
-        .ready => {
-            std.log.info("Stream ready", .{});
-        },
-        .failed => std.log.err("Stream failed", .{}),
-        .unconnected => std.log.info("Stream unconnected", .{}),
+        .ready => onOpenSuccessCallback(),
+        .failed => onOpenFailCallback(error.PulseStreamStartFail),
+        .unconnected => std.log.info("pulse: Stream unconnected", .{}),
     }
 }
 
@@ -455,11 +544,8 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
     switch (pa_context_get_state(context)) {
         .connecting, .authorizing, .setting_name => {},
         .ready => {
-            std.log.info("Stream ready (context)", .{});
             _stream = pa_stream_new(context, "Audio Input", &_sample_spec, null) orelse {
-                std.log.err("Failed to create input audio stream", .{});
-                // TODO:
-                std.debug.assert(false);
+                onOpenFailCallback(error.PulseStreamCreateFail);
                 return;
             };
 
@@ -481,26 +567,24 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
                 .fragsize = buffer_size,
             };
             if (pa_stream_connect_record(_stream, device, &buffer_attributes, flags) < 0) {
-                std.log.err("Failed to connect to recording stream", .{});
+                onOpenFailCallback(error.PulseStreamConnectFail);
+                return;
             }
-            _ = pa_context_get_sink_info_list(_context, handleSinkInfo, null);
-            _ = pa_context_get_source_info_list(_context, handleSourceInfo, null);
             stream_state = .open;
             initialized = true;
         },
-        .terminated => {
-            std.log.info("Terminated", .{});
-        },
-        .failed => {
-            std.log.err("Context state change reporting failure", .{});
-        },
-        .unconnected => {
-            std.log.info("Unconnected", .{});
-        },
+        .terminated => std.log.info("pulse: Terminated", .{}),
+        .failed => onOpenFailCallback(error.PulseContextStartFail),
+        .unconnected => std.log.info("pulse: Unconnected", .{}),
     }
 }
 
-pub fn open() OpenErrors!void {
+pub fn open(
+    onSuccess: *const audio.OpenSuccessCallbackFn,
+    onFail: *const audio.OpenFailCallbackFn,
+) OpenErrors!void {
+    onOpenFailCallback = onFail;
+    onOpenSuccessCallback = onSuccess;
     comptime {
         const c = @cImport(@cInclude("pulse/pulseaudio.h"));
         const assert = std.debug.assert;
@@ -517,18 +601,14 @@ pub fn open() OpenErrors!void {
     _context = pa_context_new(_loop_api, "Reel") orelse return error.PulseContextCreateFail;
 
     if (pa_context_connect(_context, null, .{}, null) < 0) {
-        std.log.err("Failed to connect to pulse server", .{});
         return error.PulseConnectServerFail;
     }
 
     pa_context_set_state_callback(_context, onContextStateChangedCallback, null);
 
     if (pa_threaded_mainloop_start(_thread_loop) != 0) {
-        std.log.err("Failed to start pulse client loop", .{});
         return error.PulseThreadedLoopStartFail;
     }
-
-    std.log.info("Pulse opened", .{});
 }
 
 pub fn close() void {
