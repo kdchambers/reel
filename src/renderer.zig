@@ -7,6 +7,8 @@ const vk = @import("vulkan");
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 
+const VulkanAllocator = @import("VulkanBumpAllocator.zig");
+
 const vulkan_core = @import("renderer/vulkan_core.zig");
 const texture_pipeline = @import("renderer/texture_pipeline.zig");
 const generic_pipeline = @import("renderer/generic_pipeline.zig");
@@ -17,7 +19,7 @@ const max_frames_in_flight = defines.max_frames_in_flight;
 const texture_layer_dimensions = defines.texture_layer_dimensions;
 const print_vulkan_objects = defines.print_vulkan_objects;
 const transparancy_enabled = defines.transparancy_enabled;
-const memory_size = defines.memory_size;
+const memory_size = defines.memory.host_local.size_bytes + 256;
 
 const ScreenNormalizedBaseType = defines.ScreenNormalizedBaseType;
 const TextureNormalizedBaseType = defines.TextureNormalizedBaseType;
@@ -135,8 +137,8 @@ pub var video_stream_enabled: bool = false;
 pub fn videoFrame() VideoFrameBuffer {
     return .{
         .pixels = texture_pipeline.memory_map.ptr,
-        .width = defines.pipeline_video.framebuffer_dimensions.width,
-        .height = defines.pipeline_video.framebuffer_dimensions.height,
+        .width = defines.memory.pipeline_video.framebuffer_dimensions.width,
+        .height = defines.memory.pipeline_video.framebuffer_dimensions.height,
     };
 }
 
@@ -348,13 +350,14 @@ pub fn init(
         );
     }
 
-    var mesh_memory = try v_device.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
-        .allocation_size = memory_size,
-        .memory_type_index = mesh_memory_index,
-    }, null);
+    // Overallocate to take memory lost to alignment padding into account
+    const memory_padding = 256;
+    var host_local_allocator = try VulkanAllocator.init(
+        mesh_memory_index,
+        defines.memory.host_local.size_bytes + memory_padding,
+    );
 
-    mapped_device_memory = @ptrCast([*]u8, (try v_device.mapMemory(vulkan_core.logical_device, mesh_memory, 0, memory_size, .{})).?);
-
+    // TODO:
     images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
     renders_finished = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
     inflight_fences = try allocator.alloc(vk.Fence, max_frames_in_flight);
@@ -382,27 +385,17 @@ pub fn init(
 
     try texture_pipeline.init(
         .{ .width = 2048, .height = 2048 },
-        mesh_memory_index,
         @intCast(u32, swapchain_images.len),
         defines.initial_screen_dimensions,
-        mesh_memory,
-        defines.pipeline_video.memory_range_start,
-        defines.pipeline_video.indices_range_size,
-        defines.pipeline_video.vertices_range_size,
-        mapped_device_memory,
+        &host_local_allocator,
     );
 
     try generic_pipeline.init(
         allocator,
-        mesh_memory_index,
         jobs_command_buffer,
         vulkan_core.graphics_present_queue,
         @intCast(u32, swapchain_images.len),
-        mesh_memory,
-        0, // mesh_offset
-        defines.pipeline_generic.indices_range_size,
-        defines.pipeline_generic.vertices_range_size,
-        mapped_device_memory,
+        &host_local_allocator,
     );
 }
 
@@ -587,8 +580,8 @@ pub fn recordRenderPass(
         //
         const texture_x: f32 = 0;
         const texture_y: f32 = 0;
-        const texture_width: f32 = video_stream_output_dimensions.width / @as(f32, defines.pipeline_video.framebuffer_dimensions.width);
-        const texture_height: f32 = video_stream_output_dimensions.height / @as(f32, defines.pipeline_video.framebuffer_dimensions.height);
+        const texture_width: f32 = video_stream_output_dimensions.width / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.width);
+        const texture_height: f32 = video_stream_output_dimensions.height / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.height);
         std.debug.assert(texture_width <= 1.0);
         std.debug.assert(texture_width >= 0.0);
         vertex_top_left.u = texture_x;

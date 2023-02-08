@@ -71,12 +71,6 @@ pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
     );
 }
 
-pub fn recordCommandBuffers() !void {
-    //
-}
-
-pub fn deinit() void {}
-
 fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;

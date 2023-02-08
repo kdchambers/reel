@@ -10,6 +10,7 @@ const shaders = @import("shaders");
 const vulkan_core = @import("vulkan_core.zig");
 const render_pass = @import("render_pass.zig");
 const defines = @import("defines.zig");
+const VulkanAllocator = @import("../VulkanBumpAllocator.zig");
 
 const geometry = @import("../geometry.zig");
 const graphics = @import("../graphics.zig");
@@ -40,15 +41,10 @@ var sampler: vk.Sampler = undefined;
 
 pub fn init(
     allocator: std.mem.Allocator,
-    texture_memory_index: u32,
     command_buffer: vk.CommandBuffer,
     graphics_present_queue: vk.Queue,
     swapchain_image_count: u32,
-    mesh_memory: vk.DeviceMemory,
-    memory_offset: u32,
-    indices_range_size: u32,
-    vertices_range_size: u32,
-    mapped_device_memory: [*]u8,
+    vulkan_allocator: *VulkanAllocator,
 ) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
@@ -81,22 +77,17 @@ pub fn init(
     }
 
     const texture_memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, texture_image);
-
-    var image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
-        .allocation_size = texture_memory_requirements.size,
-        .memory_type_index = texture_memory_index,
-    }, null);
-
-    try device_dispatch.bindImageMemory(logical_device, texture_image, image_memory, 0);
+    const texture_memory_offset = try vulkan_allocator.allocate(
+        texture_memory_requirements.size,
+        texture_memory_requirements.alignment,
+    );
+    try device_dispatch.bindImageMemory(logical_device, texture_image, vulkan_allocator.memory, texture_memory_offset);
 
     const texture_layer_size = defines.texture_layer_size;
-
     std.debug.assert(texture_layer_size <= texture_memory_requirements.size);
-    std.debug.assert(texture_memory_requirements.alignment >= 16);
     const last_index: usize = (@intCast(usize, texture_dimensions.width) * texture_dimensions.height) - 1;
     {
-        var mapped_memory_ptr = (try device_dispatch.mapMemory(logical_device, image_memory, 0, texture_layer_size, .{})).?;
-        texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(16, mapped_memory_ptr));
+        texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(16, &vulkan_allocator.mapped_memory[texture_memory_offset]));
         std.mem.set(graphics.RGBA(f32), texture_memory_map[0..last_index], .{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 0.0 });
     }
 
@@ -208,58 +199,61 @@ pub fn init(
         .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
     }, null);
 
-    {
-        const buffer_create_info = vk.BufferCreateInfo{
-            .size = vertices_range_size,
-            .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-            .sharing_mode = .exclusive,
-            // NOTE: Only valid when `sharing_mode` is CONCURRENT
-            // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-            .flags = .{},
-        };
+    const vertex_buffer_create_info = vk.BufferCreateInfo{
+        .size = defines.memory.pipeline_generic.vertices_range_size,
+        .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
+        .sharing_mode = .exclusive,
+        // NOTE: Only valid when `sharing_mode` is CONCURRENT
+        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .flags = .{},
+    };
+    vulkan_vertices_buffer = try device_dispatch.createBuffer(logical_device, &vertex_buffer_create_info, null);
+    const vertex_memory_requirements = device_dispatch.getBufferMemoryRequirements(logical_device, vulkan_vertices_buffer);
+    const vertex_buffer_memory_offset = try vulkan_allocator.allocate(
+        vertex_memory_requirements.size,
+        vertex_memory_requirements.alignment,
+    );
 
-        vulkan_vertices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
-        try device_dispatch.bindBufferMemory(
-            logical_device,
-            vulkan_vertices_buffer,
-            mesh_memory,
-            memory_offset,
-        );
-    }
+    try device_dispatch.bindBufferMemory(
+        logical_device,
+        vulkan_vertices_buffer,
+        vulkan_allocator.memory,
+        vertex_buffer_memory_offset,
+    );
 
-    {
-        const buffer_create_info = vk.BufferCreateInfo{
-            .size = indices_range_size,
-            .usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
-            .sharing_mode = .exclusive,
-            // NOTE: Only valid when `sharing_mode` is CONCURRENT
-            // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-            .flags = .{},
-        };
+    const index_buffer_create_info = vk.BufferCreateInfo{
+        .size = defines.memory.pipeline_generic.indices_range_size,
+        .usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
+        .sharing_mode = .exclusive,
+        // NOTE: Only valid when `sharing_mode` is CONCURRENT
+        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .flags = .{},
+    };
 
-        vulkan_indices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
-        try device_dispatch.bindBufferMemory(
-            logical_device,
-            vulkan_indices_buffer,
-            mesh_memory,
-            memory_offset + vertices_range_size,
-        );
-    }
+    vulkan_indices_buffer = try device_dispatch.createBuffer(logical_device, &index_buffer_create_info, null);
+    const index_memory_requirements = device_dispatch.getBufferMemoryRequirements(logical_device, vulkan_indices_buffer);
+    const index_buffer_memory_offset = try vulkan_allocator.allocate(
+        index_memory_requirements.size,
+        index_memory_requirements.alignment,
+    );
 
-    const indices_range_index_begin = memory_offset + vertices_range_size;
-    const indices_range_count = @divExact(indices_range_size, @sizeOf(u16));
-    const vertices_range_count = @divExact(vertices_range_size, @sizeOf(graphics.GenericVertex));
+    try device_dispatch.bindBufferMemory(
+        logical_device,
+        vulkan_indices_buffer,
+        vulkan_allocator.memory,
+        index_buffer_memory_offset,
+    );
 
     {
         const Vertex = graphics.GenericVertex;
-        const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &mapped_device_memory[memory_offset]));
-        vertices_buffer = vertex_ptr[0..vertices_range_count];
-        const indices_ptr = @ptrCast([*]u16, @alignCast(16, &mapped_device_memory[indices_range_index_begin]));
-        indices_buffer = indices_ptr[0..indices_range_count];
+        const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &vulkan_allocator.mapped_memory[vertex_buffer_memory_offset]));
+        vertices_buffer = vertex_ptr[0..defines.memory.pipeline_generic.vertices_range_count];
+        const indices_ptr = @ptrCast([*]u16, @alignCast(16, &vulkan_allocator.mapped_memory[index_buffer_memory_offset]));
+        indices_buffer = indices_ptr[0..defines.memory.pipeline_generic.indices_range_count];
     }
 
     vertex_shader_module = try createVertexShaderModule(device_dispatch, logical_device);

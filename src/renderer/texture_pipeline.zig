@@ -4,6 +4,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
+const defines = @import("defines.zig");
+const VulkanAllocator = @import("../VulkanBumpAllocator.zig");
 
 const vulkan_core = @import("vulkan_core.zig");
 const vulkan_config = @import("vulkan_config.zig");
@@ -49,6 +51,139 @@ pub var vulkan_indices_buffer: vk.Buffer = undefined;
 
 pub var memory_map: []Pixel = undefined;
 
+pub fn init(
+    texture_dimensions: geometry.Dimensions2D(u32),
+    swapchain_image_count: u32,
+    initial_viewport_dimensions: geometry.Dimensions2D(u16),
+    vulkan_allocator: *VulkanAllocator,
+) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+    const queue = vulkan_core.graphics_present_queue;
+
+    try createUnscaledImage(vulkan_allocator.memory_index);
+
+    {
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = .r8g8b8a8_unorm,
+            .tiling = .linear,
+            .extent = vk.Extent3D{
+                .width = texture_dimensions.width,
+                .height = texture_dimensions.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = .preinitialized,
+            .usage = .{ .sampled_bit = true, .transfer_dst_bit = true },
+            .samples = .{ .@"1_bit" = true },
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+
+        texture_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+    }
+
+    const texture_memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, texture_image);
+    const texture_image_memory_offset = try vulkan_allocator.allocate(texture_memory_requirements.size, texture_memory_requirements.alignment);
+
+    try device_dispatch.bindImageMemory(logical_device, texture_image, vulkan_allocator.memory, texture_image_memory_offset);
+    texture_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
+        .flags = .{},
+        .image = texture_image,
+        .view_type = .@"2d_array",
+        .format = .r8g8b8a8_unorm,
+        .subresource_range = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+    }, null);
+
+    try layoutToOptimal(
+        device_dispatch,
+        logical_device,
+        queue,
+    );
+
+    const vertex_buffer_create_info = vk.BufferCreateInfo{
+        .size = defines.memory.pipeline_video.vertices_range_size,
+        .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
+        .sharing_mode = .exclusive,
+        // NOTE: Only valid when `sharing_mode` is CONCURRENT
+        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .flags = .{},
+    };
+    vulkan_vertices_buffer = try device_dispatch.createBuffer(logical_device, &vertex_buffer_create_info, null);
+    const vertex_memory_requirements = device_dispatch.getBufferMemoryRequirements(logical_device, vulkan_vertices_buffer);
+    const vertex_buffer_memory_offset = try vulkan_allocator.allocate(
+        vertex_memory_requirements.size,
+        vertex_memory_requirements.alignment,
+    );
+    try device_dispatch.bindBufferMemory(
+        logical_device,
+        vulkan_vertices_buffer,
+        vulkan_allocator.memory,
+        vertex_buffer_memory_offset,
+    );
+
+    const index_buffer_create_info = vk.BufferCreateInfo{
+        .size = defines.memory.pipeline_generic.indices_range_size,
+        .usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
+        .sharing_mode = .exclusive,
+        // NOTE: Only valid when `sharing_mode` is CONCURRENT
+        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .flags = .{},
+    };
+    vulkan_indices_buffer = try device_dispatch.createBuffer(logical_device, &index_buffer_create_info, null);
+    const index_memory_requirements = device_dispatch.getBufferMemoryRequirements(logical_device, vulkan_indices_buffer);
+    const index_buffer_memory_offset = try vulkan_allocator.allocate(
+        index_memory_requirements.size,
+        index_memory_requirements.alignment,
+    );
+    try device_dispatch.bindBufferMemory(
+        logical_device,
+        vulkan_indices_buffer,
+        vulkan_allocator.memory,
+        index_buffer_memory_offset,
+    );
+
+    {
+        const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &vulkan_allocator.mapped_memory[vertex_buffer_memory_offset]));
+        vertices_buffer = vertex_ptr[0..defines.memory.pipeline_video.vertices_range_count];
+        const indices_ptr = @ptrCast([*]u16, @alignCast(16, &vulkan_allocator.mapped_memory[index_buffer_memory_offset]));
+        indices_buffer = indices_ptr[0..defines.memory.pipeline_video.indices_range_count];
+    }
+
+    vertex_shader_module = try createVertexShaderModule(device_dispatch, logical_device);
+    fragment_shader_module = try createFragmentShaderModule(device_dispatch, logical_device);
+
+    try createDescriptorSetLayouts(device_dispatch, logical_device, swapchain_image_count);
+
+    const pipeline_layout_create_info = vk.PipelineLayoutCreateInfo{
+        .set_layout_count = 1,
+        .p_set_layouts = &descriptor_set_layout_buffer,
+        .push_constant_range_count = 0,
+        .p_push_constant_ranges = undefined,
+        .flags = .{},
+    };
+
+    pipeline_layout = try device_dispatch.createPipelineLayout(logical_device, &pipeline_layout_create_info, null);
+    try createDescriptorPool(device_dispatch, logical_device, swapchain_image_count);
+    try createDescriptorSets(device_dispatch, logical_device, swapchain_image_count);
+    try createGraphicsPipeline(device_dispatch, logical_device, initial_viewport_dimensions);
+}
+
 pub fn createUnscaledImage(memory_index: u32) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
@@ -88,7 +223,6 @@ pub fn createUnscaledImage(memory_index: u32) !void {
     }
 
     const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, unscaled_image);
-
     var memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = memory_requirements.size,
         .memory_type_index = memory_index,
@@ -208,148 +342,6 @@ pub fn createUnscaledImage(memory_index: u32) !void {
         1,
         @ptrCast([*]const vk.CommandBuffer, &command_buffer),
     );
-}
-
-pub fn init(
-    texture_dimensions: geometry.Dimensions2D(u32),
-    texture_memory_index: u32,
-    swapchain_image_count: u32,
-    initial_viewport_dimensions: geometry.Dimensions2D(u16),
-    mesh_memory: vk.DeviceMemory,
-    memory_offset: u32,
-    indices_range_size: u32,
-    vertices_range_size: u32,
-    mapped_device_memory: [*]u8,
-) !void {
-    const device_dispatch = vulkan_core.device_dispatch;
-    const logical_device = vulkan_core.logical_device;
-    const queue = vulkan_core.graphics_present_queue;
-
-    try createUnscaledImage(texture_memory_index);
-
-    {
-        const image_create_info = vk.ImageCreateInfo{
-            .flags = .{},
-            .image_type = .@"2d",
-            .format = .r8g8b8a8_unorm,
-            .tiling = .linear,
-            .extent = vk.Extent3D{
-                .width = texture_dimensions.width,
-                .height = texture_dimensions.height,
-                .depth = 1,
-            },
-            .mip_levels = 1,
-            .array_layers = 1,
-            .initial_layout = .preinitialized,
-            .usage = .{ .sampled_bit = true, .transfer_dst_bit = true },
-            .samples = .{ .@"1_bit" = true },
-            .sharing_mode = .exclusive,
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-        };
-
-        texture_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
-    }
-
-    const texture_memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, texture_image);
-
-    var image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
-        .allocation_size = texture_memory_requirements.size,
-        .memory_type_index = texture_memory_index,
-    }, null);
-
-    try device_dispatch.bindImageMemory(logical_device, texture_image, image_memory, 0);
-    texture_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
-        .flags = .{},
-        .image = texture_image,
-        .view_type = .@"2d_array",
-        .format = .r8g8b8a8_unorm,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = 1,
-            .base_array_layer = 0,
-            .layer_count = 1,
-        },
-        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-    }, null);
-
-    try layoutToOptimal(
-        device_dispatch,
-        logical_device,
-        queue,
-    );
-
-    {
-        const buffer_create_info = vk.BufferCreateInfo{
-            .size = vertices_range_size,
-            .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-            .sharing_mode = .exclusive,
-            // NOTE: Only valid when `sharing_mode` is CONCURRENT
-            // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-            .flags = .{},
-        };
-
-        vulkan_vertices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
-        try device_dispatch.bindBufferMemory(
-            logical_device,
-            vulkan_vertices_buffer,
-            mesh_memory,
-            memory_offset,
-        );
-    }
-
-    {
-        const buffer_create_info = vk.BufferCreateInfo{
-            .size = indices_range_size,
-            .usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
-            .sharing_mode = .exclusive,
-            // NOTE: Only valid when `sharing_mode` is CONCURRENT
-            // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-            .flags = .{},
-        };
-
-        vulkan_indices_buffer = try device_dispatch.createBuffer(logical_device, &buffer_create_info, null);
-        try device_dispatch.bindBufferMemory(
-            logical_device,
-            vulkan_indices_buffer,
-            mesh_memory,
-            memory_offset + vertices_range_size,
-        );
-    }
-
-    const indices_range_index_begin = memory_offset + vertices_range_size;
-    const indices_range_count = @divExact(indices_range_size, @sizeOf(u16));
-    const vertices_range_count = @divExact(vertices_range_size, @sizeOf(Vertex));
-
-    {
-        const vertex_ptr = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), &mapped_device_memory[memory_offset]));
-        vertices_buffer = vertex_ptr[0..vertices_range_count];
-        const indices_ptr = @ptrCast([*]u16, @alignCast(16, &mapped_device_memory[indices_range_index_begin]));
-        indices_buffer = indices_ptr[0..indices_range_count];
-    }
-
-    vertex_shader_module = try createVertexShaderModule(device_dispatch, logical_device);
-    fragment_shader_module = try createFragmentShaderModule(device_dispatch, logical_device);
-
-    try createDescriptorSetLayouts(device_dispatch, logical_device, swapchain_image_count);
-
-    const pipeline_layout_create_info = vk.PipelineLayoutCreateInfo{
-        .set_layout_count = 1,
-        .p_set_layouts = &descriptor_set_layout_buffer,
-        .push_constant_range_count = 0,
-        .p_push_constant_ranges = undefined,
-        .flags = .{},
-    };
-
-    pipeline_layout = try device_dispatch.createPipelineLayout(logical_device, &pipeline_layout_create_info, null);
-    try createDescriptorPool(device_dispatch, logical_device, swapchain_image_count);
-    try createDescriptorSets(device_dispatch, logical_device, swapchain_image_count);
-    try createGraphicsPipeline(device_dispatch, logical_device, initial_viewport_dimensions);
 }
 
 fn createDescriptorPool(
