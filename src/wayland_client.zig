@@ -73,7 +73,7 @@ pub var frame_start_ns: i128 = undefined;
 pub var is_fullscreen: bool = true;
 pub var is_draw_requested: bool = false;
 
-pub var pending_swapchain_images_count: u32 = 1;
+pub var pending_swapchain_images_count: u32 = 2;
 pub var frame_index: u32 = 0;
 
 //
@@ -112,12 +112,10 @@ var frame_tick_callback_count: u32 = 0;
 //
 // Public Interface
 //
-// fn: init
-// fn: deinit
-// fn: pollEvents
-// fn: mouseCoordinatesNDCR
-// ns: screen_stream
-//
+
+pub fn shutdown() void {
+    is_shutdown_requested = true;
+}
 
 pub fn addFrameTickCallback(entry: OnFrameTickCallbackEntry) !u32 {
     if (frame_tick_callback_count == frame_tick_callback_buffer.len)
@@ -196,7 +194,7 @@ pub fn pollEvents() bool {
     //
     _ = display.flush();
 
-    const timeout_milliseconds = 250;
+    const timeout_milliseconds = 4;
     var pollfd = linux.pollfd{
         .fd = wayland_fd,
         .events = linux.POLL.IN,
@@ -205,8 +203,8 @@ pub fn pollEvents() bool {
     const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
 
     if (poll_code == 0) {
-        if (builtin.mode == .Debug)
-            std.log.warn("wayland_client: Input poll timed out", .{});
+        // if (builtin.mode == .Debug)
+        //     std.log.warn("wayland_client: Input poll timed out", .{});
 
         display.cancelRead();
         return true;
@@ -364,6 +362,9 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 return;
             }
 
+            if (mouse_coordinates.x < 0 or mouse_coordinates.y < 0)
+                return;
+
             const mouse_button = @intToEnum(MouseButton, button.button);
             button_clicked = .none;
 
@@ -378,15 +379,24 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
 
             button_state = button.state;
 
+            std.log.info("Button mouse coordinates: {d}, {d}", .{
+                mouse_coordinates.x,
+                mouse_coordinates.y,
+            });
+
             {
                 const mouse_x = @floatToInt(u16, mouse_coordinates.x);
                 const mouse_y = @floatToInt(u16, mouse_coordinates.y);
+
                 std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{
                     mouse_x,
                     mouse_y,
                     screen_dimensions.width,
                     screen_dimensions.height,
                 });
+
+                if (mouse_x > screen_dimensions.width or mouse_y > screen_dimensions.height)
+                    return;
 
                 if (mouse_x < 3 and mouse_y < 3) {
                     xdg_toplevel.resize(seat, button.serial, .bottom_left);
