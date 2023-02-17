@@ -12,7 +12,7 @@ const ScanProtocolsStep = @import("deps/zig-wayland/build.zig").ScanProtocolsSte
 
 pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
-    const mode = b.standardReleaseOptions();
+    const optimize = b.standardOptimizeOption(.{});
 
     const scanner = ScanProtocolsStep.create(b);
     scanner.addProtocolPath("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
@@ -27,35 +27,46 @@ pub fn build(b: *Builder) void {
     scanner.generate("zwlr_screencopy_manager_v1", 3);
     scanner.generate("zxdg_decoration_manager_v1", 1);
 
-    const exe = b.addExecutable("reel", "src/main.zig");
-
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
+    const exe = b.addExecutable(.{
+        .name = "reel",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
 
     const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml", "vk.zig");
-    const vulkan_pkg = gen.getPackage("vulkan");
+    exe.addModule("vulkan", gen.getModule());
 
-    exe.addPackage(.{
-        .name = "shaders",
-        .source = .{ .path = "shaders/shaders.zig" },
+    const shaders_module = b.createModule(.{
+        .source_file = .{ .path = "shaders/shaders.zig" },
+        .dependencies = &.{},
     });
+    const fontana_module = b.createModule(.{
+        .source_file = .{ .path = "deps/fontana/src/fontana.zig" },
+        .dependencies = &.{},
+    });
+    exe.addModule("shaders", shaders_module);
+    exe.addModule("fontana", fontana_module);
 
-    exe.addPackage(.{
-        .name = "fontana",
-        .source = .{ .path = "deps/fontana/src/fontana.zig" },
+    const wayland_module = b.createModule(.{
+        .source_file = .{ .generated = &scanner.result },
+        .dependencies = &.{},
     });
+    exe.addModule("wayland", wayland_module);
 
-    exe.addPackage(.{
-        .name = "wayland",
-        .source = .{ .generated = &scanner.result },
-    });
     exe.step.dependOn(&scanner.step);
 
-    exe.addPackagePath("zigimg", "deps/zigimg/zigimg.zig");
+    const zigimg_module = b.createModule(.{
+        .source_file = .{ .path = "deps/zigimg/zigimg.zig" },
+        .dependencies = &.{},
+    });
+    exe.addModule("zigimg", zigimg_module);
 
     exe.linkLibC();
     exe.linkSystemLibrary("wayland-client");
     exe.linkSystemLibrary("wayland-cursor");
+
+    exe.linkSystemLibrary("pulse");
 
     //
     // Pipewire Screencast
@@ -88,8 +99,6 @@ pub fn build(b: *Builder) void {
     exe.linkSystemLibrary("swscale");
 
     scanner.addCSource(exe);
-
-    exe.addPackage(vulkan_pkg);
 
     exe.install();
 
