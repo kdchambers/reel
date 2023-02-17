@@ -117,7 +117,7 @@ pub fn detectSupport() bool {
         return false;
     }
     const source_mode_flags = getProperty(u32, connection, "AvailableSourceTypes") catch return false;
-    return (@bitCast(SourceTypeFlags, source_mode_flags).window == true);
+    return (@bitCast(SourceTypeFlags, source_mode_flags).monitor == true);
 }
 
 pub fn open(
@@ -884,7 +884,7 @@ pub fn init() !void {
     var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
 
     const connection_name_max_size = 16;
-    const connection_name = blk: {
+    const connection_name: []const u8 = blk: {
         const raw_name = dbus.busGetUniqueName(connection);
         const raw_name_len = std.mem.len(raw_name);
         if (raw_name_len == 0) {
@@ -899,9 +899,7 @@ pub fn init() !void {
         }
         break :blk raw_name[1..raw_name_len];
     };
-    const connection_name_len = std.mem.len(connection_name);
-
-    if (connection_name_len >= connection_name_max_size) {
+    if (connection_name.len >= connection_name_max_size) {
         std.log.err("dbus_client: Connection name '{s}' exceeds maximum size of {d}", .{
             connection_name,
             connection_name_max_size,
@@ -910,19 +908,18 @@ pub fn init() !void {
     }
 
     var portal_connection_name_buffer: [connection_name_max_size]u8 = undefined;
-    const portal_connection_name = blk: {
+    const portal_connection_name: []const u8 = blk: {
         var i: usize = 0;
-        while (i < connection_name_len) : (i += 1) {
+        while (i < connection_name.len) : (i += 1) {
             if (connection_name[i] == '.') {
                 portal_connection_name_buffer[i] = '_';
                 continue;
             }
             portal_connection_name_buffer[i] = connection_name[i];
         }
-        portal_connection_name_buffer[connection_name_len] = '0';
-        break :blk portal_connection_name_buffer[0..connection_name_len];
+        portal_connection_name_buffer[connection_name.len] = '0';
+        break :blk portal_connection_name_buffer[0..connection_name.len];
     };
-    std.debug.assert(std.mem.len(portal_connection_name) == connection_name_len);
 
     //
     // Check support
