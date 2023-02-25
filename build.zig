@@ -9,6 +9,7 @@ const Pkg = Build.Pkg;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const ScanProtocolsStep = @import("deps/zig-wayland/build.zig").ScanProtocolsStep;
+const zmath = @import("deps/zig-gamedev/libs/zmath/build.zig");
 
 pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
@@ -36,6 +37,9 @@ pub fn build(b: *Builder) void {
 
     const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml", "vk.zig");
     exe.addModule("vulkan", gen.getModule());
+
+    const zmath_module = zmath.Package.build(b, .{});
+    exe.addModule("zmath", zmath_module.zmath);
 
     const shaders_module = b.createModule(.{
         .source_file = .{ .path = "shaders/shaders.zig" },
