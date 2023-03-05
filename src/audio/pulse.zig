@@ -432,6 +432,8 @@ extern fn pa_stream_get_state(stream: *pa_stream) callconv(.C) StreamState;
 extern fn pa_stream_set_state_callback(stream: *pa_stream, callback: *const StreamNotifyFn, userdata: ?*void) callconv(.C) void;
 extern fn pa_stream_connect_record(stream: *pa_stream, device: ?[*:0]const u8, buffer_attributes: ?*const BufferAttr, flags: StreamFlags) callconv(.C) i32;
 extern fn pa_stream_unref(stream: *pa_stream) callconv(.C) void;
+extern fn pa_stream_get_sample_spec(stream: *pa_stream) callconv(.C) *const pa_sample_spec;
+extern fn pa_stream_get_channel_map(stream: *pa_stream) callconv(.C) *const pa_channel_map;
 
 var _thread_loop: *pa_threaded_mainloop = undefined;
 var _loop_api: *pa_mainloop_api = undefined;
@@ -532,7 +534,17 @@ fn onStreamStateCallback(stream: *pa_stream, userdata: ?*void) callconv(.C) void
     _ = userdata;
     switch (pa_stream_get_state(stream)) {
         .creating, .terminated => {},
-        .ready => onOpenSuccessCallback(),
+        .ready => {
+            const sample_spec = pa_stream_get_sample_spec(stream);
+            const channel_map = pa_stream_get_channel_map(stream);
+            std.debug.assert(sample_spec.channels == channel_map.channels);
+            std.log.info("Audio input stream channels: {d} {s} {s}", .{
+                channel_map.channels,
+                @tagName(channel_map.map[0]),
+                @tagName(channel_map.map[1]),
+            });
+            onOpenSuccessCallback();
+        },
         .failed => onOpenFailCallback(error.PulseStreamStartFail),
         .unconnected => std.log.info("pulse: Stream unconnected", .{}),
     }
@@ -579,23 +591,24 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
     }
 }
 
+comptime {
+    const c = @cImport(@cInclude("pulse/pulseaudio.h"));
+    const assert = std.debug.assert;
+    assert(c.PA_CONTEXT_UNCONNECTED == @enumToInt(ContextState.unconnected));
+    assert(c.PA_CONTEXT_CONNECTING == @enumToInt(ContextState.connecting));
+    assert(c.PA_CONTEXT_AUTHORIZING == @enumToInt(ContextState.authorizing));
+    assert(c.PA_CONTEXT_SETTING_NAME == @enumToInt(ContextState.setting_name));
+    assert(c.PA_CONTEXT_READY == @enumToInt(ContextState.ready));
+    assert(c.PA_CONTEXT_FAILED == @enumToInt(ContextState.failed));
+    assert(c.PA_CONTEXT_TERMINATED == @enumToInt(ContextState.terminated));
+}
+
 pub fn open(
     onSuccess: *const audio.OpenSuccessCallbackFn,
     onFail: *const audio.OpenFailCallbackFn,
 ) OpenErrors!void {
     onOpenFailCallback = onFail;
     onOpenSuccessCallback = onSuccess;
-    comptime {
-        const c = @cImport(@cInclude("pulse/pulseaudio.h"));
-        const assert = std.debug.assert;
-        assert(c.PA_CONTEXT_UNCONNECTED == @enumToInt(ContextState.unconnected));
-        assert(c.PA_CONTEXT_CONNECTING == @enumToInt(ContextState.connecting));
-        assert(c.PA_CONTEXT_AUTHORIZING == @enumToInt(ContextState.authorizing));
-        assert(c.PA_CONTEXT_SETTING_NAME == @enumToInt(ContextState.setting_name));
-        assert(c.PA_CONTEXT_READY == @enumToInt(ContextState.ready));
-        assert(c.PA_CONTEXT_FAILED == @enumToInt(ContextState.failed));
-        assert(c.PA_CONTEXT_TERMINATED == @enumToInt(ContextState.terminated));
-    }
     _thread_loop = pa_threaded_mainloop_new() orelse return error.PulseThreadedLoopCreateFail;
     _loop_api = pa_threaded_mainloop_get_api(_thread_loop) orelse return error.PulseThreadedLoopGetApiFail;
     _context = pa_context_new(_loop_api, "Reel") orelse return error.PulseContextCreateFail;
