@@ -26,8 +26,8 @@ pub const FrameImage = graphics.Image(PixelType);
 /// List of backends for screencasting, ordered in terms of preference
 /// Top of the list being the most preferable
 pub const Backend = enum(u16) {
-    wlroots,
     pipewire,
+    wlroots,
     invalid = std.math.maxInt(u16),
 };
 

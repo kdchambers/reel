@@ -241,6 +241,9 @@ fn finishedInitializationCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Scre
 }
 
 fn frameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, entry: *Entry) void {
+    if (stream_state != .open)
+        return;
+
     switch (event) {
         .buffer_done => {
             frame.copy(entry.buffer.buffer);
