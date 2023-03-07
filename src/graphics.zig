@@ -4,6 +4,14 @@
 const std = @import("std");
 const geometry = @import("geometry.zig");
 
+pub fn Image(comptime PixelType: type) type {
+    return struct {
+        width: u16,
+        height: u16,
+        pixels: [*]PixelType,
+    };
+}
+
 pub const FaceWriter = struct {
     vertices: []GenericVertex,
     indices: []u16,
@@ -31,7 +39,7 @@ pub const FaceWriter = struct {
 
     pub fn allocate(self: *@This(), comptime Type: type, amount: u32) ![]Type {
         if (Type == QuadFace)
-            return self.allocateQuadFace(amount);
+            return self.allocateQuadFaces(amount);
 
         if (Type == TriangleFace)
             return self.allocateTriangleFace(amount);
@@ -83,7 +91,7 @@ pub const FaceWriter = struct {
         var j: usize = 0;
         while (j < amount) : (j += 1) {
             const i = indices_used + (j * 6);
-            const v = vertices_used + (j * 4);
+            const v = @intCast(u16, vertices_used + (j * 4));
             self.indices[i + 0] = v + 0; // Top left
             self.indices[i + 1] = v + 1; // Top right
             self.indices[i + 2] = v + 2; // Bottom right
@@ -92,8 +100,8 @@ pub const FaceWriter = struct {
             self.indices[i + 5] = v + 3; // Bottom left
         }
 
-        self.vertex_used += 4 * amount;
-        self.indices_used += 6 * amount;
+        self.vertices_used += @intCast(u16, 4 * amount);
+        self.indices_used += @intCast(u16, 6 * amount);
 
         return @ptrCast([*]QuadFace, &self.vertices[vertices_used])[0..amount];
     }
@@ -188,7 +196,7 @@ pub const AnchorPoint = enum {
     bottom_right,
 };
 
-fn generateQuad(
+pub fn generateQuad(
     comptime VertexType: type,
     extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
     comptime anchor_point: AnchorPoint,
@@ -338,3 +346,51 @@ pub fn RGBA(comptime BaseType: type) type {
         a: BaseType,
     };
 }
+
+
+// fn imageCrop(
+//     comptime Pixel: type,
+//     src_width: u32,
+//     crop_extent: geometry.Extent2D(u32),
+//     input_pixels: [*]const Pixel,
+//     output_pixels: [*]Pixel,
+// ) !void {
+//     var y: usize = crop_extent.y;
+//     const y_end: usize = y + crop_extent.height;
+//     const row_size: usize = crop_extent.width * @sizeOf(Pixel);
+//     while (y < y_end) : (y += 1) {
+//         std.debug.assert(y < crop_extent.y + crop_extent.height);
+//         const src_index: usize = crop_extent.x + (y * src_width);
+//         const dst_index: usize = crop_extent.width * y;
+//         @memcpy(
+//             @ptrCast([*]u8, &output_pixels[dst_index]),
+//             @ptrCast([*]const u8, &input_pixels[src_index]),
+//             row_size,
+//         );
+//     }
+// }
+
+// fn imageCopyExact(
+//     comptime Pixel: type,
+//     src_position: geometry.Coordinates2D(u32),
+//     dst_position: geometry.Coordinates2D(u32),
+//     dimensions: geometry.Dimensions2D(u32),
+//     src_stride: u32,
+//     dst_stride: u32,
+//     input_pixels: [*]const Pixel,
+//     output_pixels: [*]Pixel,
+// ) void {
+//     var y: usize = 0;
+//     const row_size: usize = dimensions.width * @sizeOf(Pixel);
+//     while (y < dimensions.height) : (y += 1) {
+//         const src_y = src_position.y + y;
+//         const dst_y = dst_position.y + y;
+//         const src_index = src_position.x + (src_y * src_stride);
+//         const dst_index = dst_position.x + (dst_y * dst_stride);
+//         @memcpy(
+//             @ptrCast([*]u8, &output_pixels[dst_index]),
+//             @ptrCast([*]const u8, &input_pixels[src_index]),
+//             row_size,
+//         );
+//     }
+// }
