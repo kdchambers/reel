@@ -212,8 +212,8 @@ pub const AudioVolumeLevel = struct {
     }
 
     inline fn decibelToPercent(decibels: f64) f64 {
-        const decibel_range_min = 13.0;
-        const decibel_range_max = 8.0;
+        const decibel_range_min = 6.5;
+        const decibel_range_max = 3.5;
         const decibel_range_total = decibel_range_max - decibel_range_min;
         return @max(@min((-decibels - decibel_range_min) / decibel_range_total, 1.0), 0.0);
     }
@@ -223,7 +223,7 @@ pub const AudioVolumeLevel = struct {
         self.extent = geometry.Extent2D(f32){
             .x = 0.5,
             .y = 0.8,
-            .width = 0.025,
+            .width = 0.010,
             .height = 0.1,
         };
         const color_green = graphics.RGBA(f32){ .r = 0, .g = 1.0, .b = 0.0, .a = 1.0 };

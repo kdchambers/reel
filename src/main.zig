@@ -6,23 +6,27 @@ const builtin = @import("builtin");
 const vk = @import("vulkan");
 const linux = std.os.linux;
 const img = @import("zigimg");
-// const audio = @import("audio.zig");
+const audio = @import("audio.zig");
 const wayland_client = @import("wayland_client.zig");
 const style = @import("app_styling.zig");
 const geometry = @import("geometry.zig");
 const event_system = @import("event_system.zig");
 const screencast = @import("screencast.zig");
 const mini_heap = @import("mini_heap.zig");
+const zmath = @import("zmath");
 
 const video_encoder = @import("video_record.zig");
 
 const fontana = @import("fontana");
 const Atlas = fontana.Atlas;
-const Font = fontana.Font(.freetype_harfbuzz, .{
-    .Extent2DPixel = geometry.Extent2D(u32),
-    .Extent2DNative = geometry.Extent2D(f32),
-    .Coordinates2DNative = geometry.Coordinates2D(f32),
-    .Scale2D = geometry.ScaleFactor2D(f64),
+const Font = fontana.Font(.{
+    .backend = .freetype_harfbuzz,
+    .type_overrides = .{
+        .Extent2DPixel = geometry.Extent2D(u32),
+        .Extent2DNative = geometry.Extent2D(f32),
+        .Coordinates2DNative = geometry.Coordinates2D(f32),
+        .Scale2D = geometry.ScaleFactor2D(f64),
+    },
 });
 
 const graphics = @import("graphics.zig");
@@ -43,6 +47,10 @@ pub const log_level: std.log.Level = .info;
 const application_name = "reel";
 const background_color = graphics.RGBA(f32).fromInt(u8, 90, 90, 90, 255);
 
+fn melScale(freq_band: f32) f32 {
+    return 2595 * std.math.log10(1.0 + (freq_band / 700));
+}
+
 const window_decorations = struct {
     const height_pixels = 30;
     const color = graphics.RGBA(f32).fromInt(u8, 200, 200, 200, 255);
@@ -50,6 +58,51 @@ const window_decorations = struct {
         const size_pixels = 24;
         const color_hovered = graphics.RGBA(f32).fromInt(u8, 180, 180, 180, 255);
     };
+
+    var requested: bool = true;
+
+    pub fn draw() !void {
+        const screen_dimensions = wayland_client.screen_dimensions;
+        var faces = try face_writer.allocate(QuadFace, 1);
+        const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
+        {
+            //
+            // Draw window decoration topbar background
+            //
+            const extent = geometry.Extent2D(f32){
+                .x = -1.0,
+                .y = -1.0,
+                .width = 2.0,
+                .height = window_decoration_height,
+            };
+            faces[0] = graphics.quadColored(extent, window_decorations.color, .top_left);
+        }
+        try button_close.draw();
+    }
+};
+
+const information_bar = struct {
+    const height_pixels = 30;
+    const background_color = graphics.RGBA(f32){
+        .r = 0.05,
+        .g = 0.05,
+        .b = 0.05,
+        .a = 1.0,
+    };
+
+    pub fn draw() !void {
+        const extent = geometry.Extent2D(f32){
+            .x = -1.0,
+            .y = 1.0,
+            .width = 2.0,
+            .height = @floatCast(f32, information_bar.height_pixels * wayland_client.screen_scale.vertical),
+        };
+        (try face_writer.create(QuadFace)).* = graphics.quadColored(
+            extent,
+            information_bar.background_color,
+            .bottom_left,
+        );
+    }
 };
 
 const button_close = struct {
@@ -76,8 +129,8 @@ const button_close = struct {
     };
 
     const background_padding_pixels = 4;
-    const size_pixels = 18;
-    const width_pixels = 3;
+    const size_pixels = 16;
+    const width_pixels = 2.5;
     const vertex_count = 4;
 
     var state_index: Index(HoverZoneState) = undefined;
@@ -160,8 +213,6 @@ const button_close = struct {
         }
     }
 };
-
-var draw_window_decorations_requested: bool = true;
 
 /// Color to use for icon images
 const icon_color = graphics.RGB(f32).fromInt(200, 200, 200);
@@ -261,15 +312,27 @@ var exit_button_hovered: bool = false;
 var record_button_color_normal = graphics.RGBA(f32){ .r = 0.2, .g = 0.2, .b = 0.4, .a = 1.0 };
 var record_button_color_hover = graphics.RGBA(f32){ .r = 0.25, .g = 0.23, .b = 0.42, .a = 1.0 };
 
+var record_start_timestamp: i128 = 0;
+var record_duration: u64 = 0;
+
+var screen_capture_bottom: f32 = 0;
+
 //
 // Text Rendering
 //
 
 var texture_atlas: Atlas = undefined;
 var font: Font = undefined;
-var pen: Font.Pen = undefined;
-const asset_path_font = "assets/Roboto-Light.ttf";
-const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:";
+
+const pen_options = fontana.PenOptions{
+    .pixel_format = .r32g32b32a32,
+    .PixelType = graphics.RGBA(f32),
+};
+var pen: Font.PenConfig(pen_options) = undefined;
+var pen_small: Font.PenConfig(pen_options) = undefined;
+
+const asset_path_font = "assets/Roboto-Regular.ttf";
+const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 
 const ScreenPixelBaseType = u16;
 const ScreenNormalizedBaseType = f32;
@@ -296,14 +359,46 @@ var enable_preview_checkbox: ?Checkbox = null;
 
 var gpu_texture_mutex: std.Thread.Mutex = undefined;
 
+var audio_input_devices_opt: ?[][]const u8 = null;
+
 const StreamState = enum(u8) {
     idle,
     preview,
     record,
     record_preview,
 };
+
 var stream_state: StreamState = .idle;
 var video_stream_frame_index: u32 = 0;
+var close_icon_handle: renderer.ImageHandle = undefined;
+var audio_input_interface: audio.Interface = undefined;
+var audio_volume_level_widget: widget.AudioVolumeLevel = undefined;
+
+var audio_callback_count: usize = 0;
+var audio_start: ?i128 = null;
+
+const bin_count = 256;
+
+var audio_power_table_mutex: std.Thread.Mutex = .{};
+var audio_power_table = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (bin_count / 8);
+
+const decibel_range_lower = -7.0;
+
+const hamming_table: [bin_count]f32 = calculateHammingWindowTable(bin_count);
+var audio_spectogram_bins = [1]f32{0.00000000001} ** audio_visual_bin_count;
+var audio_input_quads: ?[]graphics.QuadFace = null;
+const audio_visual_bin_count = 32;
+const reference_max_audio: f32 = 128.0 * 4.0;
+
+var unity_table: [bin_count]zmath.F32x4 = undefined;
+const sample_rate = 44100;
+const freq_resolution: f32 = sample_rate / bin_count;
+
+const mel_table: [audio_visual_bin_count]f32 = generateMelTable();
+const mel_upper: f32 = melScale(freq_resolution * (bin_count / 2.0));
+
+const freq_to_mel_table: [bin_count / 2]f32 = calculateFreqToMelTable();
+const filter_spread: f32 = 4.0;
 
 pub fn main() !void {
     app_runtime_start = std.time.nanoTimestamp();
@@ -314,19 +409,164 @@ pub fn main() !void {
     deinit();
 }
 
-var close_icon_handle: renderer.ImageHandle = undefined;
+fn calculateHammingWindowTable(comptime freq_bin_count: comptime_int) [freq_bin_count]f32 {
+    comptime {
+        var i: comptime_int = 0;
+        var result: [freq_bin_count]f32 = undefined;
+        while (i < freq_bin_count) : (i += 1) {
+            // 0.54 - 0.46cos(2pi*n/(N-1))
+            result[i] = 0.54 - (0.46 * @cos((2 * std.math.pi * i) / @as(f32, freq_bin_count - 1)));
+        }
+        return result;
+    }
+}
+
+fn calculateHanningWindowTable(comptime freq_bin_count: comptime_int) [freq_bin_count]f32 {
+    comptime {
+        var i: comptime_int = 0;
+        var result: [freq_bin_count]f32 = undefined;
+        while (i < freq_bin_count) : (i += 1) {
+            // 0.50 - 0.50cos(2pi*n/(N-1))
+            result[i] = 0.50 - (0.50 * @cos((2 * std.math.pi * i) / @as(f32, freq_bin_count - 1)));
+        }
+        return result;
+    }
+}
+
+/// NOTE: This will be called on a separate thread
+pub fn onAudioInputRead(pcm_buffer: []i16) void {
+    if (audio_start == null)
+        audio_start = std.time.nanoTimestamp();
+
+    audio_power_table_mutex.lock();
+    defer audio_power_table_mutex.unlock();
+
+    const fft_overlap_samples = @divExact(bin_count, 2); // 128
+    const fft_iteration_count = ((pcm_buffer.len / 2) / (fft_overlap_samples - 1)) - 1;
+
+    audio_power_table = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (bin_count / 8);
+
+    var i: usize = 0;
+    while (i < fft_iteration_count) : (i += 1) {
+        const vector_len: usize = @divExact(bin_count, 4);
+        var complex = [1]zmath.F32x4{zmath.f32x4s(0.0)} ** vector_len;
+
+        var fft_window = blk: {
+            // TODO: Don't hardcode channel count
+            const channel_count = 2;
+            var result = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (@divExact(bin_count, 4));
+            const sample_increment = fft_overlap_samples * channel_count;
+            const start = sample_increment * i;
+            const end = start + (bin_count * channel_count);
+            const pcm_window = pcm_buffer[start..end];
+            std.debug.assert(pcm_window.len == (hamming_table.len * channel_count));
+            std.debug.assert(pcm_window.len % 4 == 0);
+            var k: usize = 0;
+            var j: usize = 0;
+            for (result) |*sample| {
+                const max = std.math.maxInt(i16);
+                // TODO: The indexing here is dependent on the channel count
+                sample.* = .{
+                    ((@intToFloat(f32, pcm_window[j + 0])) / max) * hamming_table[k + 0],
+                    ((@intToFloat(f32, pcm_window[j + 2])) / max) * hamming_table[k + 1],
+                    ((@intToFloat(f32, pcm_window[j + 4])) / max) * hamming_table[k + 2],
+                    ((@intToFloat(f32, pcm_window[j + 6])) / max) * hamming_table[k + 3],
+                };
+                j += 8;
+                k += 4;
+            }
+            break :blk result;
+        };
+
+        zmath.fft(&fft_window, &complex, &unity_table);
+
+        for (audio_power_table) |*value, v| {
+            const complex2 = complex[v] * complex[v];
+            // const real2 = fft_window[v] * fft_window[v];
+            // const magnitude = zmath.sqrt(complex2 + real2);
+            const magnitude = zmath.sqrt(complex2);
+            value.* += magnitude;
+        }
+    }
+    for (audio_power_table) |*value| {
+        std.debug.assert(value.*[0] >= 0.0);
+        std.debug.assert(value.*[1] >= 0.0);
+        std.debug.assert(value.*[2] >= 0.0);
+        std.debug.assert(value.*[3] >= 0.0);
+        value.* /= zmath.f32x4s(@intToFloat(f32, fft_iteration_count));
+        std.debug.assert(value.*[0] >= 0.0);
+        std.debug.assert(value.*[1] >= 0.0);
+        std.debug.assert(value.*[2] >= 0.0);
+        std.debug.assert(value.*[3] >= 0.0);
+    }
+
+    //
+    // Convert to mel scale & combine bins
+    //
+
+    const usable_bin_count = (bin_count / 2);
+    var mel_bins = [1]f32{0.00000000001} ** usable_bin_count;
+
+    i = 0;
+    while (i < usable_bin_count) : (i += 1) {
+        const array_i = @divTrunc(i, 4);
+        std.debug.assert(array_i <= 31);
+        const sub_i = i % 4;
+        std.debug.assert(audio_power_table[array_i][sub_i] >= 0.0);
+        const power_value = audio_power_table[array_i][sub_i];
+        const freq_to_mel = freq_to_mel_table[i];
+        var filter_map_buffer: [5]FilterMap = undefined;
+        for (triangleFilter(freq_to_mel, &filter_map_buffer)) |filter_map| {
+            mel_bins[filter_map.index] += filter_map.weight * power_value;
+        }
+    }
+
+    const audio_bin_compress_count = @divExact(@divExact(bin_count, 2), audio_visual_bin_count);
+    var decibel_accumulator: f32 = 0;
+    var mel_bin_index: usize = 0;
+    i = 0;
+    while (i < audio_visual_bin_count) : (i += 1) {
+        comptime var x: usize = 0;
+        audio_spectogram_bins[i] = 0;
+        inline while(x < audio_bin_compress_count) : (x += 1) {
+            audio_spectogram_bins[i] += mel_bins[mel_bin_index + x];
+        }
+        audio_spectogram_bins[i] /= @intToFloat(f32, audio_bin_compress_count);
+        audio_spectogram_bins[i] = std.math.log10(audio_spectogram_bins[i] / reference_max_audio);
+        decibel_accumulator += audio_spectogram_bins[i];
+        mel_bin_index += audio_bin_compress_count;
+    }
+
+    decibel_accumulator /= @intToFloat(f32, audio_visual_bin_count);
+
+    audio_volume_level_widget.setDecibelLevel(decibel_accumulator);
+    audio_callback_count += 1;
+    is_record_requested = true;
+}
+
+fn handleAudioInputOpenSuccess() void {
+    audio_input_interface.inputList(general_allocator, handleAudioDeviceInputsList);
+    zmath.fftInitUnityTable(&unity_table);
+}
+
+fn handleAudioInputOpenFail(err: audio.OpenError) void {
+    std.log.err("Failed to open audio input device. Error: {}", .{err});
+}
 
 pub fn init() !void {
     general_allocator = if (builtin.mode == .Debug) stdlib_gpa.allocator() else std.heap.c_allocator;
 
-    font = Font.initFromFile(general_allocator, asset_path_font) catch |err| {
-        std.log.err("app: Failed to initialize fonts. Is Freetype installed? Error code: {}", .{err});
+    font = blk: {
+        const file_handle = try std.fs.cwd().openFile(asset_path_font, .{ .mode = .read_only });
+        defer file_handle.close();
+        const max_size_bytes = 10 * 1024 * 1024; // 10mib
+        const font_file_bytes = try file_handle.readToEndAlloc(general_allocator, max_size_bytes);
+        break :blk Font.construct(font_file_bytes);
+    } catch |err| {
+        std.log.err("Failed to load font file ({s}). Error: {}", .{ asset_path_font, err });
         return err;
     };
     errdefer font.deinit(general_allocator);
-
-    // try audio_input_capture.init();
-    // errdefer audio_input_capture.deinit();
 
     texture_atlas = try Atlas.init(general_allocator, 512);
     errdefer texture_atlas.deinit(general_allocator);
@@ -339,7 +579,7 @@ pub fn init() !void {
     try wayland_client.init("reel");
     errdefer wayland_client.deinit();
 
-    if (draw_window_decorations_requested) {
+    if (window_decorations.requested) {
         top_reserved_pixels = window_decorations.height_pixels;
     }
 
@@ -362,15 +602,24 @@ pub fn init() !void {
     );
 
     {
-        const PixelType = graphics.RGBA(f32);
         const points_per_pixel = 100;
-        const font_size = fontana.Size{ .point = 18.0 };
+        const font_point_size: f64 = 12.0;
         var loaded_texture = try renderer.textureGet();
         std.debug.assert(loaded_texture.width == loaded_texture.height);
         pen = try font.createPen(
-            PixelType,
+            pen_options,
             general_allocator,
-            font_size,
+            font_point_size,
+            points_per_pixel,
+            atlas_codepoints,
+            loaded_texture.width,
+            loaded_texture.pixels,
+            &texture_atlas,
+        );
+        pen_small = try font.createPen(
+            pen_options,
+            general_allocator,
+            10,
             points_per_pixel,
             atlas_codepoints,
             loaded_texture.width,
@@ -391,6 +640,12 @@ pub fn init() !void {
         &wayland_client.is_mouse_in_screen,
     );
 
+    audio_input_interface = audio.createBestInterface(&onAudioInputRead);
+    try audio_input_interface.open(
+        &handleAudioInputOpenSuccess,
+        &handleAudioInputOpenFail,
+    );
+
     screencast_interface = screencast.createBestInterface(
         writeScreencastPixelBufferCallback,
     );
@@ -402,11 +657,18 @@ pub fn init() !void {
 }
 
 fn deinit() void {
+    audio_input_interface.close();
+
+    if (audio_input_devices_opt) |audio_input_devices| {
+        for (audio_input_devices) |input_device| {
+            general_allocator.free(input_device);
+        }
+    }
+
     pen.deinit(general_allocator);
     renderer.deinit(general_allocator);
     wayland_client.deinit();
     texture_atlas.deinit(general_allocator);
-    // audio_input_capture.deinit();
     font.deinit(general_allocator);
 
     if (builtin.mode == .Debug) {
@@ -634,6 +896,7 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                             .preview => .record_preview,
                             else => unreachable,
                         };
+                        record_start_timestamp = std.time.nanoTimestamp();
                     },
                     //
                     // Stop current recording
@@ -648,6 +911,9 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                             .record_preview => stream_state = .preview,
                             else => unreachable,
                         }
+                        const record_end_timestamp = std.time.nanoTimestamp();
+                        record_duration = @intCast(u64, record_end_timestamp - record_start_timestamp);
+                        std.log.info("Recording lasted {}", .{std.fmt.fmtDuration(record_duration)});
                     },
                     else => unreachable,
                 }
@@ -683,6 +949,8 @@ fn appLoop(allocator: std.mem.Allocator) !void {
             }
         }
 
+        updateAudioInput();
+
         _ = wayland_client.pollEvents();
 
         if (wayland_client.framebuffer_resized) {
@@ -712,6 +980,7 @@ fn appLoop(allocator: std.mem.Allocator) !void {
         const loop_duration = @intCast(u64, loop_end - loop_begin);
         if (loop_duration < input_latency_ns) {
             const sleep_period_ns = input_latency_ns - loop_duration;
+            // _ = sleep_period_ns;
             std.time.sleep(sleep_period_ns);
         }
     }
@@ -737,70 +1006,14 @@ fn appLoop(allocator: std.mem.Allocator) !void {
     const print = std.debug.print;
     const runtime_seconds: f64 = @intToFloat(f64, app_duration) / std.time.ns_per_s;
     const frames_per_s: f64 = @intToFloat(f64, wayland_client.frame_index) / @intToFloat(f64, app_duration / std.time.ns_per_s);
+    const audio_duration: f64 = @intToFloat(f64, app_end - audio_start.?) / std.time.ns_per_s;
+    const audio_fps: f64 = @intToFloat(f64, audio_callback_count) / audio_duration;
     print("\n== Runtime Statistics ==\n\n", .{});
+    print("audio fps:   {d}\n", .{audio_fps});
     print("runtime:     {d:.2}s\n", .{runtime_seconds});
     print("display fps: {d:.2}\n", .{frames_per_s});
     print("input fps:   {d:.2}\n", .{@intToFloat(f64, app_loop_iteration) / runtime_seconds});
     print("\n", .{});
-}
-
-fn drawDecorations() !void {
-    const screen_dimensions = wayland_client.screen_dimensions;
-
-    if (draw_window_decorations_requested) {
-        var faces = try face_writer.allocate(QuadFace, 1);
-        const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
-        {
-            //
-            // Draw window decoration topbar background
-            //
-            const extent = geometry.Extent2D(f32){
-                .x = -1.0,
-                .y = -1.0,
-                .width = 2.0,
-                .height = window_decoration_height,
-            };
-            faces[0] = graphics.quadColored(extent, window_decorations.color, .top_left);
-        }
-        {
-            //
-            // Draw exit button in window decoration topbar
-            //
-            // std.debug.assert(window_decorations.exit_button.size_pixels <= window_decorations.height_pixels);
-            // const screen_icon_dimensions = geometry.Dimensions2D(f32){
-            //     .width = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.width),
-            //     .height = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.height),
-            // };
-            // const exit_button_outer_margin_pixels = @intToFloat(f32, window_decorations.height_pixels - window_decorations.exit_button.size_pixels) / 2.0;
-            // const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.width);
-            // const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.height);
-            // const texture_coordinates = iconTextureLookup(.close);
-            // const texture_extent = geometry.Extent2D(f32){
-            //     .x = texture_coordinates.x,
-            //     .y = texture_coordinates.y,
-            //     .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
-            //     .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
-            // };
-            // const extent = geometry.Extent2D(f32){
-            //     .x = 1.0 - (outer_margin_hor + screen_icon_dimensions.width),
-            //     .y = -1.0 + outer_margin_ver,
-            //     .width = screen_icon_dimensions.width,
-            //     .height = screen_icon_dimensions.height,
-            // };
-            // faces[1] = graphics.quadColored(extent, window_decorations.color, .top_left);
-            // faces[2] = graphics.quadTextured(extent, texture_extent, .top_left);
-
-            // // TODO: Update on screen size change
-            // const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
-            // exit_button_extent = geometry.Extent2D(u16){ // Top left anchor
-            //     .x = screen_dimensions.width - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
-            //     .y = screen_dimensions.height - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
-            //     .width = window_decorations.exit_button.size_pixels,
-            //     .height = window_decorations.exit_button.size_pixels,
-            // };
-            // exit_button_background_quad = &faces[1];
-        }
-    }
 }
 
 fn drawTexture() !void {
@@ -823,6 +1036,16 @@ fn drawTexture() !void {
     );
 }
 
+inline fn gpuClamp(value: f32) f32 {
+    const precision = 1.0 / 256.0;
+    const rem = value % precision;
+    if (rem == 0) return value;
+    return if (rem >= (precision / 2.0)) value + rem else value - rem;
+}
+
+const preview_background_color = graphics.RGB(f32).fromInt(120, 120, 120);
+const preview_background_color_recording = graphics.RGB(f32).fromInt(120, 20, 20);
+
 fn drawScreenCapture() !void {
     calculatePreviewExtent();
 
@@ -833,16 +1056,19 @@ fn drawScreenCapture() !void {
     const border_width_vertical: f64 = border_width_pixels * screen_scale.vertical;
     const background_width: f64 = (renderer.video_stream_output_dimensions.width * screen_scale.horizontal) + (border_width_horizontal * 2.0);
     const background_height: f64 = (renderer.video_stream_output_dimensions.height * screen_scale.vertical) + (border_width_vertical * 2.0);
-    {
-        const extent = geometry.Extent2D(f32){
-            .x = @floatCast(f32, renderer.video_stream_placement.x - border_width_horizontal),
-            .y = @floatCast(f32, renderer.video_stream_placement.y - border_width_vertical),
-            .width = @floatCast(f32, background_width),
-            .height = @floatCast(f32, background_height),
-        };
-        const color = graphics.RGB(f32).fromInt(120, 120, 120);
-        (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, color.toRGBA(), .top_left);
-    }
+    const extent = geometry.Extent2D(f32){
+        .x = @floatCast(f32, renderer.video_stream_placement.x - border_width_horizontal),
+        .y = @floatCast(f32, renderer.video_stream_placement.y - border_width_vertical),
+        .width = @floatCast(f32, background_width),
+        .height = @floatCast(f32, background_height),
+    };
+    const color = if (video_encoder.state == .encoding and screencast_interface.?.state() == .open)
+        preview_background_color_recording
+    else
+        preview_background_color;
+
+    (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, color.toRGBA(), .top_left);
+    screen_capture_bottom = extent.y + extent.height;
 }
 
 fn calculatePreviewExtent() void {
@@ -868,15 +1094,155 @@ fn calculatePreviewExtent() void {
     renderer.video_stream_placement.y = @floatCast(f32, -1.0 + y_top + y_offset);
 }
 
+fn handleAudioDeviceInputsList(devices: [][]const u8) void {
+    const print = std.debug.print;
+    print("Audio input devices:\n", .{});
+    for (devices) |device, device_i| {
+        print("  {d:.2} {s}\n", .{ device_i, device });
+    }
+    audio_input_devices_opt = devices;
+}
+
+fn generateMelTable() [audio_visual_bin_count]f32 {
+    var result: [audio_visual_bin_count]f32 = undefined;
+    var i: usize = 0;
+    while (i < audio_visual_bin_count) : (i += 1) {
+        result[i] = melScale(freq_resolution * (@intToFloat(f32, i) + 1));
+    }
+    return result;
+}
+
+fn calculateFreqToMelTable() [bin_count / 2]f32 {
+    return comptime blk: {
+        @setEvalBranchQuota(bin_count * bin_count);
+        var result = [1]f32{0.0} ** (bin_count / 2);
+        const mel_increment = mel_upper / (bin_count / 2);
+        var freq_i: usize = 0;
+        outer: while (freq_i < (bin_count / 2)) : (freq_i += 1) {
+            const freq = @intToFloat(f32, freq_i) * freq_resolution;
+            const freq_in_mel: f32 = melScale(freq);
+            var lower_mel: f32 = 0;
+            var upper_mel: f32 = mel_increment;
+            var mel_bin_index: usize = 0;
+            while (mel_bin_index < (bin_count / 2)) : (mel_bin_index += 1) {
+                if (freq_in_mel >= lower_mel and freq_in_mel < upper_mel) {
+                    const fraction: f32 = (freq_in_mel - lower_mel) / mel_increment;
+                    std.debug.assert(fraction >= 0.0);
+                    std.debug.assert(fraction <= 1.0);
+                    result[freq_i] = @intToFloat(f32, mel_bin_index) + fraction;
+                    continue :outer;
+                }
+                lower_mel += mel_increment;
+                upper_mel += mel_increment;
+            }
+            unreachable;
+        }
+        break :blk result;
+    };
+}
+
+const FilterMap = struct {
+    index: usize,
+    weight: f32,
+};
+
+// Takes a point and distributes it linearly-ish across 5 bins
+fn triangleFilter(point: f32, filter_map_buffer: *[5]FilterMap) []FilterMap {
+    const point_whole = @floatToInt(u32, @floor(point));
+    const offset = (@rem(point, 1.0) - 0.5) / 10;
+    std.debug.assert(offset >= -0.10);
+    std.debug.assert(offset <= 0.10);
+    const index_first = @intCast(u32, @max(0, @intCast(i64, point_whole) - 2));
+    const index_last: u32 = @min((bin_count / 2) - 1, point_whole + 2);
+    const range: u32 = index_last - index_first;
+    if (range < 4) {
+        filter_map_buffer[0] = .{
+            .index = @intCast(usize, point_whole),
+            .weight = 1.0,
+        };
+        return filter_map_buffer[0..1];
+    }
+    filter_map_buffer.* = [5]FilterMap{
+        .{ .index = point_whole - 2, .weight = 0.10 - offset },
+        .{ .index = point_whole - 1, .weight = 0.20 - offset },
+        .{ .index = point_whole, .weight = 0.40 },
+        .{ .index = point_whole + 1, .weight = 0.20 + offset },
+        .{ .index = point_whole + 2, .weight = 0.10 + offset },
+    };
+    return filter_map_buffer[0..5];
+}
+
+fn updateAudioInput() void {
+    if (audio_input_quads) |quads| {
+        const screen_scale = wayland_client.screen_scale;
+        const x_increment = @floatCast(f32, 6 * screen_scale.horizontal);
+        const bar_width = @floatCast(f32, 4 * screen_scale.horizontal);
+        const bar_color = graphics.RGBA(f32).fromInt(u8, 55, 150, 55, 255);
+        const height_max = @floatCast(f32, 200 * screen_scale.vertical);
+
+        audio_power_table_mutex.lock();
+        defer audio_power_table_mutex.unlock();
+
+        var i: usize = 0;
+        while (i < audio_visual_bin_count) : (i += 1) {
+
+            const height: f32 = height_max - ((@min(reference_max_audio, @max(decibel_range_lower, audio_spectogram_bins[i])) / decibel_range_lower) * height_max);
+            const extent = geometry.Extent2D(f32){
+                .x = -0.95 + (@intToFloat(f32, i) * x_increment),
+                .y = 0.8,
+                .width = bar_width,
+                .height = height,
+            };
+            quads[i] = graphics.quadColored(extent, bar_color, .bottom_left);
+        }
+
+        is_render_requested = true;
+    }
+}
+
+fn drawAudioInput() !void {
+    var quads = try face_writer.allocate(QuadFace, audio_visual_bin_count);
+    audio_input_quads = quads;
+}
+
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(allocator: std.mem.Allocator) !void {
     _ = allocator;
-
     face_writer.reset();
 
-    try drawDecorations();
-    try button_close.draw();
+    if (window_decorations.requested)
+        try window_decorations.draw();
+
+    try information_bar.draw();
+
+    try drawAudioInput();
+
+    if (audio_input_interface.state() == .open) {
+        audio_volume_level_widget.init() catch |err| {
+            std.log.err("Failed to init audio_volume_level widget. Error: {}", .{err});
+        };
+    }
+
+    if (audio_input_devices_opt) |input_devices| {
+        var placement = geometry.Coordinates2D(f32){
+            .x = 0.0,
+            .y = 0.0,
+        };
+        var text_writer_interface = TextWriterInterface{ .quad_writer = &face_writer };
+        const y_increment = @floatCast(f32, 25 * wayland_client.screen_scale.vertical);
+        for (input_devices) |device| {
+            try pen_small.write(
+                device,
+                placement,
+                wayland_client.screen_scale,
+                &text_writer_interface,
+            );
+            placement.y += y_increment;
+        }
+    }
+
+    try drawScreenCapture();
 
     {
         if (enable_preview_checkbox == null)
@@ -885,9 +1251,10 @@ fn draw(allocator: std.mem.Allocator) !void {
         const preview_margin_left: f64 = style.screen_preview.margin_left_pixels * wayland_client.screen_scale.horizontal;
         const checkbox_radius_pixels = 11;
         const checkbox_width = checkbox_radius_pixels * wayland_client.screen_scale.horizontal * 2;
+        const y_offset = 20 * wayland_client.screen_scale.vertical;
         const center = geometry.Coordinates2D(f64){
             .x = -1.0 + (preview_margin_left + (checkbox_width / 2)),
-            .y = 0.0,
+            .y = screen_capture_bottom + y_offset,
         };
         const is_set = (stream_state == .preview or stream_state == .record_preview);
         try enable_preview_checkbox.?.draw(
@@ -899,6 +1266,7 @@ fn draw(allocator: std.mem.Allocator) !void {
         );
 
         // TODO: Vertically aligning label will require knowing it's height
+        //       NOTE: Use writeCentered for this
         const v_adjustment_hack = 0.85;
 
         const placement = geometry.Coordinates2D(f32){
@@ -914,8 +1282,6 @@ fn draw(allocator: std.mem.Allocator) !void {
             &text_writer_interface,
         );
     }
-
-    try drawScreenCapture();
 
     if (record_button_opt == null) {
         record_button_opt = try Button.create();
