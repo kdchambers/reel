@@ -162,7 +162,7 @@ pub const WebcamStream = struct {
 
     pub fn flushFrameBuffer(self: *@This()) void {
         var ret_code: i32 = 0;
-        while(ret_code == 0) {
+        while (ret_code == 0) {
             ret_code = libav.av_read_frame(self.format_context, self.packet);
         }
     }
@@ -255,7 +255,6 @@ pub const WebcamStream = struct {
     }
 
     pub fn deinit(self: *@This()) !void {
-
         libav.av_packet_unref(self.packet);
         libav.av_freep(@ptrCast(*anyopaque, &self.converted_frame.?.data[0]));
         libav.av_frame_free(&self.video_frame);

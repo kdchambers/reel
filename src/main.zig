@@ -441,7 +441,7 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
     audio_power_table_mutex.lock();
     defer audio_power_table_mutex.unlock();
 
-    const fft_overlap_samples = @divExact(bin_count, 2); // 128
+    const fft_overlap_samples = @divExact(bin_count, 2);
     const fft_iteration_count = ((pcm_buffer.len / 2) / (fft_overlap_samples - 1)) - 1;
 
     audio_power_table = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (bin_count / 8);
@@ -463,7 +463,7 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
             std.debug.assert(pcm_window.len % 4 == 0);
             var k: usize = 0;
             var j: usize = 0;
-            for (result) |*sample| {
+            for (&result) |*sample| {
                 const max = std.math.maxInt(i16);
                 // TODO: The indexing here is dependent on the channel count
                 sample.* = .{
@@ -480,7 +480,7 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
 
         zmath.fft(&fft_window, &complex, &unity_table);
 
-        for (audio_power_table) |*value, v| {
+        for (&audio_power_table, 0..) |*value, v| {
             const complex2 = complex[v] * complex[v];
             // const real2 = fft_window[v] * fft_window[v];
             // const magnitude = zmath.sqrt(complex2 + real2);
@@ -488,7 +488,7 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
             value.* += magnitude;
         }
     }
-    for (audio_power_table) |*value| {
+    for (&audio_power_table) |*value| {
         std.debug.assert(value.*[0] >= 0.0);
         std.debug.assert(value.*[1] >= 0.0);
         std.debug.assert(value.*[2] >= 0.0);
@@ -528,7 +528,7 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
     while (i < audio_visual_bin_count) : (i += 1) {
         comptime var x: usize = 0;
         audio_spectogram_bins[i] = 0;
-        inline while(x < audio_bin_compress_count) : (x += 1) {
+        inline while (x < audio_bin_compress_count) : (x += 1) {
             audio_spectogram_bins[i] += mel_bins[mel_bin_index + x];
         }
         audio_spectogram_bins[i] /= @intToFloat(f32, audio_bin_compress_count);
@@ -559,7 +559,7 @@ pub fn init() !void {
     font = blk: {
         const file_handle = try std.fs.cwd().openFile(asset_path_font, .{ .mode = .read_only });
         defer file_handle.close();
-        const max_size_bytes = 10 * 1024 * 1024; // 10mib
+        const max_size_bytes = 10 * 1024 * 1024;
         const font_file_bytes = try file_handle.readToEndAlloc(general_allocator, max_size_bytes);
         break :blk Font.construct(font_file_bytes);
     } catch |err| {
@@ -1097,7 +1097,7 @@ fn calculatePreviewExtent() void {
 fn handleAudioDeviceInputsList(devices: [][]const u8) void {
     const print = std.debug.print;
     print("Audio input devices:\n", .{});
-    for (devices) |device, device_i| {
+    for (devices, 0..) |device, device_i| {
         print("  {d:.2} {s}\n", .{ device_i, device });
     }
     audio_input_devices_opt = devices;
@@ -1185,8 +1185,8 @@ fn updateAudioInput() void {
 
         var i: usize = 0;
         while (i < audio_visual_bin_count) : (i += 1) {
-
-            const height: f32 = height_max - ((@min(reference_max_audio, @max(decibel_range_lower, audio_spectogram_bins[i])) / decibel_range_lower) * height_max);
+            const decibels_clamped = @min(reference_max_audio, @max(decibel_range_lower, audio_spectogram_bins[i]));
+            const height: f32 = height_max - ((decibels_clamped / decibel_range_lower) * height_max);
             const extent = geometry.Extent2D(f32){
                 .x = -0.95 + (@intToFloat(f32, i) * x_increment),
                 .y = 0.8,
@@ -1304,8 +1304,8 @@ fn draw(allocator: std.mem.Allocator) !void {
     // }
 
     if (record_button_opt) |*record_button| {
-        const width_pixels: f32 = 200;
-        const height_pixels: f32 = 40;
+        const width_pixels: f32 = 120;
+        const height_pixels: f32 = 30;
         const extent = geometry.Extent2D(f32){
             .x = 0.0,
             .y = 0.8,
@@ -1318,7 +1318,7 @@ fn draw(allocator: std.mem.Allocator) !void {
             if (video_encoder.state == .encoding) "Stop" else "Record",
             &pen,
             wayland_client.screen_scale,
-            .{ .rounding_radius = 5 },
+            .{ .rounding_radius = 2 },
         );
     }
 }

@@ -35,7 +35,7 @@ pub fn build(b: *Builder) void {
         .optimize = optimize,
     });
 
-    const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml", "vk.zig");
+    const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml");
     exe.addModule("vulkan", gen.getModule());
 
     const zmath_module = zmath.Package.build(b, .{});

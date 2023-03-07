@@ -194,7 +194,7 @@ fn selectPhysicalDevice() !?vk.PhysicalDevice {
     };
     std.log.info("renderer: {d} physical (vulkan) devices found", .{physical_devices.len});
 
-    for (physical_devices) |device, device_i| {
+    for (physical_devices, 0..) |device, device_i| {
         const device_supports_extensions = blk: {
             var extension_count: u32 = undefined;
             if (.success != (try instance_dispatch.enumerateDeviceExtensionProperties(device, null, &extension_count, null))) {
@@ -266,7 +266,7 @@ fn selectPhysicalDevice() !?vk.PhysicalDevice {
         std.debug.print("** Queue Families found on device **\n\n", .{});
         printVulkanQueueFamilies(queue_families[0..queue_family_count], 0);
 
-        for (queue_families[0..queue_family_count]) |queue_family, queue_family_i| {
+        for (queue_families[0..queue_family_count], 0..) |queue_family, queue_family_i| {
             if (queue_family.queue_count <= 0) {
                 continue;
             }
@@ -291,7 +291,7 @@ fn selectPhysicalDevice() !?vk.PhysicalDevice {
 fn printVulkanQueueFamilies(queue_families: []vk.QueueFamilyProperties, comptime indent_level: u32) void {
     const print = std.debug.print;
     const base_indent = "  " ** indent_level;
-    for (queue_families) |queue_family, queue_family_i| {
+    for (queue_families, 0..) |queue_family, queue_family_i| {
         print(base_indent ++ "Queue family index #{d}\n", .{queue_family_i});
         printVulkanQueueFamily(queue_family, indent_level + 1);
     }

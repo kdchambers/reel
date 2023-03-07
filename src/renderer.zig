@@ -603,7 +603,7 @@ pub fn recordRenderPass(
         texture_pipeline.indices_buffer[5] = 3;
     }
 
-    for (command_buffers) |command_buffer, i| {
+    for (command_buffers, 0..) |command_buffer, i| {
         try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
@@ -1142,7 +1142,7 @@ pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
 fn createSwapchainImageViews() !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
-    for (swapchain_image_views) |*image_view, image_view_i| {
+    for (swapchain_image_views, 0..) |*image_view, image_view_i| {
         const image_view_create_info = vk.ImageViewCreateInfo{
             .image = swapchain_images[image_view_i],
             .view_type = .@"2d",
