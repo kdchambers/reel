@@ -13,21 +13,29 @@ pub const StreamDirection = enum(i32) {
     upload = 3,
 };
 
-pub const OpenErrors = error{
+pub const InitErrors = error{
     PulseConnectServerFail,
     PulseThreadedLoopStartFail,
     PulseThreadedLoopCreateFail,
     PulseThreadedLoopGetApiFail,
     PulseContextCreateFail,
     PulseContextStartFail,
+    
+};
+
+pub const OpenErrors = error{
     PulseStreamCreateFail,
     PulseStreamStartFail,
     PulseStreamConnectFail,
+    InvalidInputDeviceName,
 };
 
 var stream_state: audio.State = .closed;
 
 var onReadSamplesCallback: *const audio.OnReadSamplesFn = undefined;
+
+var onInitFailCallback: *const audio.InitFailCallbackFn = undefined;
+var onInitSuccessCallback: *const audio.InitSuccessCallbackFn = undefined;
 
 var onOpenFailCallback: *const audio.OpenFailCallbackFn = undefined;
 var onOpenSuccessCallback: *const audio.OpenSuccessCallbackFn = undefined;
@@ -35,6 +43,7 @@ var onOpenSuccessCallback: *const audio.OpenSuccessCallbackFn = undefined;
 pub fn createInterface(read_samples_callback: *const audio.OnReadSamplesFn) audio.Interface {
     onReadSamplesCallback = read_samples_callback;
     return .{
+        .init = &init,
         .open = &open,
         .close = &close,
         .state = &state,
@@ -50,12 +59,21 @@ var inputListCallbackFn: *const audio.InputListCallbackFn = undefined;
 var input_list_allocator: std.mem.Allocator = undefined;
 
 var input_devices: [32][]const u8 = undefined;
-var input_device_count: u32 = undefined;
+var input_device_count: u32 = 0;
 
 fn inputList(allocator: std.mem.Allocator, callback: *const audio.InputListCallbackFn) void {
     inputListCallbackFn = callback;
     input_list_allocator = allocator;
-    input_device_count = 0;
+    std.debug.assert(stream_state == .initialized or stream_state == .open);
+
+    //
+    // We've already stored the list, just return it
+    //
+    if(input_device_count > 0) {
+        inputListCallbackFn(input_devices[0..input_device_count]);
+        return;
+    }
+
     _ = pa_context_get_source_info_list(_context, handleSourceInfo, null);
 }
 
@@ -489,17 +507,6 @@ const StreamState = enum(i32) {
     terminated,
 };
 
-var initialized: bool = false;
-
-// fn aWeight(sample: f64) f64 {
-//     const sample2: f64 = sample * sample;
-//     return (1.2588966 * 148840000 * sample2 * sample2) / ((sample2 * 424.36) * std.math.sqrt(sample2 + 11599.29) * (sample2 + 544496.41) * (sample2 + 148840000));
-
-//     //    	var f2 = f*f;
-//     // return 1.2588966 * 148840000 * f2*f2 /
-//     // ((f2 + 424.36) * Math.sqrt((f2 + 11599.29) * (f2 + 544496.41)) * (f2 + 148840000));
-// }
-
 fn streamReadCallback(stream: *pa_stream, bytes_available_count: u64, userdata: ?*void) callconv(.C) void {
     _ = userdata;
     var pcm_buffer_opt: ?[*]i16 = undefined;
@@ -543,6 +550,7 @@ fn onStreamStateCallback(stream: *pa_stream, userdata: ?*void) callconv(.C) void
                 @tagName(channel_map.map[0]),
                 @tagName(channel_map.map[1]),
             });
+            stream_state = .open;
             onOpenSuccessCallback();
         },
         .failed => onOpenFailCallback(error.PulseStreamStartFail),
@@ -556,37 +564,11 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
     switch (pa_context_get_state(context)) {
         .connecting, .authorizing, .setting_name => {},
         .ready => {
-            _stream = pa_stream_new(context, "Audio Input", &_sample_spec, null) orelse {
-                onOpenFailCallback(error.PulseStreamCreateFail);
-                return;
-            };
-
-            pa_stream_set_state_callback(_stream, onStreamStateCallback, null);
-            pa_stream_set_read_callback(_stream, streamReadCallback, null);
-
-            const target_fps = 30;
-            const bytes_per_sample = 2 * @sizeOf(i16);
-            const bytes_per_second = 44100 * bytes_per_sample;
-            const buffer_size: u32 = @divFloor(bytes_per_second, target_fps);
-
-            const device: ?[*:0]const u8 = null;
-            const flags: StreamFlags = .{};
-            const buffer_attributes = BufferAttr{
-                .max_length = std.math.maxInt(u32),
-                .tlength = std.math.maxInt(u32),
-                .minreq = std.math.maxInt(u32),
-                .prebuf = buffer_size,
-                .fragsize = buffer_size,
-            };
-            if (pa_stream_connect_record(_stream, device, &buffer_attributes, flags) < 0) {
-                onOpenFailCallback(error.PulseStreamConnectFail);
-                return;
-            }
-            stream_state = .open;
-            initialized = true;
+            stream_state = .initialized;
+            onInitSuccessCallback();
         },
         .terminated => std.log.info("pulse: Terminated", .{}),
-        .failed => onOpenFailCallback(error.PulseContextStartFail),
+        .failed => onInitFailCallback(error.PulseContextStartFail),
         .unconnected => std.log.info("pulse: Unconnected", .{}),
     }
 }
@@ -603,12 +585,16 @@ comptime {
     assert(c.PA_CONTEXT_TERMINATED == @enumToInt(ContextState.terminated));
 }
 
-pub fn open(
-    onSuccess: *const audio.OpenSuccessCallbackFn,
-    onFail: *const audio.OpenFailCallbackFn,
-) OpenErrors!void {
-    onOpenFailCallback = onFail;
-    onOpenSuccessCallback = onSuccess;
+pub fn init(
+    onSuccess: *const audio.InitSuccessCallbackFn,
+    onFail: *const audio.InitFailCallbackFn,
+) InitErrors!void {
+
+    std.debug.assert(stream_state == .closed);
+
+    onInitFailCallback = onFail;
+    onInitSuccessCallback = onSuccess;
+
     _thread_loop = pa_threaded_mainloop_new() orelse return error.PulseThreadedLoopCreateFail;
     _loop_api = pa_threaded_mainloop_get_api(_thread_loop) orelse return error.PulseThreadedLoopGetApiFail;
     _context = pa_context_new(_loop_api, "Reel") orelse return error.PulseContextCreateFail;
@@ -624,11 +610,70 @@ pub fn open(
     }
 }
 
+const device_input_name_buffer_size = 256;
+var device_input_name_buffer: [device_input_name_buffer_size]u8 = undefined;
+var input_device_name: ?[*:0]const u8 = null;
+
+pub fn open(
+    device_name_opt: ?[*:0]const u8,
+    onSuccess: *const audio.OpenSuccessCallbackFn,
+    onFail: *const audio.OpenFailCallbackFn,
+) OpenErrors!void {
+    onOpenFailCallback = onFail;
+    onOpenSuccessCallback = onSuccess;
+
+    std.debug.assert(stream_state == .initialized);
+
+    if (device_name_opt) |device_name| {
+        var i: usize = 0;
+        while (device_name[i] != 0) : (i += 1) {
+            if (i >= device_input_name_buffer_size)
+                return error.InvalidInputDeviceName;
+            device_input_name_buffer[i] = device_name[i];
+        }
+        input_device_name = device_input_name_buffer[0..i :0];
+    }
+
+    pa_threaded_mainloop_lock(_thread_loop);
+    defer pa_threaded_mainloop_unlock(_thread_loop);
+
+    _stream = pa_stream_new(_context, "Audio Input", &_sample_spec, null) orelse {
+        onOpenFailCallback(error.PulseStreamCreateFail);
+        return;
+    };
+
+    pa_stream_set_state_callback(_stream, onStreamStateCallback, null);
+    pa_stream_set_read_callback(_stream, streamReadCallback, null);
+
+    const target_fps = 30;
+    const bytes_per_sample = 2 * @sizeOf(i16);
+    const bytes_per_second = 44100 * bytes_per_sample;
+    const buffer_size: u32 = @divFloor(bytes_per_second, target_fps);
+
+    const flags: StreamFlags = .{};
+    const buffer_attributes = BufferAttr{
+        .max_length = std.math.maxInt(u32),
+        .tlength = std.math.maxInt(u32),
+        .minreq = std.math.maxInt(u32),
+        .prebuf = buffer_size,
+        .fragsize = buffer_size,
+    };
+
+    if (pa_stream_connect_record(_stream, input_device_name, &buffer_attributes, flags) < 0) {
+        return error.PulseStreamConnectFail;
+    }
+}
+
 pub fn close() void {
+
     pa_stream_unref(_stream);
     pa_context_unref(_context);
     pa_threaded_mainloop_stop(_thread_loop);
     pa_threaded_mainloop_free(_thread_loop);
+
+    for(input_devices[0..input_device_count]) |input_device| {
+        input_list_allocator.free(input_device);
+    }
 }
 
 pub const SampleFormat = enum(i32) {

@@ -13,11 +13,21 @@ const Backend = enum {
 };
 
 pub const OpenError = pulse.OpenErrors || error{Unknown};
+pub const InitError = pulse.InitErrors || error{Unknown};
+
+pub const InitFn = fn (
+    successCallback: *const InitSuccessCallbackFn,
+    failureCallback: *const InitFailCallbackFn,
+) InitError!void;
 
 pub const OpenFn = fn (
+    device_name: ?[*:0]const u8,
     successCallback: *const OpenSuccessCallbackFn,
     failureCallback: *const OpenFailCallbackFn,
 ) OpenError!void;
+
+pub const InitSuccessCallbackFn = fn () void;
+pub const InitFailCallbackFn = fn (err: InitError) void;
 
 pub const OpenSuccessCallbackFn = fn () void;
 pub const OpenFailCallbackFn = fn (err: OpenError) void;
@@ -30,11 +40,13 @@ pub const InputListCallbackFn = fn (input_devices: [][]const u8) void;
 pub const OnReadSamplesFn = fn (samples: []i16) void;
 
 pub const State = enum {
+    initialized,
     closed,
     open,
 };
 
 pub const Interface = struct {
+    init: *const InitFn,
     open: *const OpenFn,
     close: *const CloseFn,
     inputList: *const InputListFn,

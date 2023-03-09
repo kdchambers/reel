@@ -544,8 +544,23 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
     is_record_requested = true;
 }
 
-fn handleAudioInputOpenSuccess() void {
+fn handleAudioInputInitSuccess() void {
+    std.log.info("audio input system initialized", .{});
     audio_input_interface.inputList(general_allocator, handleAudioDeviceInputsList);
+    audio_input_interface.open(
+        null,
+        &handleAudioInputOpenSuccess,
+        &handleAudioInputOpenFail,
+    ) catch |err| {
+        std.log.err("audio_input: Failed to connect to device. Error: {}", .{err});
+    };
+}
+
+fn handleAudioInputInitFail(err: audio.InitError) void {
+    std.log.err("Failed to initialize audio input system. Error: {}", .{err});
+}
+
+fn handleAudioInputOpenSuccess() void {
     zmath.fftInitUnityTable(&unity_table);
 }
 
@@ -641,9 +656,10 @@ pub fn init() !void {
     );
 
     audio_input_interface = audio.createBestInterface(&onAudioInputRead);
-    try audio_input_interface.open(
-        &handleAudioInputOpenSuccess,
-        &handleAudioInputOpenFail,
+
+    try audio_input_interface.init(
+        &handleAudioInputInitSuccess,
+        &handleAudioInputInitFail,
     );
 
     screencast_interface = screencast.createBestInterface(
@@ -658,12 +674,6 @@ pub fn init() !void {
 
 fn deinit() void {
     audio_input_interface.close();
-
-    if (audio_input_devices_opt) |audio_input_devices| {
-        for (audio_input_devices) |input_device| {
-            general_allocator.free(input_device);
-        }
-    }
 
     pen.deinit(general_allocator);
     renderer.deinit(general_allocator);
@@ -884,7 +894,7 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                                 .width = 1920,
                                 .height = 1080,
                             },
-                            .fps = 60,
+                            .fps = 30,
                             .base_index = wayland_client.frame_index,
                         };
                         video_encoder.open(options) catch |err| {
