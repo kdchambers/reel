@@ -12,7 +12,6 @@ const libav = @import("libav.zig");
 const EAGAIN: i32 = -11;
 const EINVAL: i32 = -22;
 
-var avframe: *libav.Frame = undefined;
 var video_codec_context: *libav.CodecContext = undefined;
 var sws_context: *libav.SwsContext = undefined;
 var format_context: *libav.FormatContext = undefined;
@@ -24,6 +23,9 @@ var video_filter_graph: *libav.FilterGraph = undefined;
 var hw_device_context: ?*libav.BufferRef = null;
 var hw_frame_context: ?*libav.BufferRef = null;
 var video_frame: *libav.Frame = undefined;
+
+var audio_stream: *libav.Stream = undefined;
+var audio_codec_context: *libav.CodecContext = undefined;
 
 pub const State = enum {
     uninitialized,
@@ -159,12 +161,14 @@ pub fn open(options: RecordOptions) !void {
         return;
     };
 
+    std.log.info("Video output format: {s}", .{output_format.name});
+
     var ret_code: i32 = 0;
     var format_context_opt: ?*libav.FormatContext = null;
     ret_code = libav.formatAllocOutputContext2(
         &format_context_opt,
         null,
-        "mp4",
+        output_format.name,
         options.output_path,
     );
     std.debug.assert(ret_code == 0);
@@ -178,13 +182,12 @@ pub fn open(options: RecordOptions) !void {
 
     const video_codec: *libav.Codec = libav.codecFindEncoder(.h264) orelse {
         std.log.err("Failed to find h264 encoder", .{});
-        return error.FindEncoderFail;
+        return error.FindVideoEncoderFail;
     };
     video_stream = libav.formatNewStream(format_context, video_codec) orelse {
         std.log.err("Failed to create video stream", .{});
         return;
     };
-
     video_codec_context = libav.codecAllocContext3(video_codec) orelse {
         std.log.err("Failed to allocate context for codec", .{});
         return;
@@ -193,10 +196,10 @@ pub fn open(options: RecordOptions) !void {
     video_codec_context.width = @intCast(i32, options.dimensions.width);
     video_codec_context.height = @intCast(i32, options.dimensions.height);
     video_codec_context.color_range = @enumToInt(libav.ColorRange.jpeg);
-    video_codec_context.bit_rate = 400000;
-    video_codec_context.time_base = .{ .num = 1000, .den = @intCast(i32, options.fps) * 1000 };
-    video_codec_context.gop_size = 10;
-    video_codec_context.max_b_frames = 1;
+    video_codec_context.bit_rate = 1024 * 1024 * 8;
+    video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
+    // video_codec_context.gop_size = 300;
+    // video_codec_context.max_b_frames = 1;
     video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.YUV420P);
 
     initVideoFilters(options) catch |err| {
@@ -210,9 +213,9 @@ pub fn open(options: RecordOptions) !void {
 
     var ffmpeg_options: ?*libav.Dictionary = null;
 
-    _ = libav.dictSet(&ffmpeg_options, "preset", "ultrafast", 0);
-    _ = libav.dictSet(&ffmpeg_options, "crf", "35", 0);
-    _ = libav.dictSet(&ffmpeg_options, "tune", "zerolatency", 0);
+    _ = libav.dictSet(&ffmpeg_options, "preset", "slow", 0);
+    _ = libav.dictSet(&ffmpeg_options, "crf", "20", 0);
+    _ = libav.dictSet(&ffmpeg_options, "tune", "animation", 0);
 
     if (libav.codecOpen2(video_codec_context, video_codec, &ffmpeg_options) < 0) {
         std.log.err("Failed to open codec", .{});
@@ -222,6 +225,52 @@ pub fn open(options: RecordOptions) !void {
 
     if (libav.codecParametersFromContext(video_stream.codecpar, video_codec_context) < 0) {
         std.log.err("Failed to avcodec_parameters_from_context", .{});
+        return;
+    }
+
+    //
+    // Setup Audio Stream
+    //
+
+    const audio_codec: *libav.Codec = libav.codecFindEncoder(.AAC) orelse {
+        std.log.err("Failed to find AAC encoder", .{});
+        return error.FindAudioEncoderFail;
+    };
+
+    if (audio_codec.sample_fmts) |sample_formats| {
+        std.log.info("Supported Audio sample formats", .{});
+        var i: usize = 0;
+        while (sample_formats[i] != -1) : (i += 1) {
+            std.log.info("{s}", .{@tagName(@intToEnum(libav.SampleFormat, sample_formats[i]))});
+        }
+    }
+
+    audio_stream = libav.formatNewStream(format_context, audio_codec) orelse {
+        std.log.err("Failed to create audio stream", .{});
+        return;
+    };
+    audio_codec_context = libav.codecAllocContext3(audio_codec) orelse {
+        std.log.err("Failed to allocate audio context for codec", .{});
+        return;
+    };
+
+    audio_codec_context.sample_rate = 44100;
+    audio_codec_context.channels = 2;
+    audio_codec_context.channel_layout = libav.ChannelLayout.stereo;
+    audio_codec_context.sample_fmt = @enumToInt(libav.SampleFormat.fltp);
+    audio_codec_context.bit_rate = 96000;
+
+    audio_stream.time_base.den = 96000;
+    audio_stream.time_base.num = 1;
+
+    var audio_codec_options: ?*libav.Dictionary = null;
+    if (libav.codecOpen2(audio_codec_context, audio_codec, &audio_codec_options) < 0) {
+        std.log.err("Failed to open audio codec", .{});
+        return;
+    }
+
+    if (libav.codecParametersFromContext(audio_stream.codecpar, audio_codec_context) < 0) {
+        std.log.err("Failed to audio avcodec_parameters_from_context", .{});
         return;
     }
 
@@ -374,8 +423,8 @@ fn initVideoFilters(options: RecordOptions) !void {
             1920,
             1080,
             libav.PIXEL_FORMAT_RGB0,
-            1000,
-            options.fps * 1000,
+            1,
+            options.fps,
         },
     );
 
@@ -406,7 +455,7 @@ fn initVideoFilters(options: RecordOptions) !void {
     }
 
     const supported_pixel_formats = [2]libav.PixelFormat{
-        .YUV420P,
+        .YUV444P,
         .NONE,
     };
 
@@ -464,7 +513,7 @@ fn initVideoFilters(options: RecordOptions) !void {
     video_codec_context.width = filter_output.w;
     video_codec_context.height = filter_output.h;
     video_codec_context.pix_fmt = filter_output.format;
-    video_codec_context.time_base = .{ .num = 1000, .den = @intCast(i32, options.fps) * 1000 };
+    video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
     video_codec_context.framerate = filter_output.frame_rate;
     video_codec_context.sample_aspect_ratio = filter_output.sample_aspect_ratio;
 
