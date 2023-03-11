@@ -55,6 +55,75 @@ pub fn init(
     is_mouse_in_screen_ref = is_mouse_in_screen;
 }
 
+pub const Section = packed struct(u64) {
+    pub fn draw(
+        extent: Extent2D(f32),
+        title: []const u8,
+        screen_scale: ScaleFactor2D(f64),
+        pen: anytype,
+        border_color: graphics.RGBA(f32),
+        border_width: f32,
+    ) !void {
+
+        //
+        // TODO: Don't hardcode text_width or margin_left
+        //
+        const border_quads = try face_writer_ref.allocate(QuadFace, 5);
+        const text_width: f32 = @floatCast(f32, 100.0 * screen_scale.horizontal);
+        const margin_left: f32 = @floatCast(f32, 15.0 * screen_scale.horizontal);
+
+        //
+        // This doesn't need to match the text height, as it will be centered. It just needs to be higher
+        //
+        const title_extent_height = @floatCast(f32, 40.0 * screen_scale.vertical);
+
+        const title_extent = geometry.Extent2D(f32){
+            .x = extent.x + margin_left,
+            .y = (extent.y - extent.height) + (title_extent_height / 2.0),
+            .width = text_width,
+            .height = title_extent_height,
+        };
+        var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+        try pen.writeCentered(title, title_extent, screen_scale, &text_writer_interface);
+
+        const extent_left = geometry.Extent2D(f32){
+            .x = extent.x,
+            .y = extent.y,
+            .width = border_width,
+            .height = extent.height,
+        };
+        const extent_right = geometry.Extent2D(f32){
+            .x = extent.x + extent.width - border_width,
+            .y = extent.y,
+            .width = border_width,
+            .height = extent.height,
+        };
+        const extent_top_left = geometry.Extent2D(f32){
+            .x = extent.x + border_width,
+            .y = (extent.y - extent.height) + border_width,
+            .width = margin_left,
+            .height = border_width,
+        };
+        const extent_top_right = geometry.Extent2D(f32){
+            .x = extent.x + border_width + text_width + margin_left,
+            .y = (extent.y - extent.height) + border_width,
+            .width = extent.width - (border_width * 2 + text_width + margin_left),
+            .height = border_width,
+        };
+        const extent_bottom = geometry.Extent2D(f32){
+            .x = extent.x + border_width,
+            .y = extent.y,
+            .width = extent.width - (border_width * 2),
+            .height = border_width,
+        };
+        border_quads[0] = graphics.quadColored(extent_left, border_color, .bottom_left);
+        border_quads[1] = graphics.quadColored(extent_right, border_color, .bottom_left);
+        border_quads[2] = graphics.quadColored(extent_top_left, border_color, .bottom_left);
+        border_quads[3] = graphics.quadColored(extent_top_right, border_color, .bottom_left);
+        border_quads[4] = graphics.quadColored(extent_bottom, border_color, .bottom_left);
+    }
+};
+
 pub const Dropdown = packed struct(u64) {
     state_index: Index(HoverZoneState),
     extent_index: Index(geometry.Extent2D(f32)),
