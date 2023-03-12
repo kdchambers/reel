@@ -50,18 +50,18 @@ pub extern fn avio_open(
     context: *?*IOContext,
     url: [*:0]const u8,
     flags: i32,
-) i32;
-pub extern fn avio_closep(context: **IOContext) i32;
+) callconv(.C) i32;
+pub extern fn avio_closep(context: **IOContext) callconv(.C) i32;
 
-pub extern fn av_buffer_ref(buffer: *BufferRef) ?*BufferRef;
-pub extern fn av_buffersink_get_hw_frames_ctx(context: *FilterContext) ?*BufferRef;
-pub extern fn av_buffersink_get_frame(context: *FilterContext, frame: *Frame) i32;
+pub extern fn av_buffer_ref(buffer: *BufferRef) callconv(.C) ?*BufferRef;
+pub extern fn av_buffersink_get_hw_frames_ctx(context: *FilterContext) callconv(.C) ?*BufferRef;
+pub extern fn av_buffersink_get_frame(context: *FilterContext, frame: *Frame) callconv(.C) i32;
 
-pub extern fn av_buffersrc_add_frame(context: *FilterContext, frame: *Frame) i32;
-pub extern fn av_buffersrc_add_frame_flags(buffer_src: *FilterContext, frame: ?*Frame, flags: i32) i32;
+pub extern fn av_buffersrc_add_frame(context: *FilterContext, frame: *Frame) callconv(.C) i32;
+pub extern fn av_buffersrc_add_frame_flags(buffer_src: *FilterContext, frame: ?*Frame, flags: i32) callconv(.C) i32;
 
-pub extern fn avfilter_graph_alloc() *FilterGraph;
-pub extern fn avfilter_get_by_name(name: [*:0]const u8) ?*Filter;
+pub extern fn avfilter_graph_alloc() callconv(.C) *FilterGraph;
+pub extern fn avfilter_get_by_name(name: [*:0]const u8) callconv(.C) ?*Filter;
 pub extern fn avfilter_graph_create_filter(
     filter_context: **FilterContext,
     filter: *Filter,
@@ -69,30 +69,31 @@ pub extern fn avfilter_graph_create_filter(
     args: ?[*:0]const u8,
     data: ?*void,
     graph_context: *FilterGraph,
-) i32;
-pub extern fn avfilter_inout_alloc() ?*FilterInOut;
-pub extern fn avfilter_inout_free(inout: **FilterInOut) void;
+) callconv(.C) i32;
+pub extern fn avfilter_inout_alloc() callconv(.C) ?*FilterInOut;
+pub extern fn avfilter_inout_free(inout: **FilterInOut) callconv(.C) void;
 
-pub extern fn avfilter_graph_config(graph_context: *FilterGraph, log_context: ?*void) i32;
+pub extern fn avfilter_graph_config(graph_context: *FilterGraph, log_context: ?*void) callconv(.C) i32;
 
-pub extern fn av_frame_free(frame: **Frame) void;
+pub extern fn av_frame_free(frame: **Frame) callconv(.C) void;
+pub extern fn av_frame_get_buffer(frame: *Frame, alignment: i32) callconv(.C) i32;
 
-pub extern fn av_init_packet(packet: *Packet) void;
+pub extern fn av_init_packet(packet: *Packet) callconv(.C) void;
 pub extern fn av_packet_rescale_ts(
     packet: *Packet,
     tb_src: Rational,
     tb_dst: Rational,
-) void;
-pub extern fn av_packet_unref(packet: *Packet) void;
-pub extern fn av_interleaved_write_frame(context: *FormatContext, packet: *Packet) i32;
-pub extern fn av_write_trailer(context: *FormatContext) i32;
+) callconv(.C) void;
+pub extern fn av_packet_unref(packet: *Packet) callconv(.C) void;
+pub extern fn av_interleaved_write_frame(context: *FormatContext, packet: *Packet) callconv(.C) i32;
+pub extern fn av_write_trailer(context: *FormatContext) callconv(.C) i32;
 
 pub extern fn av_opt_set(
     object: *void,
     name: [*:0]const u8,
     value: [*:0]const u8,
     search_flags: i32,
-) i32;
+) callconv(.C) i32;
 
 pub extern fn av_opt_set_bin(
     object: *void,
@@ -100,7 +101,7 @@ pub extern fn av_opt_set_bin(
     value: [*]const u8,
     size: i32,
     search_flags: i32,
-) i32;
+) callconv(.C) i32;
 pub extern fn avfilter_graph_parse_ptr(
     filter_graph: *FilterGraph,
     filters: [*:0]const u8,
@@ -115,10 +116,10 @@ pub extern fn av_frame_alloc() callconv(.C) ?*Frame;
 pub extern fn av_frame_unref(frame: *Frame) callconv(.C) void;
 pub extern fn av_log_set_level(level: i32) callconv(.C) void;
 pub extern fn av_find_input_format(short_name: [*:0]const u8) callconv(.C) ?*InputFormat;
-pub extern fn av_guess_format(short_name: ?[*:0]const u8, filename: [*:0]const u8, mime_type: ?[*:0]const u8) ?*OutputFormat;
-pub extern fn av_strdup(value: [*:0]const u8) ?[*:0]u8;
+pub extern fn av_guess_format(short_name: ?[*:0]const u8, filename: [*:0]const u8, mime_type: ?[*:0]const u8) callconv(.C) ?*OutputFormat;
+pub extern fn av_strdup(value: [*:0]const u8) callconv(.C) ?[*:0]u8;
 
-pub extern fn avcodec_find_encoder(codec_id: CodecID) ?*Codec;
+pub extern fn avcodec_find_encoder(codec_id: CodecID) callconv(.C) ?*Codec;
 
 pub extern fn avformat_alloc_output_context2(
     context: *?*FormatContext,
@@ -156,11 +157,11 @@ pub extern fn avcodec_find_decoder(id: CodecID) callconv(.C) *Codec;
 pub extern fn avcodec_open2(context: *CodecContext, codec: *const Codec, options: *?*Dictionary) callconv(.C) i32;
 pub extern fn avcodec_send_packet(context: *CodecContext, packet: *const Packet) callconv(.C) i32;
 pub extern fn avcodec_receive_frame(context: *CodecContext, frame: *Frame) callconv(.C) i32;
-pub extern fn avcodec_alloc_context3(codec: ?*Codec) ?*CodecContext;
+pub extern fn avcodec_alloc_context3(codec: ?*Codec) callconv(.C) ?*CodecContext;
 pub extern fn avcodec_parameters_from_context(params: *CodecParameters, codec: *const CodecContext) callconv(.C) i32;
-pub extern fn avcodec_send_frame(context: *CodecContext, frame: ?*Frame) i32;
-pub extern fn avcodec_receive_packet(context: *CodecContext, packet: *Packet) i32;
-pub extern fn avcodec_free_context(context: **CodecContext) void;
+pub extern fn avcodec_send_frame(context: *CodecContext, frame: ?*Frame) callconv(.C) i32;
+pub extern fn avcodec_receive_packet(context: *CodecContext, packet: *Packet) callconv(.C) i32;
+pub extern fn avcodec_free_context(context: **CodecContext) callconv(.C) void;
 
 pub extern fn avdevice_register_all() callconv(.C) void;
 pub extern fn avformat_alloc_context() callconv(.C) ?*FormatContext;
@@ -171,12 +172,12 @@ pub extern fn avformat_open_input(
     options: *?*Dictionary,
 ) callconv(.C) i32;
 pub extern fn avformat_find_stream_info(format_context: *FormatContext, options: ?*?*Dictionary) callconv(.C) i32;
-pub extern fn avformat_new_stream(stream_context: *FormatContext, codec: *Codec) ?*Stream;
+pub extern fn avformat_new_stream(stream_context: *FormatContext, codec: *Codec) callconv(.C) ?*Stream;
 pub extern fn avformat_write_header(
     context: *FormatContext,
     options: ?**Dictionary,
-) i32;
-pub extern fn avformat_free_context(context: *FormatContext) void;
+) callconv(.C) i32;
+pub extern fn avformat_free_context(context: *FormatContext) callconv(.C) void;
 
 pub const ioOpen = avio_open;
 pub const ioClosep = avio_closep;
@@ -199,6 +200,7 @@ pub const filterInOutAlloc = avfilter_inout_alloc;
 pub const filterInOutFree = avfilter_inout_free;
 
 pub const frameFree = av_frame_free;
+pub const frameGetBuffer = av_frame_get_buffer;
 
 pub const initPacket = av_init_packet;
 pub const packetUnref = av_packet_unref;
