@@ -23,6 +23,7 @@ var video_filter_graph: *libav.FilterGraph = undefined;
 var hw_device_context: ?*libav.BufferRef = null;
 var hw_frame_context: ?*libav.BufferRef = null;
 var video_frame: *libav.Frame = undefined;
+var filtered_frame: *libav.Frame = undefined;
 
 var audio_stream: *libav.Stream = undefined;
 var audio_codec_context: *libav.CodecContext = undefined;
@@ -202,6 +203,9 @@ pub fn open(options: RecordOptions) !void {
     // video_codec_context.max_b_frames = 1;
     video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.YUV420P);
 
+    video_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
+    filtered_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
+
     initVideoFilters(options) catch |err| {
         std.log.err("Failed to init video filters. Error: {}", .{err});
         return;
@@ -316,6 +320,9 @@ fn finishVideoStream() void {
 
     _ = libav.codecFreeContext(&video_codec_context);
     _ = libav.formatFreeContext(format_context);
+
+    libav.frameFree(&video_frame);
+    libav.frameFree(&filtered_frame);
 }
 
 fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
@@ -323,7 +330,6 @@ fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
     // Prepare frame
     //
     const stride = [1]i32{4 * @intCast(i32, context.dimensions.width)};
-    video_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
 
     //
     // NOTE: intToPtr used here instead of ptrCast to get rid of const qualifier.
@@ -345,7 +351,6 @@ fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
     }
 
     while (true) {
-        var filtered_frame: *libav.Frame = libav.frameAlloc() orelse return error.AllocateFilteredFrameFailed;
         code = libav.buffersinkGetFrame(
             video_filter_sink_context,
             filtered_frame,
@@ -363,7 +368,6 @@ fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
             // An actual error
             //
             std.log.err("Failed to get filtered frame", .{});
-            libav.frameFree(&filtered_frame);
             return error.GetFilteredFrameFailed;
         }
 
@@ -374,13 +378,11 @@ fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
         packet.size = 0;
 
         try encodeFrame(filtered_frame, &packet);
-        libav.frameFree(&filtered_frame);
     }
-    libav.frameFree(&video_frame);
 }
 
-fn encodeFrame(filtered_frame: ?*libav.Frame, packet: *libav.Packet) !void {
-    var code = libav.codecSendFrame(video_codec_context, filtered_frame);
+fn encodeFrame(frame: ?*libav.Frame, packet: *libav.Packet) !void {
+    var code = libav.codecSendFrame(video_codec_context, frame);
     if (code < 0) {
         std.log.err("Failed to send frame for encoding", .{});
         return error.EncodeFrameFailed;
