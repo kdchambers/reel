@@ -153,8 +153,7 @@ pub fn init(
     atlas: *Atlas,
 ) !void {
     texture_atlas = atlas;
-
-    const screen_dimensions = defines.initial_screen_dimensions;
+    const swapchain_dimensions = defines.initial_screen_dimensions;
 
     try vulkan_core.init(
         @ptrCast(*vk.wl_display, wayland_display),
@@ -259,8 +258,8 @@ pub fn init(
     }
 
     if (surface_capabilities.current_extent.width == 0xFFFFFFFF or surface_capabilities.current_extent.height == 0xFFFFFFFF) {
-        swapchain_extent.width = screen_dimensions.width;
-        swapchain_extent.height = screen_dimensions.height;
+        swapchain_extent.width = swapchain_dimensions.width;
+        swapchain_extent.height = swapchain_dimensions.height;
     }
 
     std.debug.assert(swapchain_extent.width >= surface_capabilities.min_image_extent.width);
@@ -381,12 +380,12 @@ pub fn init(
 
     std.debug.assert(swapchain_images.len > 0);
 
-    try createFramebuffers(allocator, screen_dimensions);
+    try createFramebuffers(allocator, swapchain_dimensions);
 
     try texture_pipeline.init(
         .{ .width = 2048, .height = 2048 },
         @intCast(u32, swapchain_images.len),
-        defines.initial_screen_dimensions,
+        swapchain_dimensions,
         &host_local_allocator,
     );
 
@@ -420,6 +419,10 @@ pub fn faceWriter() graphics.FaceWriter {
 }
 
 pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
+
+    if(swapchain_extent.width == screen_dimensions.width and swapchain_extent.height == screen_dimensions.height)
+        return;
+
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
@@ -523,6 +526,12 @@ pub fn recordRenderPass(
 ) !void {
     std.debug.assert(command_buffers.len > 0);
     std.debug.assert(swapchain_images.len == command_buffers.len);
+
+    if(screen_dimensions.width != swapchain_extent.width or screen_dimensions.height != swapchain_extent.height) {
+        try recreateSwapchain(screen_dimensions);
+        return;
+    }
+
     std.debug.assert(screen_dimensions.width == swapchain_extent.width);
     std.debug.assert(screen_dimensions.height == swapchain_extent.height);
 
