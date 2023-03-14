@@ -13,14 +13,13 @@ const EAGAIN: i32 = -11;
 const EINVAL: i32 = -22;
 
 var video_codec_context: *libav.CodecContext = undefined;
-var sws_context: *libav.SwsContext = undefined;
 var format_context: *libav.FormatContext = undefined;
 var video_stream: *libav.Stream = undefined;
 var output_format: *libav.OutputFormat = undefined;
 var video_filter_source_context: *libav.FilterContext = undefined;
 var video_filter_sink_context: *libav.FilterContext = undefined;
 var video_filter_graph: *libav.FilterGraph = undefined;
-var hw_device_context: ?*libav.BufferRef = null;
+// var hw_device_context: ?*libav.BufferRef = null;
 var hw_frame_context: ?*libav.BufferRef = null;
 var video_frame: *libav.Frame = undefined;
 
@@ -46,11 +45,7 @@ pub const RecordOptions = struct {
 };
 
 var processing_thread: std.Thread = undefined;
-var fence_buffer: [8]bool = undefined;
-var image_buffer: [8][*]const PixelType = undefined;
-var current_index: u32 = 0;
 var request_close: bool = false;
-var once: bool = true;
 
 pub var state: State = .uninitialized;
 
@@ -152,8 +147,14 @@ pub fn close() void {
     request_close = true;
     std.log.info("video_encoder: waiting for video_record thread to terminate..", .{});
     processing_thread.join();
+
+    request_close = false;
     state = .closed;
     std.log.info("video_encoder: shutdown successful", .{});
+
+    libav.filterGraphFree(&video_filter_graph);
+
+    ring_buffer = RingBuffer(Frame, 4).init;
 
     const audio_written = (@intToFloat(f32, samples_written) / 44100.0) / 2.0;
     std.log.info("{d} seconds of audio written", .{audio_written});
@@ -164,8 +165,6 @@ pub fn close() void {
 }
 
 pub fn open(options: RecordOptions) !void {
-    std.debug.assert(once);
-    once = false;
 
     context.dimensions = options.dimensions;
     if (builtin.mode == .Debug)
@@ -199,6 +198,11 @@ pub fn open(options: RecordOptions) !void {
         std.log.err("Failed to find h264 encoder", .{});
         return error.FindVideoEncoderFail;
     };
+
+    //
+    // video_stream is cleaned up along with format_context
+    // https://ffmpeg.org/doxygen/trunk/group__lavf__core.html#gadcb0fd3e507d9b58fe78f61f8ad39827
+    //
     video_stream = libav.formatNewStream(format_context, video_codec) orelse {
         std.log.err("Failed to create video stream", .{});
         return;
@@ -414,16 +418,12 @@ fn finishVideoStream() void {
     };
     _ = libav.writeTrailer(format_context);
 
-    //
-    // TODO: Audit. This is changing type from AVFormatContext
-    // was opened by avio_open ?
-    //
-    // _ = libav.ioClosep(@ptrCast(**libav.IOContext, &format_context.pb[0]));
-
     _ = libav.codecFreeContext(&video_codec_context);
+    _ = libav.codecFreeContext(&audio_codec_context);
     _ = libav.formatFreeContext(format_context);
 
     libav.frameFree(&video_frame);
+    libav.frameFree(&audio_frame);
 }
 
 fn encodeAudioFrames(audio_buffers: []const *[2048]f32) !void {
@@ -573,6 +573,8 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const *[2048]f32, fram
     while (true) {
         var filtered_frame: *libav.Frame = undefined;
         filtered_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
+        defer libav.frameFree(&filtered_frame);
+
         code = libav.buffersinkGetFrame(
             video_filter_sink_context,
             filtered_frame,
@@ -592,12 +594,8 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const *[2048]f32, fram
             std.log.err("Failed to get filtered frame", .{});
             return error.GetFilteredFrameFailed;
         }
-
         filtered_frame.pict_type = libav.AV_PICTURE_TYPE_NONE;
-
         try encodeFrame(filtered_frame);
-
-        libav.frameFree(&filtered_frame);
     }
 
     if (audio_buffer.len != 0)
@@ -732,13 +730,13 @@ fn initVideoFilters(options: RecordOptions) !void {
         return error.ParseGraphFilterFailed;
     }
 
-    if (hw_device_context) |frame_context| {
-        std.debug.assert(false);
-        var i: usize = 0;
-        while (i < video_filter_graph.nb_filters) : (i += 1) {
-            video_filter_graph.filters[i][0].hw_device_ctx = libav.bufferRef(frame_context);
-        }
-    }
+    // if (hw_device_context) |frame_context| {
+    //     std.debug.assert(false);
+    //     var i: usize = 0;
+    //     while (i < video_filter_graph.nb_filters) : (i += 1) {
+    //         video_filter_graph.filters[i][0].hw_device_ctx = libav.bufferRef(frame_context);
+    //     }
+    // }
 
     code = libav.filterGraphConfig(video_filter_graph, null);
     if (code < 0) {

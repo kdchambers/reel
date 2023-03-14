@@ -472,6 +472,11 @@ var audio_sample_ring_buffer: struct {
 
     mutex: std.Thread.Mutex = .{},
 
+    pub fn reset(self: *@This()) void {
+        self.head = 0;
+        self.len = 0;
+    }
+
     pub fn push(self: *@This(), samples: []const i16) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -990,7 +995,7 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                     //
                     // Start new recording
                     //
-                    .uninitialized => {
+                    .uninitialized, .closed => {
                         //
                         // Start screencast stream if preview isn't already open
                         //
@@ -1003,6 +1008,7 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                                 break :blk;
                             };
                         }
+                        audio_sample_ring_buffer.reset();
                         const options = video_encoder.RecordOptions{
                             .output_path = "reel_test.mp4",
                             .dimensions = .{
@@ -1040,7 +1046,6 @@ fn appLoop(allocator: std.mem.Allocator) !void {
                         record_duration = @intCast(u64, record_end_timestamp - record_start_timestamp);
                         std.log.info("Recording lasted {}", .{std.fmt.fmtDuration(record_duration)});
                     },
-                    else => unreachable,
                 }
                 is_draw_required = true;
             }
