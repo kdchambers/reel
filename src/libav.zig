@@ -188,9 +188,19 @@ pub extern fn avcodec_fill_audio_frame(
     alignment: i32,
 ) callconv(.C) i32;
 
+pub extern fn av_samples_get_buffer_size(
+    linesize: ?*i32,
+    nb_channels: i32,
+    nb_samples: i32,
+    sample_fmt: SampleFormat,
+    alignment: i32,
+) callconv(.C) i32;
+
 extern fn av_strerror(err_num: i32, err_buffer: [*]u8, err_buffer_size: u64) callconv(.C) i32;
 
 pub const strError = av_strerror;
+
+pub const samplesGetBufferSize = av_samples_get_buffer_size;
 
 pub const ioOpen = avio_open;
 pub const ioClosep = avio_closep;
@@ -314,6 +324,22 @@ pub const SampleFormat = enum(i32) {
     s64 = 10,
     s64p = 11,
 };
+
+comptime {
+    const assert = std.debug.assert;
+    assert(@enumToInt(SampleFormat.@"u8") == libav.AV_SAMPLE_FMT_U8);
+    assert(@enumToInt(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
+    assert(@enumToInt(SampleFormat.s32) == libav.AV_SAMPLE_FMT_S32);
+    assert(@enumToInt(SampleFormat.flt) == libav.AV_SAMPLE_FMT_FLT);
+    assert(@enumToInt(SampleFormat.dbl) == libav.AV_SAMPLE_FMT_DBL);
+    assert(@enumToInt(SampleFormat.u8p) == libav.AV_SAMPLE_FMT_U8P);
+    assert(@enumToInt(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
+    assert(@enumToInt(SampleFormat.s32p) == libav.AV_SAMPLE_FMT_S32P);
+    assert(@enumToInt(SampleFormat.fltp) == libav.AV_SAMPLE_FMT_FLTP);
+    assert(@enumToInt(SampleFormat.dblp) == libav.AV_SAMPLE_FMT_DBLP);
+    assert(@enumToInt(SampleFormat.s64) == libav.AV_SAMPLE_FMT_S64);
+    assert(@enumToInt(SampleFormat.s64p) == libav.AV_SAMPLE_FMT_S64P);
+}
 
 pub const CodecID = enum(i32) {
     none = 0,
