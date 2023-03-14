@@ -372,7 +372,7 @@ var stream_state: StreamState = .idle;
 var video_stream_frame_index: u32 = 0;
 var close_icon_handle: renderer.ImageHandle = undefined;
 var audio_input_interface: audio.Interface = undefined;
-var audio_volume_level_widget: widget.AudioVolumeLevel = undefined;
+var audio_volume_level_widget: widget.AudioVolumeLevelHorizontal = undefined;
 
 var audio_callback_count: usize = 0;
 var audio_start: ?i128 = null;
@@ -1290,6 +1290,12 @@ fn triangleFilter(point: f32, filter_map_buffer: *[5]FilterMap) []FilterMap {
 fn updateAudioInput() void {
     if (audio_input_quads) |quads| {
         const screen_scale = wayland_client.screen_scale;
+
+        const margin_left_pixels: f32 = 20;
+        const margin_bottom_pixels: f32 = 60 + information_bar.height_pixels;
+        const x_offset: f32 = @floatCast(f32, margin_left_pixels * screen_scale.horizontal);
+        const y_offset: f32 = @floatCast(f32, margin_bottom_pixels * screen_scale.vertical);
+
         const x_increment = @floatCast(f32, 6 * screen_scale.horizontal);
         const bar_width = @floatCast(f32, 4 * screen_scale.horizontal);
         const bar_color = graphics.RGBA(f32).fromInt(u8, 55, 150, 55, 255);
@@ -1303,8 +1309,8 @@ fn updateAudioInput() void {
             const decibels_clamped = @min(reference_max_audio, @max(decibel_range_lower, audio_spectogram_bins[i]));
             const height: f32 = height_max - ((decibels_clamped / decibel_range_lower) * height_max);
             const extent = geometry.Extent2D(f32){
-                .x = -0.95 + (@intToFloat(f32, i) * x_increment),
-                .y = 0.8,
+                .x = -1.0 + x_offset + (@intToFloat(f32, i) * x_increment),
+                .y = 1.0 - y_offset,
                 .width = bar_width,
                 .height = height,
             };
@@ -1320,6 +1326,33 @@ fn drawAudioInput() !void {
     audio_input_quads = quads;
 }
 
+fn drawAudioSource() !void {
+    const screen_scale = wayland_client.screen_scale;
+    const margin_left_pixels: f32 = 15;
+    const margin_bottom_pixels: f32 = 15 + information_bar.height_pixels;
+    const x_offset: f32 = @floatCast(f32, margin_left_pixels * screen_scale.horizontal);
+    const y_offset: f32 = @floatCast(f32, margin_bottom_pixels * screen_scale.vertical);
+    const width_pixels: f32 = 400;
+    const height_pixels: f32 = 200;
+    const extent = geometry.Extent2D(f32){
+        .x = -1.0 + x_offset,
+        .y = 1.0 - y_offset,
+        .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
+        .height = @floatCast(f32, height_pixels * screen_scale.vertical),
+    };
+    const border_color = graphics.RGBA(f32).fromInt(u8, 155, 155, 155, 255);
+    const border_width = @floatCast(f32, 1 * screen_scale.horizontal);
+    try widget.Section.draw(
+        extent,
+        "Audio Source",
+        wayland_client.screen_scale,
+        &pen,
+        border_color,
+        border_width,
+    );
+    try drawAudioInput();
+}
+
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(allocator: std.mem.Allocator) !void {
@@ -1331,29 +1364,21 @@ fn draw(allocator: std.mem.Allocator) !void {
 
     try information_bar.draw();
 
-    try drawAudioInput();
-
-    {
-        const extent = geometry.Extent2D(f32){
-            .x = -0.2,
-            .y = 0.5,
-            .width = 1.0,
-            .height = 0.5,
-        };
-        const border_color = graphics.RGBA(f32).fromInt(u8, 155, 155, 155, 255);
-        const border_width = @floatCast(f32, 1 * wayland_client.screen_scale.horizontal);
-        try widget.Section.draw(
-            extent,
-            "Audio Input",
-            wayland_client.screen_scale,
-            &pen,
-            border_color,
-            border_width,
-        );
-    }
+    try drawAudioSource();
 
     if (audio_input_interface.state() == .open) {
-        audio_volume_level_widget.init() catch |err| {
+        const screen_scale = wayland_client.screen_scale;
+        const margin_left_pixels: f32 = 30;
+        const margin_bottom_pixels: f32 = 30 + information_bar.height_pixels;
+        const x_offset: f32 = @floatCast(f32, margin_left_pixels * screen_scale.horizontal);
+        const y_offset: f32 = @floatCast(f32, margin_bottom_pixels * screen_scale.vertical);
+        const extent = geometry.Extent2D(f32) {
+            .x = -1.0 + x_offset,
+            .y = 1.0 - y_offset,
+            .width = @floatCast(f32, 370 * screen_scale.horizontal),
+            .height = @floatCast(f32, 5 * screen_scale.vertical),
+        };
+        audio_volume_level_widget.init(extent) catch |err| {
             std.log.err("Failed to init audio_volume_level widget. Error: {}", .{err});
         };
     }
@@ -1443,13 +1468,21 @@ fn draw(allocator: std.mem.Allocator) !void {
     // }
 
     if (record_button_opt) |*record_button| {
+        const right_margin_pixels: f32 = 15;
+        const bottom_margin_pixels: f32 = 15 + information_bar.height_pixels;
         const width_pixels: f32 = 120;
-        const height_pixels: f32 = 30;
+        //
+        // Even height values are causing text distortion
+        // https://github.com/kdchambers/reel/issues/11
+        //
+        const height_pixels: f32 = 31;
+
+        const screen_scale = wayland_client.screen_scale;
         const extent = geometry.Extent2D(f32){
-            .x = 0.0,
-            .y = 0.8,
-            .width = @floatCast(f32, width_pixels * wayland_client.screen_scale.horizontal),
-            .height = @floatCast(f32, height_pixels * wayland_client.screen_scale.vertical),
+            .x = 1.0 - @floatCast(f32, (right_margin_pixels + width_pixels) * screen_scale.horizontal),
+            .y = 1.0 - @floatCast(f32, bottom_margin_pixels * screen_scale.vertical),
+            .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
+            .height = @floatCast(f32, height_pixels * screen_scale.vertical),
         };
         try record_button.draw(
             extent,

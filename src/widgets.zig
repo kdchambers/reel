@@ -69,7 +69,7 @@ pub const Section = packed struct(u64) {
         // TODO: Don't hardcode text_width or margin_left
         //
         const border_quads = try face_writer_ref.allocate(QuadFace, 5);
-        const text_width: f32 = @floatCast(f32, 100.0 * screen_scale.horizontal);
+        const text_width: f32 = @floatCast(f32, 120.0 * screen_scale.horizontal);
         const margin_left: f32 = @floatCast(f32, 15.0 * screen_scale.horizontal);
 
         //
@@ -252,6 +252,74 @@ pub const Checkbox = packed struct(u32) {
         const state_copy = self.state_index.get();
         self.state_index.getPtr().clear();
         return state_copy;
+    }
+};
+
+pub const AudioVolumeLevelHorizontal = struct {
+    vertex_index: u32,
+    extent: geometry.Extent2D(f32),
+
+    pub fn setDecibelLevel(self: *@This(), decibels: f64) void {
+        var overlay_quad = @ptrCast(*graphics.QuadFace, &face_writer_ref.vertices[self.vertex_index]);
+        const percentage = decibelToPercent(decibels);
+        const overlay_extent = geometry.Extent2D(f32){
+            .x = self.extent.x + @floatCast(f32, self.extent.width * percentage),
+            .y = self.extent.y,
+            .width = self.extent.width * @floatCast(f32, 1.0 - percentage),
+            .height = self.extent.height,
+        };
+        overlay_quad.* = graphics.generateQuad(graphics.GenericVertex, overlay_extent, .bottom_left);
+        const color_black = graphics.RGBA(f32){ .r = 0, .g = 0, .b = 0.0, .a = 1.0 };
+        overlay_quad[0].color = color_black; // Top left
+        overlay_quad[1].color = color_black; // Top right
+        overlay_quad[2].color = color_black; // Bottom right
+        overlay_quad[3].color = color_black; // Bottom left
+        overlay_quad[0].color.a = 0.5;
+        overlay_quad[1].color.a = 0.5;
+        overlay_quad[2].color.a = 0.5;
+        overlay_quad[3].color.a = 0.5;
+    }
+
+    inline fn decibelToPercent(decibels: f64) f64 {
+        const decibel_range_min = 6.5;
+        const decibel_range_max = 3.5;
+        const decibel_range_total = decibel_range_max - decibel_range_min;
+        return @max(@min((-decibels - decibel_range_min) / decibel_range_total, 1.0), 0.0);
+    }
+
+    pub fn init(self: *@This(), extent: geometry.Extent2D(f32)) !void {
+        const percentage = 1.0;
+        self.extent = extent;
+        const color_green = graphics.RGBA(f32){ .r = 0, .g = 1.0, .b = 0.0, .a = 1.0 };
+        const color_red = graphics.RGBA(f32){ .r = 1, .g = 0.0, .b = 0.0, .a = 1.0 };
+        const color_black = graphics.RGBA(f32){ .r = 0, .g = 0, .b = 0.0, .a = 1.0 };
+
+        var overlay_quad = try face_writer_ref.create(QuadFace);
+        overlay_quad.* = graphics.generateQuad(graphics.GenericVertex, self.extent, .bottom_left);
+        overlay_quad[0].color = color_red; // Top left
+        overlay_quad[1].color = color_green; // Top right
+        overlay_quad[2].color = color_green; // Bottom right
+        overlay_quad[3].color = color_red; // Bottom left
+
+        self.vertex_index = face_writer_ref.vertices_used;
+
+        var background_quad = try face_writer_ref.create(QuadFace);
+        const background_extent = geometry.Extent2D(f32){
+            .x = self.extent.x + @floatCast(f32, self.extent.width * percentage),
+            .y = self.extent.y,
+            .width = self.extent.width * @floatCast(f32, 1.0 - percentage),
+            .height = self.extent.height,
+        };
+        background_quad.* = graphics.generateQuad(graphics.GenericVertex, background_extent, .bottom_left);
+
+        background_quad[0].color = color_black; // Top left
+        background_quad[1].color = color_black; // Top right
+        background_quad[2].color = color_black; // Bottom right
+        background_quad[3].color = color_black; // Bottom left
+        background_quad[0].color.a = 0.5;
+        background_quad[1].color.a = 0.5;
+        background_quad[2].color.a = 0.5;
+        background_quad[3].color.a = 0.5;
     }
 };
 
