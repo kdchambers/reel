@@ -281,8 +281,8 @@ pub const AudioVolumeLevelHorizontal = struct {
     }
 
     inline fn decibelToPercent(decibels: f64) f64 {
-        const decibel_range_min = 6.5;
-        const decibel_range_max = 3.5;
+        const decibel_range_min = 6.0;
+        const decibel_range_max = 3.0;
         const decibel_range_total = decibel_range_max - decibel_range_min;
         return @max(@min((-decibels - decibel_range_min) / decibel_range_total, 1.0), 0.0);
     }
@@ -290,16 +290,21 @@ pub const AudioVolumeLevelHorizontal = struct {
     pub fn init(self: *@This(), extent: geometry.Extent2D(f32)) !void {
         const percentage = 1.0;
         self.extent = extent;
-        const color_green = graphics.RGBA(f32){ .r = 0, .g = 1.0, .b = 0.0, .a = 1.0 };
-        const color_red = graphics.RGBA(f32){ .r = 1, .g = 0.0, .b = 0.0, .a = 1.0 };
+        // const color_green = graphics.RGBA(f32){ .r = 0, .g = 1.0, .b = 0.0, .a = 1.0 };
+        // const color_red = graphics.RGBA(f32){ .r = 1, .g = 0.0, .b = 0.0, .a = 1.0 };
         const color_black = graphics.RGBA(f32){ .r = 0, .g = 0, .b = 0.0, .a = 1.0 };
+
+        // const color_from = graphics.RGBA(f32).fromInt(u8, 50, 230, 50, 255);
+        const color_from = graphics.RGBA(f32).fromInt(u8, 50, 100, 65, 255);
+        // const color_to = graphics.RGBA(f32).fromInt(u8, 230, 50, 50, 255);
+        const color_to = graphics.RGBA(f32).fromInt(u8, 150, 50, 70, 255);
 
         var overlay_quad = try face_writer_ref.create(QuadFace);
         overlay_quad.* = graphics.generateQuad(graphics.GenericVertex, self.extent, .bottom_left);
-        overlay_quad[0].color = color_red; // Top left
-        overlay_quad[1].color = color_green; // Top right
-        overlay_quad[2].color = color_green; // Bottom right
-        overlay_quad[3].color = color_red; // Bottom left
+        overlay_quad[0].color = color_from; // Top left
+        overlay_quad[1].color = color_to; // Top right
+        overlay_quad[2].color = color_to; // Bottom right
+        overlay_quad[3].color = color_from; // Bottom left
 
         self.vertex_index = face_writer_ref.vertices_used;
 

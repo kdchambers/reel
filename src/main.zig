@@ -84,9 +84,9 @@ const window_decorations = struct {
 const information_bar = struct {
     const height_pixels = 30;
     const background_color = graphics.RGBA(f32){
-        .r = 0.05,
-        .g = 0.05,
-        .b = 0.05,
+        .r = 0.175,
+        .g = 0.175,
+        .b = 0.175,
         .a = 1.0,
     };
 
@@ -285,6 +285,26 @@ const TextWriterInterface = struct {
     }
 };
 
+const TextMutaterInterface = struct {
+    quads: []QuadFace,
+    used: u32 = 0,
+
+    pub fn write(
+        self: *@This(),
+        screen_extent: geometry.Extent2D(f32),
+        texture_extent: geometry.Extent2D(f32),
+    ) !void {
+        if (self.used == self.quads.len)
+            return error.OutOfSpace;
+        self.quads[self.used] = graphics.quadTextured(
+            screen_extent,
+            texture_extent,
+            .bottom_left,
+        );
+        self.used += 1;
+    }
+};
+
 var face_writer: FaceWriter = undefined;
 
 var is_draw_required: bool = true;
@@ -387,7 +407,7 @@ const decibel_range_lower = -7.0;
 const hamming_table: [bin_count]f32 = calculateHammingWindowTable(bin_count);
 var audio_spectogram_bins = [1]f32{0.00000000001} ** audio_visual_bin_count;
 var audio_input_quads: ?[]graphics.QuadFace = null;
-const audio_visual_bin_count = 32;
+const audio_visual_bin_count = 64;
 const reference_max_audio: f32 = 128.0 * 4.0;
 
 var unity_table: [bin_count]zmath.F32x4 = undefined;
@@ -583,7 +603,7 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
     const usable_bin_count = (bin_count / 2);
     var mel_bins = [1]f32{0.00000000001} ** usable_bin_count;
 
-    i = 0;
+    i = 1;
     while (i < usable_bin_count) : (i += 1) {
         const array_i = @divTrunc(i, 4);
         std.debug.assert(array_i <= 31);
@@ -1056,6 +1076,23 @@ fn appLoop(allocator: std.mem.Allocator) !void {
 
         updateAudioInput();
 
+        if (stream_state == .record or stream_state == .record_preview) {
+            if (recording_timer_text_quads) |quads| {
+                var interface = TextMutaterInterface{ .quads = quads };
+                const current_timestamp = std.time.nanoTimestamp();
+                const duration = @intCast(u64, current_timestamp - record_start_timestamp);
+                const seconds = @divFloor(duration, std.time.ns_per_s);
+                var time_label_buffer: [5]u8 = undefined;
+                const time_label = std.fmt.bufPrint(&time_label_buffer, "00:{d:0>2}", .{seconds}) catch "00:00";
+                try pen_small.write(
+                    time_label,
+                    recording_timer_placement,
+                    wayland_client.screen_scale,
+                    &interface,
+                );
+            }
+        }
+
         _ = wayland_client.pollEvents();
 
         if (wayland_client.framebuffer_resized) {
@@ -1209,6 +1246,7 @@ fn handleAudioDeviceInputsList(devices: []audio.InputDeviceInfo) void {
     }
 
     audio_input_interface.open(
+        // devices[0].name,
         null,
         &handleAudioInputOpenSuccess,
         &handleAudioInputOpenFail,
@@ -1278,11 +1316,11 @@ fn triangleFilter(point: f32, filter_map_buffer: *[5]FilterMap) []FilterMap {
         return filter_map_buffer[0..1];
     }
     filter_map_buffer.* = [5]FilterMap{
-        .{ .index = point_whole - 2, .weight = 0.10 - offset },
+        .{ .index = point_whole - 2, .weight = 0.05 - offset },
         .{ .index = point_whole - 1, .weight = 0.20 - offset },
-        .{ .index = point_whole, .weight = 0.40 },
+        .{ .index = point_whole, .weight = 0.50 },
         .{ .index = point_whole + 1, .weight = 0.20 + offset },
-        .{ .index = point_whole + 2, .weight = 0.10 + offset },
+        .{ .index = point_whole + 2, .weight = 0.05 + offset },
     };
     return filter_map_buffer[0..5];
 }
@@ -1291,14 +1329,14 @@ fn updateAudioInput() void {
     if (audio_input_quads) |quads| {
         const screen_scale = wayland_client.screen_scale;
 
-        const margin_left_pixels: f32 = 20;
+        const margin_left_pixels: f32 = 15;
         const margin_bottom_pixels: f32 = 60 + information_bar.height_pixels;
         const x_offset: f32 = @floatCast(f32, margin_left_pixels * screen_scale.horizontal);
         const y_offset: f32 = @floatCast(f32, margin_bottom_pixels * screen_scale.vertical);
 
         const x_increment = @floatCast(f32, 6 * screen_scale.horizontal);
         const bar_width = @floatCast(f32, 4 * screen_scale.horizontal);
-        const bar_color = graphics.RGBA(f32).fromInt(u8, 55, 150, 55, 255);
+        const bar_color = graphics.RGBA(f32).fromInt(u8, 50, 100, 65, 255);
         const height_max = @floatCast(f32, 200 * screen_scale.vertical);
 
         audio_power_table_mutex.lock();
@@ -1315,6 +1353,8 @@ fn updateAudioInput() void {
                 .height = height,
             };
             quads[i] = graphics.quadColored(extent, bar_color, .bottom_left);
+            quads[i][0].color = graphics.RGBA(f32).fromInt(u8, 150, 50, 70, 255);
+            quads[i][1].color = graphics.RGBA(f32).fromInt(u8, 150, 50, 70, 255);
         }
 
         is_render_requested = true;
@@ -1353,6 +1393,9 @@ fn drawAudioSource() !void {
     try drawAudioInput();
 }
 
+var recording_timer_text_quads: ?[]QuadFace = null;
+var recording_timer_placement: geometry.Coordinates2D(f32) = undefined;
+
 /// Our example draw function
 /// This will run anytime the screen is resized
 fn draw(allocator: std.mem.Allocator) !void {
@@ -1366,13 +1409,48 @@ fn draw(allocator: std.mem.Allocator) !void {
 
     try drawAudioSource();
 
+    if (stream_state == .record or stream_state == .record_preview) {
+        const screen_scale = wayland_client.screen_scale;
+        {
+            const margin_vertical_pixels = 10;
+            const margin_vertical = @floatCast(f32, margin_vertical_pixels * screen_scale.vertical);
+            const radius_pixels = (@intToFloat(f32, information_bar.height_pixels) - (margin_vertical_pixels * 2)) / 2;
+            const x_offset: f32 = @floatCast(f32, 20 * screen_scale.horizontal);
+            const y_offset: f32 = margin_vertical + @floatCast(f32, radius_pixels * screen_scale.vertical);
+            const center = geometry.Coordinates2D(f64){
+                .x = -1.0 + x_offset,
+                .y = 1.0 - y_offset,
+            };
+            try widget.drawCircle(
+                center,
+                radius_pixels,
+                screen_scale,
+                graphics.RGBA(f32).fromInt(u8, 220, 10, 10, 255),
+            );
+        }
+        var text_writer_interface = TextWriterInterface{ .quad_writer = &face_writer };
+        const x_offset = @floatCast(f32, 40 * screen_scale.horizontal);
+        const y_offset = @floatCast(f32, 10 * screen_scale.vertical);
+        recording_timer_placement = geometry.Coordinates2D(f32){
+            .x = -1.0 + x_offset,
+            .y = 1.0 - y_offset,
+        };
+        recording_timer_text_quads = @ptrCast([*]QuadFace, &face_writer.vertices[face_writer.vertices_used])[0..5];
+        try pen_small.write(
+            "00:00",
+            recording_timer_placement,
+            wayland_client.screen_scale,
+            &text_writer_interface,
+        );
+    }
+
     if (audio_input_interface.state() == .open) {
         const screen_scale = wayland_client.screen_scale;
         const margin_left_pixels: f32 = 30;
         const margin_bottom_pixels: f32 = 30 + information_bar.height_pixels;
         const x_offset: f32 = @floatCast(f32, margin_left_pixels * screen_scale.horizontal);
         const y_offset: f32 = @floatCast(f32, margin_bottom_pixels * screen_scale.vertical);
-        const extent = geometry.Extent2D(f32) {
+        const extent = geometry.Extent2D(f32){
             .x = -1.0 + x_offset,
             .y = 1.0 - y_offset,
             .width = @floatCast(f32, 370 * screen_scale.horizontal),
