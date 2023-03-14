@@ -109,6 +109,7 @@ pub extern fn avfilter_graph_parse_ptr(
     outputs: ?**FilterInOut,
     log_context: ?*void,
 ) callconv(.C) i32;
+extern fn avfilter_graph_free(graph: **FilterGraph) callconv(.C) void;
 
 pub extern fn av_dict_set(dict: *?*Dictionary, key: [*:0]const u8, value: [*:0]const u8, flags: i32) callconv(.C) i32;
 pub extern fn av_dict_free(dict: *?*Dictionary) callconv(.C) void;
@@ -218,6 +219,7 @@ pub const filterGraphAlloc = avfilter_graph_alloc;
 pub const filterGraphCreateFilter = avfilter_graph_create_filter;
 pub const filterGraphParsePtr = avfilter_graph_parse_ptr;
 pub const filterGraphConfig = avfilter_graph_config;
+pub const filterGraphFree = avfilter_graph_free;
 
 pub const filterInOutAlloc = avfilter_inout_alloc;
 pub const filterInOutFree = avfilter_inout_free;
@@ -327,7 +329,7 @@ pub const SampleFormat = enum(i32) {
 
 comptime {
     const assert = std.debug.assert;
-    assert(@enumToInt(SampleFormat.@"u8") == libav.AV_SAMPLE_FMT_U8);
+    assert(@enumToInt(SampleFormat.u8) == libav.AV_SAMPLE_FMT_U8);
     assert(@enumToInt(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
     assert(@enumToInt(SampleFormat.s32) == libav.AV_SAMPLE_FMT_S32);
     assert(@enumToInt(SampleFormat.flt) == libav.AV_SAMPLE_FMT_FLT);
