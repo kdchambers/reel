@@ -179,6 +179,19 @@ pub extern fn avformat_write_header(
 ) callconv(.C) i32;
 pub extern fn avformat_free_context(context: *FormatContext) callconv(.C) void;
 
+pub extern fn avcodec_fill_audio_frame(
+    frame: *Frame,
+    nb_channels: i32,
+    sample_fmt: SampleFormat,
+    buffer: [*]const u8,
+    buffer_size: i32,
+    alignment: i32,
+) callconv(.C) i32;
+
+extern fn av_strerror(err_num: i32, err_buffer: [*]u8, err_buffer_size: u64) callconv(.C) i32;
+
+pub const strError = av_strerror;
+
 pub const ioOpen = avio_open;
 pub const ioClosep = avio_closep;
 
@@ -245,6 +258,8 @@ pub const codecParametersFromContext = avcodec_parameters_from_context;
 pub const codecSendFrame = avcodec_send_frame;
 pub const codecReceivePacket = avcodec_receive_packet;
 pub const codecFreeContext = avcodec_free_context;
+
+pub const codecFillAudioFrame = avcodec_fill_audio_frame;
 
 pub const Channel = struct {
     pub const front_left = 0x00000001;
