@@ -23,10 +23,12 @@ var video_filter_graph: *libav.FilterGraph = undefined;
 var hw_device_context: ?*libav.BufferRef = null;
 var hw_frame_context: ?*libav.BufferRef = null;
 var video_frame: *libav.Frame = undefined;
-var filtered_frame: *libav.Frame = undefined;
 
 var audio_stream: *libav.Stream = undefined;
 var audio_codec_context: *libav.CodecContext = undefined;
+var audio_frame: *libav.Frame = undefined;
+
+var video_frames_written: usize = 0;
 
 pub const State = enum {
     uninitialized,
@@ -43,8 +45,6 @@ pub const RecordOptions = struct {
     base_index: u64,
 };
 
-const Fence = u32;
-
 var processing_thread: std.Thread = undefined;
 var fence_buffer: [8]bool = undefined;
 var image_buffer: [8][*]const PixelType = undefined;
@@ -53,6 +53,20 @@ var request_close: bool = false;
 var once: bool = true;
 
 pub var state: State = .uninitialized;
+
+const sample_rate = 44100;
+var samples_written: usize = 0;
+
+const Context = struct {
+    dimensions: geometry.Dimensions2D(u32),
+};
+var context: Context = undefined;
+
+const Frame = struct {
+    pixels: [*]const PixelType,
+    audio_buffer: []const *[2048]f32,
+    frame_index: u64,
+};
 
 fn RingBuffer(comptime T: type, comptime capacity: usize) type {
     return struct {
@@ -82,10 +96,12 @@ fn RingBuffer(comptime T: type, comptime capacity: usize) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            if (self.len == capacity)
+            if (self.len == capacity) {
+                // std.debug.assert(false);
                 return error.Full;
+            }
 
-            const dst_index: usize = (self.head + self.len) % capacity;
+            const dst_index: usize = @intCast(u16, @mod(self.head + self.len, capacity));
             self.buffer[dst_index] = value;
             self.len += 1;
         }
@@ -98,46 +114,37 @@ fn RingBuffer(comptime T: type, comptime capacity: usize) type {
                 return null;
 
             const index = self.head;
-            self.head = (self.head + 1) % @as(u16, capacity);
+            self.head = @intCast(u16, @mod(self.head + 1, capacity));
             self.len -= 1;
-
             return self.buffer[index];
         }
     };
 }
 
-const Context = struct {
-    dimensions: geometry.Dimensions2D(u32),
-};
-var context: Context = undefined;
-
-const Frame = struct {
-    pixels: [*]const PixelType,
-    frame_index: u64,
-};
-
 var ring_buffer = RingBuffer(Frame, 4).init;
 
 fn eventLoop() void {
     outer: while (true) {
-        while (ring_buffer.len == 0) {
-            std.time.sleep(std.time.ns_per_ms * 8);
-            if (request_close) break :outer;
+        while (ring_buffer.pop()) |entry| {
+            writeFrame(entry.pixels, entry.audio_buffer, @intCast(u32, entry.frame_index)) catch |err| {
+                std.log.err("Failed to write frame. Error {}", .{err});
+            };
         }
-        const entry = ring_buffer.pop() orelse continue;
-        writeFrame(entry.pixels, @intCast(u32, entry.frame_index)) catch |err| {
-            std.log.err("Failed to write frame. Error {}", .{err});
-        };
+        if (request_close)
+            break :outer;
+        std.time.sleep(std.time.ns_per_ms * 8);
     }
     finishVideoStream();
 }
 
-pub fn write(pixels: [*]const graphics.RGBA(u8), frame_index: u64) !void {
+pub fn write(pixels: [*]const graphics.RGBA(u8), audio_samples: []const *[2048]f32, frame_index: u64) !void {
     ring_buffer.push(.{
         .pixels = pixels,
+        .audio_buffer = audio_samples,
         .frame_index = frame_index,
     }) catch {
         std.log.warn("Buffer full, failed to write frame", .{});
+        std.debug.assert(false);
     };
 }
 
@@ -147,6 +154,13 @@ pub fn close() void {
     processing_thread.join();
     state = .closed;
     std.log.info("video_encoder: shutdown successful", .{});
+
+    const audio_written = (@intToFloat(f32, samples_written) / 44100.0) / 2.0;
+    std.log.info("{d} seconds of audio written", .{audio_written});
+
+    const ms_per_frame: f32 = 1000.0 / 30.0;
+    const video_written = @intToFloat(f32, video_frames_written) * ms_per_frame;
+    std.log.info("{d} seconds of video written", .{video_written / 1000.0});
 }
 
 pub fn open(options: RecordOptions) !void {
@@ -204,7 +218,6 @@ pub fn open(options: RecordOptions) !void {
     video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.YUV420P);
 
     video_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
-    filtered_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
 
     initVideoFilters(options) catch |err| {
         std.log.err("Failed to init video filters. Error: {}", .{err});
@@ -217,9 +230,13 @@ pub fn open(options: RecordOptions) !void {
 
     var ffmpeg_options: ?*libav.Dictionary = null;
 
-    _ = libav.dictSet(&ffmpeg_options, "preset", "slow", 0);
-    _ = libav.dictSet(&ffmpeg_options, "crf", "20", 0);
-    _ = libav.dictSet(&ffmpeg_options, "tune", "animation", 0);
+    _ = libav.dictSet(&ffmpeg_options, "preset", "ultrafast", 0);
+    _ = libav.dictSet(&ffmpeg_options, "crf", "35", 0);
+    _ = libav.dictSet(&ffmpeg_options, "tune", "zerolatency", 0);
+
+    // _ = libav.dictSet(&ffmpeg_options, "preset", "slow", 0);
+    // _ = libav.dictSet(&ffmpeg_options, "crf", "20", 0);
+    // _ = libav.dictSet(&ffmpeg_options, "tune", "animation", 0);
 
     if (libav.codecOpen2(video_codec_context, video_codec, &ffmpeg_options) < 0) {
         std.log.err("Failed to open codec", .{});
@@ -264,9 +281,6 @@ pub fn open(options: RecordOptions) !void {
     audio_codec_context.sample_fmt = @enumToInt(libav.SampleFormat.fltp);
     audio_codec_context.bit_rate = 96000;
 
-    audio_stream.time_base.den = 96000;
-    audio_stream.time_base.num = 1;
-
     var audio_codec_options: ?*libav.Dictionary = null;
     if (libav.codecOpen2(audio_codec_context, audio_codec, &audio_codec_options) < 0) {
         std.log.err("Failed to open audio codec", .{});
@@ -276,6 +290,17 @@ pub fn open(options: RecordOptions) !void {
     if (libav.codecParametersFromContext(audio_stream.codecpar, audio_codec_context) < 0) {
         std.log.err("Failed to audio avcodec_parameters_from_context", .{});
         return;
+    }
+
+    audio_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
+
+    audio_frame.format = @enumToInt(libav.SampleFormat.fltp);
+    audio_frame.channel_layout = libav.ChannelLayout.stereo;
+    audio_frame.nb_samples = audio_codec_context.frame_size;
+
+    if (libav.frameGetBuffer(audio_frame, 0) != 0) {
+        std.log.err("Failed to allocate audio frame buffer", .{});
+        return error.AllocateAudioFrameBufferFailed;
     }
 
     libav.dumpFormat(format_context, 0, options.output_path, 1);
@@ -299,15 +324,92 @@ pub fn open(options: RecordOptions) !void {
         return error.WriteFormatHeaderFailed;
     }
 
+    std.log.info("video stream timebase: {d} / {d}", .{
+        video_stream.time_base.num,
+        video_stream.time_base.den,
+    });
+    std.log.info("Video context timebase: {d} / {d}", .{
+        video_codec_context.time_base.num,
+        video_codec_context.time_base.den,
+    });
+
+    std.log.info("Audio stream timebase: {d} / {d}", .{
+        audio_stream.time_base.num,
+        audio_stream.time_base.den,
+    });
+    std.log.info("Audio context timebase: {d} / {d}", .{
+        audio_codec_context.time_base.num,
+        audio_codec_context.time_base.den,
+    });
+
+    std.log.info("Audio codec. Sample rate: {d} bitrate: {d}, channels: {d}, Layout: {}, Sample format: {}", .{
+        audio_codec_context.sample_rate,
+        audio_codec_context.bit_rate,
+        audio_codec_context.channels,
+        audio_codec_context.channel_layout,
+        @intToEnum(libav.SampleFormat, audio_codec_context.sample_fmt),
+    });
+
+    const samples_buffer_size = libav.samplesGetBufferSize(null, 2, 2940, .fltp, 0);
+    std.debug.assert(samples_buffer_size >= 0);
+    std.log.info("Buffer size for 2940 samples: {d} expected {d}", .{
+        samples_buffer_size,
+        2940 * 2 * 4,
+    });
+
     processing_thread = try std.Thread.spawn(.{}, eventLoop, .{});
     state = .encoding;
 }
 
 fn finishVideoStream() void {
-    var packet: libav.Packet = undefined;
-    libav.initPacket(&packet);
+    //
+    // TODO: Don't use encodeFrame here, we need to flush internal buffers
+    //       and make sure we get an EOF return code
+    //
 
-    encodeFrame(null, &packet) catch |err| {
+    //
+    // Flush audio frames
+    //
+    var code = libav.codecSendFrame(audio_codec_context, null);
+    if (code < 0) {
+        std.log.err("Failed to send frame for encoding", .{});
+    }
+
+    while (code >= 0) {
+        var packet: libav.Packet = undefined;
+        libav.initPacket(&packet);
+        packet.data = null;
+        packet.size = 0;
+
+        code = libav.codecReceivePacket(audio_codec_context, &packet);
+        if (code == libav.ERROR_EOF)
+            break;
+
+        if (code == EAGAIN or code < 0) {
+            std.log.err("Failed to recieve encoded frame (packet)", .{});
+        }
+
+        std.log.info("Writing audio packet", .{});
+
+        //
+        // Finish Frame
+        //
+        libav.packetRescaleTS(&packet, audio_codec_context.time_base, audio_stream.time_base);
+        packet.stream_index = audio_stream.index;
+        std.debug.assert(audio_stream.index != video_stream.index);
+
+        code = libav.interleavedWriteFrame(format_context, &packet);
+        if (code != 0) {
+            std.log.warn("Interleaved write frame failed", .{});
+        }
+        libav.packetUnref(&packet);
+    }
+
+    //
+    // Flush video frames
+    //
+
+    encodeFrame(null) catch |err| {
         std.log.err("Failed to encode frame. Error: {}", .{err});
     };
     _ = libav.writeTrailer(format_context);
@@ -322,10 +424,126 @@ fn finishVideoStream() void {
     _ = libav.formatFreeContext(format_context);
 
     libav.frameFree(&video_frame);
-    libav.frameFree(&filtered_frame);
 }
 
-fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
+fn encodeAudioFrames(audio_buffers: []const *[2048]f32) !void {
+    std.log.info("Writing audio {d} x {d} audio samples", .{ audio_buffers.len, audio_buffers[0].len });
+
+    audio_frame.format = @enumToInt(libav.SampleFormat.fltp);
+    audio_frame.nb_samples = audio_codec_context.frame_size;
+
+    std.debug.assert(audio_codec_context.frame_size == 1024);
+
+    var planar_buffer: [2048]f32 = [1]f32{1.1} ** 2048;
+    frame_loop: for (audio_buffers) |audio_buffer| {
+        //
+        // Assert valid samples
+        //
+        for (audio_buffer) |sample| {
+            std.debug.assert(sample <= 1.0);
+            std.debug.assert(sample >= -1.0);
+        }
+        //
+        // Convert sample buffer from interleaved to planar
+        //
+        const samples_per_channel: usize = @divExact(audio_buffer.len, 2);
+        for (0..samples_per_channel) |i| {
+            planar_buffer[i] = audio_buffer[i * 2];
+            planar_buffer[i + samples_per_channel] = audio_buffer[i * 2 + 1];
+
+            std.debug.assert(i + samples_per_channel < 2048);
+            std.debug.assert((i * 2 + 1) < 2048);
+
+            std.debug.assert(planar_buffer[i] <= 1.0);
+            std.debug.assert(planar_buffer[i] >= -1.0);
+            std.debug.assert(planar_buffer[i + samples_per_channel] <= 1.0);
+            std.debug.assert(planar_buffer[i + samples_per_channel] >= -1.0);
+        }
+
+        for (planar_buffer) |sample| {
+            std.debug.assert(sample <= 1.0);
+            std.debug.assert(sample >= -1.0);
+        }
+
+        //
+        // Planar buffer ready for action
+        //
+        const channel_count: i32 = 2;
+        const bytes_per_frame: i32 = audio_codec_context.frame_size * @sizeOf(f32) * channel_count;
+        var fill_audio_frame_code: i32 = libav.codecFillAudioFrame(
+            audio_frame,
+            channel_count,
+            libav.SampleFormat.fltp,
+            @ptrCast([*]const u8, &planar_buffer),
+            bytes_per_frame,
+            0,
+        );
+        if (fill_audio_frame_code < 0) {
+            var error_message_buffer: [512]u8 = undefined;
+            _ = libav.strError(fill_audio_frame_code, &error_message_buffer, 512);
+            std.log.err("Failed to fill audio frame: {d} {s}", .{ fill_audio_frame_code, error_message_buffer });
+            std.debug.assert(false);
+        }
+
+        audio_frame.pts = @intCast(i64, samples_written);
+
+        samples_written += 1024;
+
+        const send_frame_code = libav.codecSendFrame(audio_codec_context, audio_frame);
+        if (send_frame_code == EAGAIN) {
+            //
+            // The encoder isn't accepting any input until we receive the next output packet
+            //
+            while (true) {
+                var packet: libav.Packet = undefined;
+                libav.initPacket(&packet);
+                packet.data = null;
+                packet.size = 0;
+                packet.pts = audio_frame.pts;
+                std.log.info("Packet pts: {d}", .{packet.pts});
+
+                var receive_packet_code = libav.codecReceivePacket(audio_codec_context, &packet);
+                if (receive_packet_code == EAGAIN) {
+                    //
+                    // Wants input again, write the frame (input) that we previously couldn't
+                    // and return to top of loop
+                    //
+                    const resend_frame_code = libav.codecSendFrame(audio_codec_context, audio_frame);
+                    if (resend_frame_code < 0) {
+                        return error.ResendFrameFail;
+                    }
+                    continue :frame_loop;
+                }
+
+                if (receive_packet_code == libav.ERROR_EOF) {
+                    std.debug.assert(false);
+                    return error.UnexpectedEOF;
+                }
+
+                if (receive_packet_code < 0) {
+                    std.debug.assert(false);
+                    return error.RecievePacketFail;
+                }
+
+                libav.packetRescaleTS(&packet, audio_codec_context.time_base, audio_stream.time_base);
+                packet.stream_index = audio_stream.index;
+
+                const write_packet_code = libav.interleavedWriteFrame(format_context, &packet);
+                if (write_packet_code != 0) {
+                    std.log.warn("Interleaved write frame failed. {d}", .{write_packet_code});
+                    std.debug.assert(false);
+                }
+                libav.packetUnref(&packet);
+            }
+        } else if (send_frame_code < 0) {
+            std.log.err("Failed to send frame to encoder. Error: {d}", .{send_frame_code});
+            return error.SendFrameFail;
+        }
+    }
+}
+
+fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const *[2048]f32, frame_index: u32) !void {
+
     //
     // Prepare frame
     //
@@ -342,6 +560,8 @@ fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
     video_frame.width = @intCast(i32, context.dimensions.width);
     video_frame.height = @intCast(i32, context.dimensions.height);
 
+    video_frames_written += 1;
+
     video_frame.pts = frame_index;
 
     var code = libav.buffersrcAddFrameFlags(video_filter_source_context, video_frame, 0);
@@ -351,6 +571,8 @@ fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
     }
 
     while (true) {
+        var filtered_frame: *libav.Frame = undefined;
+        filtered_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
         code = libav.buffersinkGetFrame(
             video_filter_sink_context,
             filtered_frame,
@@ -372,16 +594,17 @@ fn writeFrame(pixels: [*]const PixelType, frame_index: u32) !void {
         }
 
         filtered_frame.pict_type = libav.AV_PICTURE_TYPE_NONE;
-        var packet: libav.Packet = undefined;
-        libav.initPacket(&packet);
-        packet.data = null;
-        packet.size = 0;
 
-        try encodeFrame(filtered_frame, &packet);
+        try encodeFrame(filtered_frame);
+
+        libav.frameFree(&filtered_frame);
     }
+
+    if (audio_buffer.len != 0)
+        try encodeAudioFrames(audio_buffer);
 }
 
-fn encodeFrame(frame: ?*libav.Frame, packet: *libav.Packet) !void {
+fn encodeFrame(frame: ?*libav.Frame) !void {
     var code = libav.codecSendFrame(video_codec_context, frame);
     if (code < 0) {
         std.log.err("Failed to send frame for encoding", .{});
@@ -389,24 +612,36 @@ fn encodeFrame(frame: ?*libav.Frame, packet: *libav.Packet) !void {
     }
 
     while (code >= 0) {
-        code = libav.codecReceivePacket(video_codec_context, packet);
+        var packet: libav.Packet = undefined;
+        libav.initPacket(&packet);
+        packet.data = null;
+        packet.size = 0;
+
+        code = libav.codecReceivePacket(video_codec_context, &packet);
         if (code == EAGAIN or code == libav.ERROR_EOF)
             return;
+
         if (code < 0) {
             std.log.err("Failed to recieve encoded frame (packet)", .{});
             return error.ReceivePacketFailed;
         }
+
+        std.log.info("Writing video packet. Pts: {d} {d}", .{
+            packet.pts,
+            @intToFloat(f32, packet.pts) / 30.0,
+        });
+
         //
         // Finish Frame
         //
-        libav.packetRescaleTS(packet, video_codec_context.time_base, video_stream.time_base);
+        libav.packetRescaleTS(&packet, video_codec_context.time_base, video_stream.time_base);
         packet.stream_index = video_stream.index;
 
-        code = libav.interleavedWriteFrame(format_context, packet);
+        code = libav.interleavedWriteFrame(format_context, &packet);
         if (code != 0) {
             std.log.warn("Interleaved write frame failed", .{});
         }
-        libav.packetUnref(packet);
+        libav.packetUnref(&packet);
     }
 }
 

@@ -359,7 +359,7 @@ var enable_preview_checkbox: ?Checkbox = null;
 
 var gpu_texture_mutex: std.Thread.Mutex = undefined;
 
-var audio_input_devices_opt: ?[][]const u8 = null;
+var audio_input_devices_opt: ?[]audio.InputDeviceInfo = null;
 
 const StreamState = enum(u8) {
     idle,
@@ -433,6 +433,79 @@ fn calculateHanningWindowTable(comptime freq_bin_count: comptime_int) [freq_bin_
     }
 }
 
+var audio_sample_ring_buffer: struct {
+    const buffer_count = 20;
+    const channel_count = 2;
+    const frames_per_second = 30;
+    // const samples_per_frame = @divExact(sample_rate, frames_per_second);
+    // const samples_per_buffer = samples_per_frame * channel_count;
+
+    //
+    // TODO: No hardcode
+    //
+    const samples_per_buffer = 1024 * channel_count;
+
+    buffers: [buffer_count][samples_per_buffer]f32 = undefined,
+    used: [buffer_count]usize = [1]usize{0} ** buffer_count,
+    head: usize = 0,
+    len: usize = 0,
+
+    mutex: std.Thread.Mutex = .{},
+
+    pub fn push(self: *@This(), samples: []const i16) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        //
+        // TODO: Calculate whether there is enough space upfront
+        //
+        var src_index: usize = 0;
+        while (src_index < samples.len) {
+            const tail_index = @mod(self.head + self.len, @This().buffer_count);
+            const space_in_buffer: usize = @This().samples_per_buffer - self.used[tail_index];
+            const start_index: usize = self.used[tail_index];
+            const src_samples_remaining: usize = samples.len - src_index;
+            const samples_to_copy_count: usize = @min(src_samples_remaining, space_in_buffer);
+            const buffer_filled = (samples_to_copy_count == space_in_buffer);
+            for (start_index..start_index + samples_to_copy_count) |i| {
+                //
+                // TODO: Use SIMD
+                //
+                self.buffers[tail_index][i] = @max(-1.0, @intToFloat(f32, samples[src_index]) / std.math.maxInt(i16));
+                std.debug.assert(self.buffers[tail_index][i] >= -1.0);
+                std.debug.assert(self.buffers[tail_index][i] <= 1.0);
+                src_index += 1;
+                std.debug.assert(src_index <= samples.len);
+            }
+            self.used[tail_index] += samples_to_copy_count;
+
+            std.debug.assert((self.used[tail_index] == samples_per_buffer) == buffer_filled);
+            std.debug.assert(self.used[tail_index] <= @This().samples_per_buffer);
+
+            if (buffer_filled) {
+                self.len += 1;
+                if (self.len > @This().buffer_count)
+                    return error.OutOfSpace;
+            }
+        }
+    }
+
+    pub fn pop(self: *@This()) ?*[@This().samples_per_buffer]f32 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.len == 0)
+            return null;
+
+        const head_index = self.head;
+        std.debug.assert(head_index < @This().buffer_count);
+
+        self.used[head_index] = 0;
+        self.head = @mod(self.head + 1, @This().buffer_count);
+        self.len -= 1;
+        return &self.buffers[head_index];
+    }
+} = .{};
+
 /// NOTE: This will be called on a separate thread
 pub fn onAudioInputRead(pcm_buffer: []i16) void {
     if (audio_start == null)
@@ -445,6 +518,9 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
     const fft_iteration_count = ((pcm_buffer.len / 2) / (fft_overlap_samples - 1)) - 1;
 
     audio_power_table = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (bin_count / 8);
+
+    if (stream_state == .record or stream_state == .record_preview)
+        audio_sample_ring_buffer.push(pcm_buffer) catch unreachable;
 
     var i: usize = 0;
     while (i < fft_iteration_count) : (i += 1) {
@@ -547,13 +623,6 @@ pub fn onAudioInputRead(pcm_buffer: []i16) void {
 fn handleAudioInputInitSuccess() void {
     std.log.info("audio input system initialized", .{});
     audio_input_interface.inputList(general_allocator, handleAudioDeviceInputsList);
-    audio_input_interface.open(
-        null,
-        &handleAudioInputOpenSuccess,
-        &handleAudioInputOpenFail,
-    ) catch |err| {
-        std.log.err("audio_input: Failed to connect to device. Error: {}", .{err});
-    };
 }
 
 fn handleAudioInputInitFail(err: audio.InitError) void {
@@ -690,6 +759,11 @@ fn deinit() void {
 // Callbacks
 //
 
+//
+// TODO: This is kind of hacky
+//
+var audio_frame_buffer: [3]*[2048]f32 = undefined;
+
 fn writeScreencastPixelBufferCallback(width: u32, height: u32, pixels: [*]const screencast.PixelType) void {
     if (screencast_interface.?.state() != .open)
         return;
@@ -717,7 +791,17 @@ fn writeScreencastPixelBufferCallback(width: u32, height: u32, pixels: [*]const 
         },
         .record_preview => {
             std.debug.assert(video_encoder.state == .encoding);
-            video_encoder.write(pixels, video_stream_frame_index) catch |err| {
+
+            //
+            // TODO: No hardcode
+            //
+            var audio_frame_count: usize = 0;
+            for (0..3) |i| {
+                audio_frame_buffer[i] = audio_sample_ring_buffer.pop() orelse break;
+                audio_frame_count += 1;
+            }
+            const buffer_slice = audio_frame_buffer[0..audio_frame_count];
+            video_encoder.write(pixels, buffer_slice, video_stream_frame_index) catch |err| {
                 std.log.err("app: Failed to write frame to video_encoder buffer. Error: {}", .{err});
             };
             video_stream_frame_index += 1;
@@ -737,7 +821,18 @@ fn writeScreencastPixelBufferCallback(width: u32, height: u32, pixels: [*]const 
         },
         .record => {
             std.debug.assert(video_encoder.state == .encoding);
-            video_encoder.write(pixels, video_stream_frame_index) catch |err| {
+
+            var audio_frame_count: usize = 0;
+            for (0..3) |i| {
+                audio_frame_buffer[i] = audio_sample_ring_buffer.pop() orelse break;
+                for (audio_frame_buffer[i]) |sample| {
+                    std.debug.assert(sample <= 1.0);
+                    std.debug.assert(sample >= -1.0);
+                }
+                audio_frame_count += 1;
+            }
+            const buffer_slice: []*[2048]f32 = audio_frame_buffer[0..audio_frame_count];
+            video_encoder.write(pixels, buffer_slice, video_stream_frame_index) catch |err| {
                 std.log.err("app: Failed to write frame to video_encoder buffer. Error: {}", .{err});
             };
             video_stream_frame_index += 1;
@@ -1104,13 +1199,23 @@ fn calculatePreviewExtent() void {
     renderer.video_stream_placement.y = @floatCast(f32, -1.0 + y_top + y_offset);
 }
 
-fn handleAudioDeviceInputsList(devices: [][]const u8) void {
+var audio_input_device_list_opt: ?[]audio.InputDeviceInfo = null;
+
+fn handleAudioDeviceInputsList(devices: []audio.InputDeviceInfo) void {
     const print = std.debug.print;
     print("Audio input devices:\n", .{});
     for (devices, 0..) |device, device_i| {
-        print("  {d:.2} {s}\n", .{ device_i, device });
+        print("  {d:.2} {s} {s}\n", .{ device_i, device.name, device.description });
     }
-    audio_input_devices_opt = devices;
+
+    audio_input_interface.open(
+        null,
+        &handleAudioInputOpenSuccess,
+        &handleAudioInputOpenFail,
+    ) catch |err| {
+        std.log.err("audio_input: Failed to connect to device. Error: {}", .{err});
+    };
+    audio_input_device_list_opt = devices;
 }
 
 fn generateMelTable() [audio_visual_bin_count]f32 {
@@ -1228,6 +1333,25 @@ fn draw(allocator: std.mem.Allocator) !void {
 
     try drawAudioInput();
 
+    {
+        const extent = geometry.Extent2D(f32){
+            .x = -0.2,
+            .y = 0.5,
+            .width = 1.0,
+            .height = 0.5,
+        };
+        const border_color = graphics.RGBA(f32).fromInt(u8, 155, 155, 155, 255);
+        const border_width = @floatCast(f32, 1 * wayland_client.screen_scale.horizontal);
+        try widget.Section.draw(
+            extent,
+            "Audio Input",
+            wayland_client.screen_scale,
+            &pen,
+            border_color,
+            border_width,
+        );
+    }
+
     if (audio_input_interface.state() == .open) {
         audio_volume_level_widget.init() catch |err| {
             std.log.err("Failed to init audio_volume_level widget. Error: {}", .{err});
@@ -1242,8 +1366,13 @@ fn draw(allocator: std.mem.Allocator) !void {
         var text_writer_interface = TextWriterInterface{ .quad_writer = &face_writer };
         const y_increment = @floatCast(f32, 25 * wayland_client.screen_scale.vertical);
         for (input_devices) |device| {
+            std.log.info("Label: {s}", .{device.description});
+            const device_label = std.mem.span(device.description);
+            std.log.info("Label len: {d}", .{device_label.len});
+            std.log.info("Device label: {s}", .{device_label});
+            std.debug.assert(device_label[device_label.len - 1] != 0);
             try pen_small.write(
-                device,
+                device_label,
                 placement,
                 wayland_client.screen_scale,
                 &text_writer_interface,
