@@ -65,17 +65,16 @@ pub const Section = packed struct(u64) {
         border_width: f32,
     ) !void {
 
-        //
-        // TODO: Don't hardcode text_width or margin_left
-        //
+        const rendered_text_dimensions = pen.calculateRenderDimensions(title);
         const border_quads = try face_writer_ref.allocate(QuadFace, 5);
-        const text_width: f32 = @floatCast(f32, 120.0 * screen_scale.horizontal);
+        const text_margin_horizontal: f32 = 20;
+        const text_width: f32 = @floatCast(f32, (text_margin_horizontal + rendered_text_dimensions.width) * screen_scale.horizontal);
         const margin_left: f32 = @floatCast(f32, 15.0 * screen_scale.horizontal);
 
         //
         // This doesn't need to match the text height, as it will be centered. It just needs to be higher
         //
-        const title_extent_height = @floatCast(f32, 40.0 * screen_scale.vertical);
+        const title_extent_height = @floatCast(f32, (rendered_text_dimensions.height + 20) * screen_scale.vertical);
 
         const title_extent = geometry.Extent2D(f32){
             .x = extent.x + margin_left,
