@@ -47,9 +47,8 @@ pub const log_level: std.log.Level = .info;
 const application_name = "reel";
 const background_color = graphics.RGBA(f32).fromInt(u8, 90, 90, 90, 255);
 
-fn melScale(freq_band: f32) f32 {
-    return 2595 * std.math.log10(1.0 + (freq_band / 700));
-}
+var recording_timer_text_quads: ?[]QuadFace = null;
+var recording_timer_placement: geometry.Coordinates2D(f32) = undefined;
 
 const window_decorations = struct {
     const height_pixels = 30;
@@ -329,8 +328,8 @@ var exit_button_extent: geometry.Extent2D(u16) = undefined;
 var exit_button_background_quad: *graphics.QuadFace = undefined;
 var exit_button_hovered: bool = false;
 
-var record_button_color_normal = graphics.RGBA(f32){ .r = 0.2, .g = 0.2, .b = 0.4, .a = 1.0 };
-var record_button_color_hover = graphics.RGBA(f32){ .r = 0.25, .g = 0.23, .b = 0.42, .a = 1.0 };
+var record_button_color_normal = graphics.RGBA(f32){ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1.0 };
+var record_button_color_hover = graphics.RGBA(f32){ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
 
 var record_start_timestamp: i128 = 0;
 var record_duration: u64 = 0;
@@ -365,7 +364,6 @@ var record_button_opt: ?Button = null;
 // var add_icon_opt: ?renderer.ImageHandle = null;
 
 var image_button_background_color = graphics.RGBA(f32){ .r = 0.3, .g = 0.3, .b = 0.3, .a = 1.0 };
-// var audio_input_capture: audio.pulse.InputCapture = undefined;
 
 var stdlib_gpa: if (builtin.mode == .Debug) std.heap.GeneralPurposeAllocator(.{}) else void = .{};
 var general_allocator: std.mem.Allocator = undefined;
@@ -404,7 +402,7 @@ var audio_power_table = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (bin_
 
 const decibel_range_lower = -7.0;
 
-const hamming_table: [bin_count]f32 = calculateHammingWindowTable(bin_count);
+const hamming_table: [bin_count]f32 = audio.calculateHammingWindowTable(bin_count);
 var audio_spectogram_bins = [1]f32{0.00000000001} ** audio_visual_bin_count;
 var audio_input_quads: ?[]graphics.QuadFace = null;
 const audio_visual_bin_count = 64;
@@ -414,11 +412,23 @@ var unity_table: [bin_count]zmath.F32x4 = undefined;
 const sample_rate = 44100;
 const freq_resolution: f32 = sample_rate / bin_count;
 
-const mel_table: [audio_visual_bin_count]f32 = generateMelTable();
-const mel_upper: f32 = melScale(freq_resolution * (bin_count / 2.0));
+const mel_table: [audio_visual_bin_count]f32 = audio.generateMelTable(audio_visual_bin_count, freq_resolution);
+const mel_upper: f32 = audio.melScale(freq_resolution * (bin_count / 2.0));
 
-const freq_to_mel_table: [bin_count / 2]f32 = calculateFreqToMelTable();
+const freq_to_mel_table: [bin_count / 2]f32 = audio.calculateFreqToMelTable(bin_count / 2, freq_resolution);
 const filter_spread: f32 = 4.0;
+
+var audio_sample_ring_buffer: audio.SampleRingBuffer(f32, 2048, 20) = .{};
+
+const preview_background_color = graphics.RGB(f32).fromInt(120, 120, 120);
+const preview_background_color_recording = graphics.RGB(f32).fromInt(120, 20, 20);
+
+var audio_input_device_list_opt: ?[]audio.InputDeviceInfo = null;
+
+//
+// TODO: This is kind of hacky
+//
+var audio_frame_buffer: [3]*[2048]f32 = undefined;
 
 pub fn main() !void {
     app_runtime_start = std.time.nanoTimestamp();
@@ -428,108 +438,6 @@ pub fn main() !void {
 
     deinit();
 }
-
-fn calculateHammingWindowTable(comptime freq_bin_count: comptime_int) [freq_bin_count]f32 {
-    comptime {
-        var i: comptime_int = 0;
-        var result: [freq_bin_count]f32 = undefined;
-        while (i < freq_bin_count) : (i += 1) {
-            // 0.54 - 0.46cos(2pi*n/(N-1))
-            result[i] = 0.54 - (0.46 * @cos((2 * std.math.pi * i) / @as(f32, freq_bin_count - 1)));
-        }
-        return result;
-    }
-}
-
-fn calculateHanningWindowTable(comptime freq_bin_count: comptime_int) [freq_bin_count]f32 {
-    comptime {
-        var i: comptime_int = 0;
-        var result: [freq_bin_count]f32 = undefined;
-        while (i < freq_bin_count) : (i += 1) {
-            // 0.50 - 0.50cos(2pi*n/(N-1))
-            result[i] = 0.50 - (0.50 * @cos((2 * std.math.pi * i) / @as(f32, freq_bin_count - 1)));
-        }
-        return result;
-    }
-}
-
-var audio_sample_ring_buffer: struct {
-    const buffer_count = 20;
-    const channel_count = 2;
-    const frames_per_second = 30;
-    // const samples_per_frame = @divExact(sample_rate, frames_per_second);
-    // const samples_per_buffer = samples_per_frame * channel_count;
-
-    //
-    // TODO: No hardcode
-    //
-    const samples_per_buffer = 1024 * channel_count;
-
-    buffers: [buffer_count][samples_per_buffer]f32 = undefined,
-    used: [buffer_count]usize = [1]usize{0} ** buffer_count,
-    head: usize = 0,
-    len: usize = 0,
-
-    mutex: std.Thread.Mutex = .{},
-
-    pub fn reset(self: *@This()) void {
-        self.head = 0;
-        self.len = 0;
-    }
-
-    pub fn push(self: *@This(), samples: []const i16) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        //
-        // TODO: Calculate whether there is enough space upfront
-        //
-        var src_index: usize = 0;
-        while (src_index < samples.len) {
-            const tail_index = @mod(self.head + self.len, @This().buffer_count);
-            const space_in_buffer: usize = @This().samples_per_buffer - self.used[tail_index];
-            const start_index: usize = self.used[tail_index];
-            const src_samples_remaining: usize = samples.len - src_index;
-            const samples_to_copy_count: usize = @min(src_samples_remaining, space_in_buffer);
-            const buffer_filled = (samples_to_copy_count == space_in_buffer);
-            for (start_index..start_index + samples_to_copy_count) |i| {
-                //
-                // TODO: Use SIMD
-                //
-                self.buffers[tail_index][i] = @max(-1.0, @intToFloat(f32, samples[src_index]) / std.math.maxInt(i16));
-                std.debug.assert(self.buffers[tail_index][i] >= -1.0);
-                std.debug.assert(self.buffers[tail_index][i] <= 1.0);
-                src_index += 1;
-                std.debug.assert(src_index <= samples.len);
-            }
-            self.used[tail_index] += samples_to_copy_count;
-
-            std.debug.assert((self.used[tail_index] == samples_per_buffer) == buffer_filled);
-            std.debug.assert(self.used[tail_index] <= @This().samples_per_buffer);
-
-            if (buffer_filled) {
-                self.len += 1;
-                if (self.len > @This().buffer_count)
-                    return error.OutOfSpace;
-            }
-        }
-    }
-
-    pub fn pop(self: *@This()) ?*[@This().samples_per_buffer]f32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        if (self.len == 0)
-            return null;
-
-        const head_index = self.head;
-        std.debug.assert(head_index < @This().buffer_count);
-
-        self.used[head_index] = 0;
-        self.head = @mod(self.head + 1, @This().buffer_count);
-        self.len -= 1;
-        return &self.buffers[head_index];
-    }
-} = .{};
 
 /// NOTE: This will be called on a separate thread
 pub fn onAudioInputRead(pcm_buffer: []i16) void {
@@ -783,11 +691,6 @@ fn deinit() void {
 //
 // Callbacks
 //
-
-//
-// TODO: This is kind of hacky
-//
-var audio_frame_buffer: [3]*[2048]f32 = undefined;
 
 fn writeScreencastPixelBufferCallback(width: u32, height: u32, pixels: [*]const screencast.PixelType) void {
     if (screencast_interface.?.state() != .open)
@@ -1183,16 +1086,6 @@ fn drawTexture() !void {
     );
 }
 
-inline fn gpuClamp(value: f32) f32 {
-    const precision = 1.0 / 256.0;
-    const rem = value % precision;
-    if (rem == 0) return value;
-    return if (rem >= (precision / 2.0)) value + rem else value - rem;
-}
-
-const preview_background_color = graphics.RGB(f32).fromInt(120, 120, 120);
-const preview_background_color_recording = graphics.RGB(f32).fromInt(120, 20, 20);
-
 fn drawScreenCapture() !void {
     calculatePreviewExtent();
 
@@ -1241,8 +1134,6 @@ fn calculatePreviewExtent() void {
     renderer.video_stream_placement.y = @floatCast(f32, -1.0 + y_top + y_offset);
 }
 
-var audio_input_device_list_opt: ?[]audio.InputDeviceInfo = null;
-
 fn handleAudioDeviceInputsList(devices: []audio.InputDeviceInfo) void {
     const print = std.debug.print;
     print("Audio input devices:\n", .{});
@@ -1259,44 +1150,6 @@ fn handleAudioDeviceInputsList(devices: []audio.InputDeviceInfo) void {
         std.log.err("audio_input: Failed to connect to device. Error: {}", .{err});
     };
     audio_input_device_list_opt = devices;
-}
-
-fn generateMelTable() [audio_visual_bin_count]f32 {
-    var result: [audio_visual_bin_count]f32 = undefined;
-    var i: usize = 0;
-    while (i < audio_visual_bin_count) : (i += 1) {
-        result[i] = melScale(freq_resolution * (@intToFloat(f32, i) + 1));
-    }
-    return result;
-}
-
-fn calculateFreqToMelTable() [bin_count / 2]f32 {
-    return comptime blk: {
-        @setEvalBranchQuota(bin_count * bin_count);
-        var result = [1]f32{0.0} ** (bin_count / 2);
-        const mel_increment = mel_upper / (bin_count / 2);
-        var freq_i: usize = 0;
-        outer: while (freq_i < (bin_count / 2)) : (freq_i += 1) {
-            const freq = @intToFloat(f32, freq_i) * freq_resolution;
-            const freq_in_mel: f32 = melScale(freq);
-            var lower_mel: f32 = 0;
-            var upper_mel: f32 = mel_increment;
-            var mel_bin_index: usize = 0;
-            while (mel_bin_index < (bin_count / 2)) : (mel_bin_index += 1) {
-                if (freq_in_mel >= lower_mel and freq_in_mel < upper_mel) {
-                    const fraction: f32 = (freq_in_mel - lower_mel) / mel_increment;
-                    std.debug.assert(fraction >= 0.0);
-                    std.debug.assert(fraction <= 1.0);
-                    result[freq_i] = @intToFloat(f32, mel_bin_index) + fraction;
-                    continue :outer;
-                }
-                lower_mel += mel_increment;
-                upper_mel += mel_increment;
-            }
-            unreachable;
-        }
-        break :blk result;
-    };
 }
 
 const FilterMap = struct {
@@ -1397,9 +1250,6 @@ fn drawAudioSource() !void {
     );
     try drawAudioInput();
 }
-
-var recording_timer_text_quads: ?[]QuadFace = null;
-var recording_timer_placement: geometry.Coordinates2D(f32) = undefined;
 
 /// Our example draw function
 /// This will run anytime the screen is resized
@@ -1534,47 +1384,58 @@ fn draw(allocator: std.mem.Allocator) !void {
         record_button_opt = try Button.create();
     }
 
-    // if (image_button_opt == null) {
-    //     image_button_opt = try ImageButton.create();
-    // }
-
-    // if (image_button_opt) |*image_button| {
-    //     const width_pixels = @intToFloat(f32, close_icon_handle.width());
-    //     const height_pixels = @intToFloat(f32, close_icon_handle.height());
-    //     const extent = geometry.Extent2D(f32){
-    //         .x = 0.4,
-    //         .y = 0.8,
-    //         .width = @floatCast(f32, width_pixels * wayland_client.screen_scale.horizontal),
-    //         .height = @floatCast(f32, height_pixels * wayland_client.screen_scale.vertical),
-    //     };
-    //     try image_button.draw(extent, image_button_background_color, close_icon_handle.extent());
-    // }
-
-    if (record_button_opt) |*record_button| {
-        const right_margin_pixels: f32 = 15;
-        const bottom_margin_pixels: f32 = 15 + information_bar.height_pixels;
-        const width_pixels: f32 = 120;
-        //
-        // Even height values are causing text distortion
-        // https://github.com/kdchambers/reel/issues/11
-        //
-        const height_pixels: f32 = 31;
-
+    {
         const screen_scale = wayland_client.screen_scale;
-        const extent = geometry.Extent2D(f32){
-            .x = 1.0 - @floatCast(f32, (right_margin_pixels + width_pixels) * screen_scale.horizontal),
-            .y = 1.0 - @floatCast(f32, bottom_margin_pixels * screen_scale.vertical),
-            .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
-            .height = @floatCast(f32, height_pixels * screen_scale.vertical),
-        };
-        try record_button.draw(
-            extent,
-            record_button_color_normal,
-            if (video_encoder.state == .encoding) "Stop" else "Record",
-            &pen,
-            wayland_client.screen_scale,
-            .{ .rounding_radius = 2 },
-        );
+        {
+            //
+            // Controls Section
+            //
+            const width_pixels: f32 = 500;
+            const height_pixels: f32 = 200;
+            const margin_right_pixels: f32 = 15;
+            const margin_bottom_pixels: f32 = information_bar.height_pixels + 15;
+            const border_color = graphics.RGBA(f32).fromInt(u8, 155, 155, 155, 255);
+            const border_width = @floatCast(f32, 1 * screen_scale.horizontal);
+            const extent = geometry.Extent2D(f32){
+                .x = 1.0 - @floatCast(f32, (width_pixels + margin_right_pixels) * screen_scale.horizontal),
+                .y = 1.0 - @floatCast(f32, margin_bottom_pixels * screen_scale.vertical),
+                .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
+                .height = @floatCast(f32, height_pixels * screen_scale.vertical),
+            };
+            try widget.Section.draw(
+                extent,
+                "Controls",
+                screen_scale,
+                &pen,
+                border_color,
+                border_width,
+            );
+        }
+
+        if (record_button_opt) |*record_button| {
+            const right_margin_pixels: f32 = 25;
+            const bottom_margin_pixels: f32 = 25 + information_bar.height_pixels;
+            const width_pixels: f32 = 120;
+            //
+            // Even height values are causing text distortion
+            // https://github.com/kdchambers/reel/issues/11
+            //
+            const height_pixels: f32 = 31;
+            const extent = geometry.Extent2D(f32){
+                .x = 1.0 - @floatCast(f32, (right_margin_pixels + width_pixels) * screen_scale.horizontal),
+                .y = 1.0 - @floatCast(f32, bottom_margin_pixels * screen_scale.vertical),
+                .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
+                .height = @floatCast(f32, height_pixels * screen_scale.vertical),
+            };
+            try record_button.draw(
+                extent,
+                record_button_color_normal,
+                if (video_encoder.state == .encoding) "Stop" else "Record",
+                &pen,
+                wayland_client.screen_scale,
+                .{ .rounding_radius = null },
+            );
+        }
     }
 }
 
@@ -1585,4 +1446,11 @@ fn lerp(from: f32, to: f32, value: f32) f32 {
 fn random(seed: u32) u32 {
     const value = (seed << 13) ^ 13;
     return ((value * (value * value * 15731 + 7892221) + 1376312589) & 0x7fffffff);
+}
+
+inline fn gpuClamp(value: f32) f32 {
+    const precision = 1.0 / 256.0;
+    const rem = value % precision;
+    if (rem == 0) return value;
+    return if (rem >= (precision / 2.0)) value + rem else value - rem;
 }
