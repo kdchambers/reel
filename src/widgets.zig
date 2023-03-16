@@ -64,7 +64,6 @@ pub const Section = packed struct(u64) {
         border_color: graphics.RGBA(f32),
         border_width: f32,
     ) !void {
-
         const rendered_text_dimensions = pen.calculateRenderDimensions(title);
         const border_quads = try face_writer_ref.allocate(QuadFace, 5);
         const text_margin_horizontal: f32 = 20;
@@ -294,9 +293,9 @@ pub const AudioVolumeLevelHorizontal = struct {
         const color_black = graphics.RGBA(f32){ .r = 0, .g = 0, .b = 0.0, .a = 1.0 };
 
         // const color_from = graphics.RGBA(f32).fromInt(u8, 50, 230, 50, 255);
-        const color_from = graphics.RGBA(f32).fromInt(u8, 50, 100, 65, 255);
+        const color_from = graphics.RGBA(f32).fromInt(50, 100, 65, 255);
         // const color_to = graphics.RGBA(f32).fromInt(u8, 230, 50, 50, 255);
-        const color_to = graphics.RGBA(f32).fromInt(u8, 150, 50, 70, 255);
+        const color_to = graphics.RGBA(f32).fromInt(150, 50, 70, 255);
 
         var overlay_quad = try face_writer_ref.create(QuadFace);
         overlay_quad.* = graphics.generateQuad(graphics.GenericVertex, self.extent, .bottom_left);

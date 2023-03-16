@@ -14,6 +14,7 @@ const event_system = @import("event_system.zig");
 const screencast = @import("screencast.zig");
 const mini_heap = @import("mini_heap.zig");
 const zmath = @import("zmath");
+const Timer = @import("Timer.zig");
 
 const video_encoder = @import("video_record.zig");
 
@@ -45,17 +46,17 @@ const texture_layer_dimensions = renderer.texture_layer_dimensions;
 pub const log_level: std.log.Level = .info;
 
 const application_name = "reel";
-const background_color = graphics.RGBA(f32).fromInt(u8, 90, 90, 90, 255);
+const background_color = graphics.RGBA(f32).fromInt(90, 90, 90, 255);
 
 var recording_timer_text_quads: ?[]QuadFace = null;
 var recording_timer_placement: geometry.Coordinates2D(f32) = undefined;
 
 const window_decorations = struct {
     const height_pixels = 30;
-    const color = graphics.RGBA(f32).fromInt(u8, 200, 200, 200, 255);
+    const color = graphics.RGBA(f32).fromInt(200, 200, 200, 255);
     const exit_button = struct {
         const size_pixels = 24;
-        const color_hovered = graphics.RGBA(f32).fromInt(u8, 180, 180, 180, 255);
+        const color_hovered = graphics.RGBA(f32).fromInt(180, 180, 180, 255);
     };
 
     var requested: bool = true;
@@ -353,12 +354,6 @@ var pen_small: Font.PenConfig(pen_options) = undefined;
 const asset_path_font = "assets/Roboto-Regular.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 
-const ScreenPixelBaseType = u16;
-const ScreenNormalizedBaseType = f32;
-
-const TexturePixelBaseType = u16;
-const TextureNormalizedBaseType = f32;
-
 var record_button_opt: ?Button = null;
 // var image_button_opt: ?ImageButton = null;
 // var add_icon_opt: ?renderer.ImageHandle = null;
@@ -368,7 +363,8 @@ var image_button_background_color = graphics.RGBA(f32){ .r = 0.3, .g = 0.3, .b =
 var stdlib_gpa: if (builtin.mode == .Debug) std.heap.GeneralPurposeAllocator(.{}) else void = .{};
 var general_allocator: std.mem.Allocator = undefined;
 
-var app_runtime_start: i128 = undefined;
+var app_runtime_timer: Timer = undefined;
+
 var top_reserved_pixels: u16 = 0;
 var screencast_interface: ?screencast.Interface = null;
 
@@ -393,7 +389,6 @@ var audio_input_interface: audio.Interface = undefined;
 var audio_volume_level_widget: widget.AudioVolumeLevelHorizontal = undefined;
 
 var audio_callback_count: usize = 0;
-var audio_start: ?i128 = null;
 
 const bin_count = 256;
 
@@ -431,7 +426,7 @@ var audio_input_device_list_opt: ?[]audio.InputDeviceInfo = null;
 var audio_frame_buffer: [3]*[2048]f32 = undefined;
 
 pub fn main() !void {
-    app_runtime_start = std.time.nanoTimestamp();
+    app_runtime_timer.start();
 
     try init();
     try appLoop(general_allocator);
@@ -441,9 +436,6 @@ pub fn main() !void {
 
 /// NOTE: This will be called on a separate thread
 pub fn onAudioInputRead(pcm_buffer: []i16) void {
-    if (audio_start == null)
-        audio_start = std.time.nanoTimestamp();
-
     audio_power_table_mutex.lock();
     defer audio_power_table_mutex.unlock();
 
@@ -804,9 +796,11 @@ fn appLoop(allocator: std.mem.Allocator) !void {
         wayland_client.screen_dimensions.height,
     });
 
-    const app_loop_start = std.time.nanoTimestamp();
-    const app_initialization_duration = @intCast(u64, app_loop_start - app_runtime_start);
+    const app_initialization_duration = app_runtime_timer.duration();
     std.log.info("App initialized in {s}", .{std.fmt.fmtDuration(app_initialization_duration)});
+
+    var app_loop_timer: Timer = undefined;
+    app_loop_timer.start();
 
     const input_fps = 60;
     const input_latency_ns: u64 = std.time.ns_per_s / input_fps;
@@ -1050,16 +1044,12 @@ fn appLoop(allocator: std.mem.Allocator) !void {
         video_encoder.close();
     }
 
-    const app_end = std.time.nanoTimestamp();
-    const app_duration = @intCast(u64, app_end - app_loop_start);
+    const app_duration = app_loop_timer.duration();
 
     const print = std.debug.print;
     const runtime_seconds: f64 = @intToFloat(f64, app_duration) / std.time.ns_per_s;
     const frames_per_s: f64 = @intToFloat(f64, wayland_client.frame_index) / @intToFloat(f64, app_duration / std.time.ns_per_s);
-    const audio_duration: f64 = @intToFloat(f64, app_end - audio_start.?) / std.time.ns_per_s;
-    const audio_fps: f64 = @intToFloat(f64, audio_callback_count) / audio_duration;
     print("\n== Runtime Statistics ==\n\n", .{});
-    print("audio fps:   {d}\n", .{audio_fps});
     print("runtime:     {d:.2}s\n", .{runtime_seconds});
     print("display fps: {d:.2}\n", .{frames_per_s});
     print("input fps:   {d:.2}\n", .{@intToFloat(f64, app_loop_iteration) / runtime_seconds});
@@ -1194,7 +1184,7 @@ fn updateAudioInput() void {
 
         const x_increment = @floatCast(f32, 6 * screen_scale.horizontal);
         const bar_width = @floatCast(f32, 4 * screen_scale.horizontal);
-        const bar_color = graphics.RGBA(f32).fromInt(u8, 50, 100, 65, 255);
+        const bar_color = graphics.RGBA(f32).fromInt(50, 100, 65, 255);
         const height_max = @floatCast(f32, 200 * screen_scale.vertical);
 
         audio_power_table_mutex.lock();
@@ -1211,8 +1201,8 @@ fn updateAudioInput() void {
                 .height = height,
             };
             quads[i] = graphics.quadColored(extent, bar_color, .bottom_left);
-            quads[i][0].color = graphics.RGBA(f32).fromInt(u8, 150, 50, 70, 255);
-            quads[i][1].color = graphics.RGBA(f32).fromInt(u8, 150, 50, 70, 255);
+            quads[i][0].color = graphics.RGBA(f32).fromInt(150, 50, 70, 255);
+            quads[i][1].color = graphics.RGBA(f32).fromInt(150, 50, 70, 255);
         }
 
         is_render_requested = true;
@@ -1238,7 +1228,7 @@ fn drawAudioSource() !void {
         .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
         .height = @floatCast(f32, height_pixels * screen_scale.vertical),
     };
-    const border_color = graphics.RGBA(f32).fromInt(u8, 155, 155, 155, 255);
+    const border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
     const border_width = @floatCast(f32, 1 * screen_scale.horizontal);
     try widget.Section.draw(
         extent,
@@ -1280,7 +1270,7 @@ fn draw(allocator: std.mem.Allocator) !void {
                 center,
                 radius_pixels,
                 screen_scale,
-                graphics.RGBA(f32).fromInt(u8, 220, 10, 10, 255),
+                graphics.RGBA(f32).fromInt(220, 10, 10, 255),
             );
         }
         var text_writer_interface = TextWriterInterface{ .quad_writer = &face_writer };
@@ -1394,7 +1384,7 @@ fn draw(allocator: std.mem.Allocator) !void {
             const height_pixels: f32 = 200;
             const margin_right_pixels: f32 = 15;
             const margin_bottom_pixels: f32 = information_bar.height_pixels + 15;
-            const border_color = graphics.RGBA(f32).fromInt(u8, 155, 155, 155, 255);
+            const border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
             const border_width = @floatCast(f32, 1 * screen_scale.horizontal);
             const extent = geometry.Extent2D(f32){
                 .x = 1.0 - @floatCast(f32, (width_pixels + margin_right_pixels) * screen_scale.horizontal),
