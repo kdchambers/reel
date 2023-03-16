@@ -799,8 +799,7 @@ fn appLoop(allocator: std.mem.Allocator) !void {
     const app_initialization_duration = app_runtime_timer.duration();
     std.log.info("App initialized in {s}", .{std.fmt.fmtDuration(app_initialization_duration)});
 
-    var app_loop_timer: Timer = undefined;
-    app_loop_timer.start();
+    const app_loop_timer = Timer.now();
 
     const input_fps = 60;
     const input_latency_ns: u64 = std.time.ns_per_s / input_fps;

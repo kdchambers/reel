@@ -13,3 +13,9 @@ pub fn duration(self: @This()) u64 {
     const stop_timestamp = std.time.nanoTimestamp();
     return @intCast(u64, stop_timestamp - self.start_timestamp);
 }
+
+pub fn now() @This() {
+    return .{
+        .start_timestamp = std.time.nanoTimestamp(),
+    };
+}
