@@ -10,11 +10,18 @@ const user_interface = @import("user_interface.zig");
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
 pub const Request = enum(u8) {
+    core_shutdown,
+
     record_start,
     record_pause,
     record_stop,
     record_quality_set,
     record_format_set,
+
+    screenshot_output_set,
+    screenshot_region_set,
+    screenshot_display_set,
+    screenshot_do,
 };
 
 pub const RequestBuffer = struct {
@@ -105,7 +112,16 @@ pub fn run() !void {
         var frame_start = std.time.nanoTimestamp();
         _ = wayland_core.sync();
 
-        ui_interface.update();
+        var request_buffer = ui_interface.update();
+        while(request_buffer.next()) |request| {
+            switch(request) {
+                .core_shutdown => {
+                    std.log.info("core: shutdown request", .{});
+                    return;
+                },
+                else => std.log.err("Invalid core request", .{}),
+            }
+        }
 
         const frame_duration = @intCast(u64, std.time.nanoTimestamp() - frame_start);
         if (frame_duration < ns_per_frame) {

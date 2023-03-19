@@ -3,6 +3,9 @@
 
 const std = @import("std");
 
+const app_core = @import("app_core.zig");
+const RequestBuffer = app_core.RequestBuffer;
+
 const build_options = @import("build_options");
 
 const backend_headless = @import("user_interface_backends/headless.zig");
@@ -13,7 +16,7 @@ pub const Backend = GenerateBackendEnum();
 
 pub const InitFn = *const fn () void;
 pub const DeinitFn = *const fn () void;
-pub const UpdateFn = *const fn () void;
+pub const UpdateFn = *const fn () RequestBuffer;
 
 pub const Interface = struct {
     init: InitFn,
