@@ -11,22 +11,14 @@ const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const ScanProtocolsStep = @import("deps/zig-wayland/build.zig").ScanProtocolsStep;
 const zmath = @import("deps/zig-gamedev/libs/zmath/build.zig");
 
+const Options = struct {
+    have_wayland: bool,
+};
+var options: Options = undefined;
+
 pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    const scanner = ScanProtocolsStep.create(b);
-    scanner.addProtocolPath("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
-    scanner.addProtocolPath("deps/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
-    scanner.addProtocolPath("deps/wayland-protocols/unstable/wlr-screencopy/wlr-screencopy-unstable-v1.xml");
-
-    scanner.generate("wl_compositor", 4);
-    scanner.generate("wl_seat", 5);
-    scanner.generate("wl_shm", 1);
-    scanner.generate("wl_output", 4);
-    scanner.generate("xdg_wm_base", 2);
-    scanner.generate("zwlr_screencopy_manager_v1", 3);
-    scanner.generate("zxdg_decoration_manager_v1", 1);
 
     const exe = b.addExecutable(.{
         .name = "reel",
@@ -34,6 +26,41 @@ pub fn build(b: *Builder) void {
         .target = target,
         .optimize = optimize,
     });
+
+    options.have_wayland = b.option(bool, "have_wayland", "Build with support for Wayland") orelse true;
+
+    if (options.have_wayland) {
+        const scanner = ScanProtocolsStep.create(b);
+        scanner.addProtocolPath("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
+        scanner.addProtocolPath("deps/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
+        scanner.addProtocolPath("deps/wayland-protocols/unstable/wlr-screencopy/wlr-screencopy-unstable-v1.xml");
+
+        scanner.generate("wl_compositor", 4);
+        scanner.generate("wl_seat", 5);
+        scanner.generate("wl_shm", 1);
+        scanner.generate("wl_output", 4);
+        scanner.generate("xdg_wm_base", 2);
+        scanner.generate("zwlr_screencopy_manager_v1", 3);
+        scanner.generate("zxdg_decoration_manager_v1", 1);
+
+        exe.step.dependOn(&scanner.step);
+
+        const wayland_module = b.createModule(.{
+            .source_file = .{ .generated = &scanner.result },
+            .dependencies = &.{},
+        });
+        exe.addModule("wayland", wayland_module);
+        scanner.addCSource(exe);
+
+        exe.linkSystemLibrary("wayland-client");
+        exe.linkSystemLibrary("wayland-cursor");
+    }
+
+    const options_step = b.addOptions();
+    options_step.addOption(bool, "have_wayland", options.have_wayland);
+    const options_module = options_step.createModule();
+
+    exe.addModule("build_options", options_module);
 
     const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml");
     exe.addModule("vulkan", gen.getModule());
@@ -52,14 +79,6 @@ pub fn build(b: *Builder) void {
     exe.addModule("shaders", shaders_module);
     exe.addModule("fontana", fontana_module);
 
-    const wayland_module = b.createModule(.{
-        .source_file = .{ .generated = &scanner.result },
-        .dependencies = &.{},
-    });
-    exe.addModule("wayland", wayland_module);
-
-    exe.step.dependOn(&scanner.step);
-
     const zigimg_module = b.createModule(.{
         .source_file = .{ .path = "deps/zigimg/zigimg.zig" },
         .dependencies = &.{},
@@ -67,8 +86,6 @@ pub fn build(b: *Builder) void {
     exe.addModule("zigimg", zigimg_module);
 
     exe.linkLibC();
-    exe.linkSystemLibrary("wayland-client");
-    exe.linkSystemLibrary("wayland-cursor");
 
     exe.linkSystemLibrary("pulse");
 
@@ -101,8 +118,6 @@ pub fn build(b: *Builder) void {
     exe.linkSystemLibrary("avdevice");
     exe.linkSystemLibrary("avfilter");
     exe.linkSystemLibrary("swscale");
-
-    scanner.addCSource(exe);
 
     exe.install();
 
