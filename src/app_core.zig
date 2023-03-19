@@ -5,6 +5,7 @@ const std = @import("std");
 const log = std.log;
 const screencapture = @import("screencast.zig");
 const build_options = @import("build_options");
+const user_interface = @import("user_interface.zig");
 
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
@@ -37,19 +38,11 @@ pub const RequestBuffer = struct {
     }
 };
 
-pub const UIBackend = enum {
-    headless,
-    cli,
-    wayland_vulkan,
-    wayland_opengl,
-    wayland_software,
-};
-
 pub const ScreenCaptureBackend = screencapture.Backend;
 
 pub const InitOptions = struct {
     screencapture_order: []const ScreenCaptureBackend,
-    ui_backend: UIBackend,
+    ui_backend: user_interface.Backend,
 };
 
 const State = enum {
@@ -59,14 +52,11 @@ const State = enum {
     closed,
 };
 
-pub const InitError = error{
-    IncorrectState,
-    WaylandInitFail,
-    ScreenCaptureInitFail,
-    NoScreencaptureBackend
-};
+pub const InitError = error{ IncorrectState, WaylandInitFail, NoScreencaptureBackend };
 
 var app_state: State = .uninitialized;
+var screencapture_interface: screencapture.Interface = undefined;
+var ui_interface: user_interface.Interface = undefined;
 
 pub fn init(options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
@@ -82,30 +72,57 @@ pub fn init(options: InitOptions) InitError!void {
     }
 
     const supported_screencapture_backends = screencapture.detectBackends();
-    const screencapture_interface = blk: for (options.screencapture_order) |ordered_backend| {
-        for(supported_screencapture_backends) |supported_backend| {
-            if(ordered_backend == supported_backend) break :blk screencapture.createInterface(supported_backend, onFrameReadyCallback) catch |err| {
-                log.err("Failed to create interface to screencapture backend ({s}). Error: {}", .{
-                    @tagName(supported_backend),
-                    err,
-                });
-                return error.ScreenCaptureInitFail;
-            };
+    screencapture_interface = blk: for (options.screencapture_order) |ordered_backend| {
+        inner: for (supported_screencapture_backends) |supported_backend| {
+            if (ordered_backend == supported_backend) {
+                log.info("Screencapture backend: {s}", .{@tagName(supported_backend)});
+                break :blk screencapture.createInterface(supported_backend, onFrameReadyCallback) catch |err| {
+                    log.err("Failed to create interface to screencapture backend ({s}). Error: {}", .{
+                        @tagName(supported_backend),
+                        err,
+                    });
+                    continue :inner;
+                };
+            }
         }
-        return error.NoScreencaptureBackend;
-    } else unreachable;
+    } else return error.NoScreencaptureBackend;
 
-    _ = screencapture_interface;
+    _ = wayland_core.sync();
+
+    ui_interface = user_interface.interface(options.ui_backend);
+    ui_interface.init();
 }
 
 pub fn run() !void {
-    // const input_fps = 240;
+    const input_fps = 120;
+    const target_runtime_ns = std.time.ns_per_s * 2;
+    const ns_per_frame = @divFloor(std.time.ns_per_s, input_fps);
+    var runtime_ns: u64 = 0;
+
+    screencapture_interface.screenshot("screenshot.png");
+
+    while (runtime_ns <= target_runtime_ns) {
+        var frame_start = std.time.nanoTimestamp();
+        _ = wayland_core.sync();
+
+        ui_interface.update();
+
+        const frame_duration = @intCast(u64, std.time.nanoTimestamp() - frame_start);
+        if (frame_duration < ns_per_frame) {
+            std.time.sleep(ns_per_frame - frame_duration);
+        }
+        runtime_ns += ns_per_frame;
+    }
+
     std.time.sleep(std.time.ns_per_s * 1);
 }
 
 pub fn deinit() void {
     if (comptime build_options.have_wayland) wayland_core.deinit();
 
+    ui_interface.deinit();
+
+    log.info("Shutting down app core", .{});
     std.time.sleep(std.time.ns_per_s * 1);
 }
 
