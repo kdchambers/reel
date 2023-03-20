@@ -3,7 +3,6 @@
 
 const std = @import("std");
 const linux = std.os.linux;
-const termios = linux.termios;
 
 const app_core = @import("../app_core.zig");
 const RequestBuffer = app_core.RequestBuffer;
@@ -13,62 +12,129 @@ const RequestEncoder = @import("../RequestEncoder.zig");
 
 var request_encoder: RequestEncoder = .{};
 
-var modified_termios: termios = undefined;
-var original_termios: termios = undefined;
+const bindings = struct {
+    const quit = [_]u8{'q'};
+    const screenshot = [_]u8{'s'};
+    const help = [_]u8{'h'};
+    const list_displays = [_]u8{ 'l', 'd' };
+};
+
+var input_loop_thread: std.Thread = undefined;
 
 pub fn init() void {
-    _ = linux.tcgetattr(0, &original_termios);
-    modified_termios = original_termios;
-    cfmakeraw(&modified_termios);
-    _ = linux.tcsetattr(0, .NOW, &modified_termios);
+    input_loop_thread = std.Thread.spawn(.{}, inputLoop, .{}) catch return;
+    _ = std.io.getStdOut().write("reel: ") catch {};
+}
+
+const help_message =
+    \\h: Display this help message
+    \\q: Quit Reel
+    \\s: Take a screenshot
+    \\ld: List displays
+;
+
+const Command = enum(u8) {
+    screenshot,
+    quit,
+    display_help,
+    display_list,
+    invalid,
+};
+
+var user_command: ?Command = null;
+var commands_mutex: std.Thread.Mutex = .{};
+
+var input_loop_shutdown: bool = false;
+
+fn inputLoop() void {
+    var input_buffer: [512]u8 = undefined;
+    const stdin = std.io.getStdIn();
+    while (!input_loop_shutdown) {
+        const timeout_milliseconds = 10;
+        var pollfd = linux.pollfd{
+            .fd = stdin.handle,
+            .events = linux.POLL.IN,
+            .revents = 0,
+        };
+        const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
+        if (poll_code == 0) {
+            // Poll timed-out, jump back to top of loop and see if we should terminate
+            continue;
+        }
+
+        if (poll_code < 0) {
+            // An error occurred in polling
+            continue;
+        }
+
+        // Input should be available and call to read shouldn't block
+        const bytes_read = stdin.read(&input_buffer) catch 0;
+        if (bytes_read > 1) do_command: {
+            commands_mutex.lock();
+            defer commands_mutex.unlock();
+
+            const input_line = input_buffer[0 .. bytes_read - 1];
+
+            if (std.mem.eql(u8, &bindings.quit, input_line)) {
+                user_command = .quit;
+                break :do_command;
+            }
+
+            if (std.mem.eql(u8, &bindings.screenshot, input_line)) {
+                user_command = .screenshot;
+                break :do_command;
+            }
+
+            if (std.mem.eql(u8, &bindings.help, input_line)) {
+                user_command = .display_help;
+                break :do_command;
+            }
+
+            if (std.mem.eql(u8, &bindings.list_displays, input_line)) {
+                user_command = .display_list;
+                break :do_command;
+            }
+
+            user_command = .invalid;
+        }
+    }
 }
 
 pub fn update() RequestBuffer {
     request_encoder.used = 0;
+    const stdout = std.io.getStdOut();
 
-    const timeout_milliseconds = 4;
-    var pollfd = linux.pollfd{
-        .fd = 0,
-        .events = linux.POLL.IN,
-        .revents = 0,
-    };
-    const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
-    if (poll_code == 0) {
-        //
-        // Timed out
-        //
-        return request_encoder.toRequestBuffer();
-    }
-    if (poll_code < 0) {
-        //
-        // Error occurred
-        //
-        std.log.err("Error in cli poll", .{});
-        return request_encoder.toRequestBuffer();
-    }
+    commands_mutex.lock();
+    defer commands_mutex.unlock();
 
-    var term_char: u8 = 0;
-    const read_code = linux.read(0, @ptrCast([*]u8, &term_char), @sizeOf(@TypeOf(term_char)));
-    if (read_code <= 0) {
-        std.log.err("Error in cli read", .{});
-        return request_encoder.toRequestBuffer();
+    if (user_command) |command| {
+        switch (command) {
+            .screenshot => request_encoder.write(.screenshot_do) catch {},
+            .quit => request_encoder.write(.core_shutdown) catch {},
+            .display_list => {
+                const display_list = app_core.displayList();
+                _ = stdout.write("Display List:\n") catch {};
+                for (display_list, 0..) |display, display_i| {
+                    const index_char = [1]u8{@intCast(u8, display_i) + '0'};
+                    _ = stdout.write("  ") catch {};
+                    _ = stdout.write(&index_char) catch {};
+                    _ = stdout.write(". ") catch {};
+                    _ = stdout.write(display) catch {};
+                    _ = stdout.write("\n") catch {};
+                }
+            },
+            .display_help, .invalid => {
+                _ = stdout.write(help_message) catch {};
+            },
+        }
+        _ = stdout.write("\nreel: ") catch {};
     }
+    user_command = null;
 
-    if (term_char == 'q') {
-        request_encoder.write(.core_shutdown) catch {};
-    }
     return request_encoder.toRequestBuffer();
 }
 
 pub fn deinit() void {
-    _ = linux.tcsetattr(0, .NOW, &original_termios);
-}
-
-// https://linux.die.net/man/3/cfmakeraw
-fn cfmakeraw(termios_p: *termios) void {
-    termios_p.iflag &= ~(linux.IGNBRK | linux.BRKINT | linux.PARMRK | linux.ISTRIP | linux.INLCR | linux.IGNCR | linux.ICRNL | linux.IXON);
-    termios_p.oflag &= ~linux.OPOST;
-    termios_p.lflag &= ~(linux.ECHO | linux.ECHONL | linux.ICANON | linux.ISIG | linux.IEXTEN);
-    termios_p.cflag &= ~(linux.CSIZE | linux.PARENB);
-    termios_p.cflag |= linux.CS8;
+    input_loop_shutdown = true;
+    input_loop_thread.join();
 }

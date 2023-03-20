@@ -28,6 +28,12 @@ pub const RequestBuffer = struct {
     buffer: []u8,
     index: usize,
 
+    //
+    // TODO: Implement readArray, readArraySentinal
+    // Probably better to write size of array, then array contents
+    // Using 0 as terminator would be problamatic
+    //
+
     pub fn next(self: *@This()) ?Request {
         if (self.index == self.buffer.len)
             return null;
@@ -65,14 +71,14 @@ var app_state: State = .uninitialized;
 var screencapture_interface: screencapture.Interface = undefined;
 var ui_interface: user_interface.Interface = undefined;
 
-pub fn init(options: InitOptions) InitError!void {
+pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
         return error.IncorrectState;
 
     std.debug.assert(options.screencapture_order.len != 0);
 
     if (comptime build_options.have_wayland) {
-        wayland_core.init() catch |err| {
+        wayland_core.init(allocator) catch |err| {
             log.err("Failed to initialize Wayland. Error: {}", .{err});
             return error.WaylandInitFail;
         };
@@ -102,23 +108,22 @@ pub fn init(options: InitOptions) InitError!void {
 
 pub fn run() !void {
     const input_fps = 120;
-    const target_runtime_ns = std.time.ns_per_s * 2;
+    const target_runtime_ns = std.time.ns_per_s * 8;
     const ns_per_frame = @divFloor(std.time.ns_per_s, input_fps);
     var runtime_ns: u64 = 0;
-
-    screencapture_interface.screenshot("screenshot.png");
 
     while (runtime_ns <= target_runtime_ns) {
         var frame_start = std.time.nanoTimestamp();
         _ = wayland_core.sync();
 
         var request_buffer = ui_interface.update();
-        while(request_buffer.next()) |request| {
-            switch(request) {
+        while (request_buffer.next()) |request| {
+            switch (request) {
                 .core_shutdown => {
                     std.log.info("core: shutdown request", .{});
                     return;
                 },
+                .screenshot_do => screencapture_interface.screenshot("screenshot.png"),
                 else => std.log.err("Invalid core request", .{}),
             }
         }
@@ -140,6 +145,13 @@ pub fn deinit() void {
 
     log.info("Shutting down app core", .{});
     std.time.sleep(std.time.ns_per_s * 1);
+}
+
+pub fn displayList() [][]const u8 {
+    if (comptime build_options.have_wayland) {
+        return wayland_core.display_list.items;
+    }
+    unreachable;
 }
 
 fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
