@@ -13,10 +13,13 @@ const backend_cli = @import("user_interface_backends/cli.zig");
 const backend_wayland = if (build_options.have_wayland) @import("user_interface_backends/wayland.zig") else void;
 
 pub const Backend = GenerateBackendEnum();
+ 
+pub const InitError = backend_wayland.InitError || backend_cli.InitError || backend_headless.InitError;
+pub const UpdateError = backend_wayland.UpdateError || backend_cli.UpdateError || backend_headless.UpdateError;
 
-pub const InitFn = *const fn () void;
+pub const InitFn = *const fn (allocator: std.mem.Allocator) InitError!void;
 pub const DeinitFn = *const fn () void;
-pub const UpdateFn = *const fn () RequestBuffer;
+pub const UpdateFn = *const fn () UpdateError!RequestBuffer;
 
 pub const Interface = struct {
     init: InitFn,

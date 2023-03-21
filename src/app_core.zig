@@ -43,11 +43,21 @@ pub const RequestBuffer = struct {
     }
 
     pub fn readParam(self: *@This(), comptime T: type) !T {
+        const alignment = @alignOf(T);
+        const misaligment = self.index % alignment;
+        if (misaligment > 0) {
+            std.debug.assert(misaligment < alignment);
+            const padding_required = alignment - misaligment;
+            std.debug.assert(padding_required < alignment);
+            self.index += padding_required;
+            std.debug.assert(self.index % alignment == 0);
+        }
+
         const bytes_to_read = @sizeOf(T);
         if (self.index + bytes_to_read > self.buffer.len)
             return error.EndOfBuffer;
         defer self.index += bytes_to_read;
-        return @ptrCast(*T, &self.buffer[self.index]).*;
+        return @ptrCast(*T, @alignCast(alignment, &self.buffer[self.index])).*;
     }
 };
 
@@ -65,7 +75,12 @@ const State = enum {
     closed,
 };
 
-pub const InitError = error{ IncorrectState, WaylandInitFail, NoScreencaptureBackend };
+pub const InitError = error{
+    IncorrectState,
+    WaylandInitFail,
+    NoScreencaptureBackend,
+    UserInterfaceInitFail,
+};
 
 var app_state: State = .uninitialized;
 var screencapture_interface: screencapture.Interface = undefined;
@@ -103,7 +118,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     _ = wayland_core.sync();
 
     ui_interface = user_interface.interface(options.ui_backend);
-    ui_interface.init();
+    ui_interface.init(allocator) catch return error.UserInterfaceInitFail;
 }
 
 pub fn run() !void {
@@ -116,7 +131,10 @@ pub fn run() !void {
         var frame_start = std.time.nanoTimestamp();
         _ = wayland_core.sync();
 
-        var request_buffer = ui_interface.update();
+        var request_buffer = ui_interface.update() catch |err| {
+            std.log.err("Runtime User Interface error. {}", .{err});
+            return;
+        };
         while (request_buffer.next()) |request| {
             switch (request) {
                 .core_shutdown => {
@@ -124,6 +142,11 @@ pub fn run() !void {
                     return;
                 },
                 .screenshot_do => screencapture_interface.screenshot("screenshot.png"),
+                .screenshot_display_set => {
+                    const display_index = request_buffer.readParam(u16) catch 0;
+                    const display_list = displayList();
+                    std.log.info("Screenshot display set to: {s}", .{display_list[display_index]});
+                },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
@@ -142,9 +165,7 @@ pub fn deinit() void {
     if (comptime build_options.have_wayland) wayland_core.deinit();
 
     ui_interface.deinit();
-
     log.info("Shutting down app core", .{});
-    std.time.sleep(std.time.ns_per_s * 1);
 }
 
 pub fn displayList() [][]const u8 {

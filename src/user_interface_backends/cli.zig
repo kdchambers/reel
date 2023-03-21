@@ -10,41 +10,50 @@ const Request = app_core.Request;
 
 const RequestEncoder = @import("../RequestEncoder.zig");
 
-var request_encoder: RequestEncoder = .{};
-
-const bindings = struct {
-    const quit = [_]u8{'q'};
-    const screenshot = [_]u8{'s'};
-    const help = [_]u8{'h'};
-    const list_displays = [_]u8{ 'l', 'd' };
-};
-
-var input_loop_thread: std.Thread = undefined;
-
-pub fn init() void {
-    input_loop_thread = std.Thread.spawn(.{}, inputLoop, .{}) catch return;
-    _ = std.io.getStdOut().write("reel: ") catch {};
-}
-
-const help_message =
-    \\h: Display this help message
-    \\q: Quit Reel
-    \\s: Take a screenshot
-    \\ld: List displays
-;
-
 const Command = enum(u8) {
     screenshot,
+    screenshot_display_set,
     quit,
     display_help,
     display_list,
     invalid,
 };
 
+var request_encoder: RequestEncoder = .{};
+
+const bindings = struct {
+    const quit = [_]u8{'q'};
+    const screenshot = [_]u8{'s'};
+    const help = [_]u8{'h'};
+    const screenshot_display_set = [_]u8{'s', 'd', 's'};
+    const list_displays = [_]u8{ 'l', 'd' };
+};
+
+const help_message =
+    \\h: Display this help message
+    \\q: Quit Reel
+    \\s: Take a screenshot
+    \\ld: List displays
+    \\sds: Set screenshot display
+;
+
+var input_loop_thread: std.Thread = undefined;
 var user_command: ?Command = null;
 var commands_mutex: std.Thread.Mutex = .{};
-
 var input_loop_shutdown: bool = false;
+
+pub const InitError = error {};
+pub const UpdateError = error {};
+
+//
+// TODO: Update interface to allow init to return errors
+//
+pub fn init(_: std.mem.Allocator) InitError!void {
+    input_loop_thread = std.Thread.spawn(.{}, inputLoop, .{}) catch return;
+    _ = std.io.getStdOut().write("reel: ") catch {};
+}
+
+var screenshot_display_index: u8 = 0;
 
 fn inputLoop() void {
     var input_buffer: [512]u8 = undefined;
@@ -69,7 +78,7 @@ fn inputLoop() void {
 
         // Input should be available and call to read shouldn't block
         const bytes_read = stdin.read(&input_buffer) catch 0;
-        if (bytes_read > 1) do_command: {
+        if (bytes_read > 1) process_line: {
             commands_mutex.lock();
             defer commands_mutex.unlock();
 
@@ -77,22 +86,28 @@ fn inputLoop() void {
 
             if (std.mem.eql(u8, &bindings.quit, input_line)) {
                 user_command = .quit;
-                break :do_command;
+                break :process_line;
             }
 
             if (std.mem.eql(u8, &bindings.screenshot, input_line)) {
                 user_command = .screenshot;
-                break :do_command;
+                break :process_line;
             }
 
             if (std.mem.eql(u8, &bindings.help, input_line)) {
                 user_command = .display_help;
-                break :do_command;
+                break :process_line;
             }
 
             if (std.mem.eql(u8, &bindings.list_displays, input_line)) {
                 user_command = .display_list;
-                break :do_command;
+                break :process_line;
+            }
+
+            if(input_line.len == 5 and std.mem.eql(u8, &bindings.screenshot_display_set, input_line[0..3])) {
+                screenshot_display_index = input_line[4] - '0';
+                user_command = .screenshot_display_set;
+                break :process_line;
             }
 
             user_command = .invalid;
@@ -100,7 +115,7 @@ fn inputLoop() void {
     }
 }
 
-pub fn update() RequestBuffer {
+pub fn update() UpdateError!RequestBuffer {
     request_encoder.used = 0;
     const stdout = std.io.getStdOut();
 
@@ -110,6 +125,10 @@ pub fn update() RequestBuffer {
     if (user_command) |command| {
         switch (command) {
             .screenshot => request_encoder.write(.screenshot_do) catch {},
+            .screenshot_display_set => {
+                request_encoder.write(.screenshot_display_set) catch {};
+                request_encoder.writeParam(u16, screenshot_display_index) catch {};
+            },
             .quit => request_encoder.write(.core_shutdown) catch {},
             .display_list => {
                 const display_list = app_core.displayList();
