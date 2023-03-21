@@ -5,7 +5,7 @@ const std = @import("std");
 const log = std.log;
 const screencapture = @import("screencast.zig");
 const build_options = @import("build_options");
-const user_interface = @import("user_interface.zig");
+const frontend = @import("frontend.zig");
 
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
@@ -65,7 +65,7 @@ pub const ScreenCaptureBackend = screencapture.Backend;
 
 pub const InitOptions = struct {
     screencapture_order: []const ScreenCaptureBackend,
-    ui_backend: user_interface.Backend,
+    frontend: frontend.InterfaceImplTag,
 };
 
 const State = enum {
@@ -79,12 +79,12 @@ pub const InitError = error{
     IncorrectState,
     WaylandInitFail,
     NoScreencaptureBackend,
-    UserInterfaceInitFail,
+    FrontendInitFail,
 };
 
 var app_state: State = .uninitialized;
 var screencapture_interface: screencapture.Interface = undefined;
-var ui_interface: user_interface.Interface = undefined;
+var frontend_interface: frontend.Interface = undefined;
 
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
@@ -117,8 +117,8 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 
     _ = wayland_core.sync();
 
-    ui_interface = user_interface.interface(options.ui_backend);
-    ui_interface.init(allocator) catch return error.UserInterfaceInitFail;
+    frontend_interface = frontend.interface(options.frontend);
+    frontend_interface.init(allocator) catch return error.FrontendInitFail;
 }
 
 pub fn run() !void {
@@ -131,7 +131,7 @@ pub fn run() !void {
         var frame_start = std.time.nanoTimestamp();
         _ = wayland_core.sync();
 
-        var request_buffer = ui_interface.update() catch |err| {
+        var request_buffer = frontend_interface.update() catch |err| {
             std.log.err("Runtime User Interface error. {}", .{err});
             return;
         };
@@ -164,7 +164,7 @@ pub fn run() !void {
 pub fn deinit() void {
     if (comptime build_options.have_wayland) wayland_core.deinit();
 
-    ui_interface.deinit();
+    frontend_interface.deinit();
     log.info("Shutting down app core", .{});
 }
 
