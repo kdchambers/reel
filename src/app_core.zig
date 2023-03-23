@@ -6,6 +6,7 @@ const log = std.log;
 const screencapture = @import("screencast.zig");
 const build_options = @import("build_options");
 const frontend = @import("frontend.zig");
+const Model = @import("Model.zig");
 
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
@@ -86,6 +87,21 @@ var app_state: State = .uninitialized;
 var screencapture_interface: screencapture.Interface = undefined;
 var frontend_interface: frontend.Interface = undefined;
 
+var model: Model = .{
+    .audio_input_samples = undefined,
+    .audio_input_volume_db = -9.0,
+    .desktop_capture_frame = null,
+    .recording_context = .{
+        .format = .mp4,
+        .quality = .low,
+        .start = 0,
+        .duration = 0,
+        .video_streams = undefined,
+        .audio_streams = undefined,
+        .start = .idle,
+    };
+};
+
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
         return error.IncorrectState;
@@ -131,7 +147,7 @@ pub fn run() !void {
         var frame_start = std.time.nanoTimestamp();
         _ = wayland_core.sync();
 
-        var request_buffer = frontend_interface.update() catch |err| {
+        var request_buffer = frontend_interface.update(&model) catch |err| {
             std.log.err("Runtime User Interface error. {}", .{err});
             return;
         };
