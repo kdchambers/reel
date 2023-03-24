@@ -7,10 +7,17 @@ const screencapture = @import("screencast.zig");
 const build_options = @import("build_options");
 const frontend = @import("frontend.zig");
 const Model = @import("Model.zig");
+const zmath = @import("zmath");
+
+const audio_input = @import("audio.zig");
+var audio_input_interface: audio_input.Interface = undefined;
 
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
 pub const Request = enum(u8) {
+    //
+    // TODO: Probably app_ is better than core_ ?
+    //
     core_shutdown,
 
     record_start,
@@ -81,6 +88,8 @@ pub const InitError = error{
     WaylandInitFail,
     NoScreencaptureBackend,
     FrontendInitFail,
+    AudioInputInitFail,
+    OutOfMemory,
 };
 
 var app_state: State = .uninitialized;
@@ -98,9 +107,11 @@ var model: Model = .{
         .duration = 0,
         .video_streams = undefined,
         .audio_streams = undefined,
-        .start = .idle,
-    };
+        .state = .idle,
+    },
 };
+
+var model_mutex: std.Thread.Mutex = .{};
 
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
@@ -135,11 +146,23 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 
     frontend_interface = frontend.interface(options.frontend);
     frontend_interface.init(allocator) catch return error.FrontendInitFail;
+
+    //
+    // TODO: Don't hardcode number of samples
+    //
+    model.audio_input_samples = allocator.alloc(i16, 3000) catch return error.OutOfMemory;
+
+    audio_input_interface = audio_input.createBestInterface(&onAudioInputRead);
+
+    audio_input_interface.init(
+        &handleAudioInputInitSuccess,
+        &handleAudioInputInitFail,
+    ) catch return error.AudioInputInitFail;
 }
 
 pub fn run() !void {
     const input_fps = 120;
-    const target_runtime_ns = std.time.ns_per_s * 8;
+    const target_runtime_ns = std.time.ns_per_s * 30;
     const ns_per_frame = @divFloor(std.time.ns_per_s, input_fps);
     var runtime_ns: u64 = 0;
 
@@ -147,10 +170,13 @@ pub fn run() !void {
         var frame_start = std.time.nanoTimestamp();
         _ = wayland_core.sync();
 
+        model_mutex.lock();
         var request_buffer = frontend_interface.update(&model) catch |err| {
             std.log.err("Runtime User Interface error. {}", .{err});
             return;
         };
+        model_mutex.unlock();
+
         while (request_buffer.next()) |request| {
             switch (request) {
                 .core_shutdown => {
@@ -178,9 +204,11 @@ pub fn run() !void {
 }
 
 pub fn deinit() void {
-    if (comptime build_options.have_wayland) wayland_core.deinit();
+    audio_input_interface.close();
 
     frontend_interface.deinit();
+    if (comptime build_options.have_wayland) wayland_core.deinit();
+
     log.info("Shutting down app core", .{});
 }
 
@@ -194,4 +222,36 @@ pub fn displayList() [][]const u8 {
 fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
     _ = pixels;
     log.info("width {d}, height {d}", .{ width, height });
+}
+
+/// NOTE: This will be called on a separate thread
+pub fn onAudioInputRead(pcm_buffer: []i16) void {
+    model_mutex.lock();
+    defer model_mutex.unlock();
+    std.mem.copy(i16, model.audio_input_samples.?, pcm_buffer);
+}
+
+fn handleAudioInputInitSuccess() void {
+    std.log.info("audio input system initialized", .{});
+    audio_input_interface.open(
+        // devices[0].name,
+        null,
+        &handleAudioInputOpenSuccess,
+        &handleAudioInputOpenFail,
+    ) catch |err| {
+        std.log.err("audio_input: Failed to connect to device. Error: {}", .{err});
+    };
+    // audio_input_interface.inputList(general_allocator, handleAudioDeviceInputsList);
+}
+
+fn handleAudioInputInitFail(err: audio_input.InitError) void {
+    std.log.err("Failed to initialize audio input system. Error: {}", .{err});
+}
+
+fn handleAudioInputOpenSuccess() void {
+    std.log.info("Audio input stream opened", .{});
+}
+
+fn handleAudioInputOpenFail(err: audio_input.OpenError) void {
+    std.log.err("Failed to open audio input device. Error: {}", .{err});
 }

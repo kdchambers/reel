@@ -59,7 +59,7 @@ pub const VideoFrame = struct {
 // This defines all state that is relevant to the user interface
 //
 
-audio_input_samples: []f32,
+audio_input_samples: ?[]i16,
 audio_input_volume_db: f32,
 desktop_capture_frame: ?VideoFrame,
 recording_context: RecordingContext,
