@@ -4,6 +4,8 @@
 const std = @import("std");
 const linux = std.os.linux;
 
+const Model = @import("../Model.zig");
+
 const app_core = @import("../app_core.zig");
 const RequestBuffer = app_core.RequestBuffer;
 const Request = app_core.Request;
@@ -25,7 +27,7 @@ const bindings = struct {
     const quit = [_]u8{'q'};
     const screenshot = [_]u8{'s'};
     const help = [_]u8{'h'};
-    const screenshot_display_set = [_]u8{'s', 'd', 's'};
+    const screenshot_display_set = [_]u8{ 's', 'd', 's' };
     const list_displays = [_]u8{ 'l', 'd' };
 };
 
@@ -42,8 +44,8 @@ var user_command: ?Command = null;
 var commands_mutex: std.Thread.Mutex = .{};
 var input_loop_shutdown: bool = false;
 
-pub const InitError = error {};
-pub const UpdateError = error {};
+pub const InitError = error{};
+pub const UpdateError = error{};
 
 //
 // TODO: Update interface to allow init to return errors
@@ -104,7 +106,7 @@ fn inputLoop() void {
                 break :process_line;
             }
 
-            if(input_line.len == 5 and std.mem.eql(u8, &bindings.screenshot_display_set, input_line[0..3])) {
+            if (input_line.len == 5 and std.mem.eql(u8, &bindings.screenshot_display_set, input_line[0..3])) {
                 screenshot_display_index = input_line[4] - '0';
                 user_command = .screenshot_display_set;
                 break :process_line;
@@ -115,7 +117,7 @@ fn inputLoop() void {
     }
 }
 
-pub fn update() UpdateError!RequestBuffer {
+pub fn update(_: *const Model) UpdateError!RequestBuffer {
     request_encoder.used = 0;
     const stdout = std.io.getStdOut();
 

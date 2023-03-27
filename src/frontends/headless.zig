@@ -3,17 +3,19 @@
 
 const std = @import("std");
 
+const Model = @import("../Model.zig");
+
 const app_core = @import("../app_core.zig");
 const RequestBuffer = app_core.RequestBuffer;
 
-pub const InitError = error {};
-pub const UpdateError = error {};
+pub const InitError = error{};
+pub const UpdateError = error{};
 
 pub fn init(_: std.mem.Allocator) InitError!void {
     std.log.info("headless init", .{});
 }
 
-pub fn update() UpdateError!RequestBuffer {
+pub fn update(_: *const Model) UpdateError!RequestBuffer {
     std.log.info("headless update", .{});
     return .{
         .buffer = undefined,

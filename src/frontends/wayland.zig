@@ -3,17 +3,10 @@
 
 const std = @import("std");
 
-const frontend = @import("../frontend.zig");
-const ScreenExtent = frontend.ScreenExtent;
-const ScreenPoint = frontend.ScreenPoint;
-const ScreenLength = frontend.ScreenLength;
-
-const side_left = frontend.side_left;
-const side_right = frontend.side_right;
-const side_top = frontend.side_top;
-const side_bottom = frontend.side_bottom;
-const width_full = frontend.width_full;
-const height_full = frontend.height_full;
+const Model = @import("../Model.zig");
+const UIState = @import("wayland/UIState.zig");
+const audio_utils = @import("wayland/audio.zig");
+const zmath = @import("zmath");
 
 const wayland_core = @import("../wayland_core.zig");
 const wayland = @import("wayland");
@@ -30,6 +23,8 @@ var xdg_toplevel: *xdg.Toplevel = undefined;
 var xdg_surface: *xdg.Surface = undefined;
 var surface: *wl.Surface = undefined;
 
+const layout_medium = @import("wayland/layouts/desktop_medium.zig");
+
 const geometry = @import("../geometry.zig");
 const Extent2D = geometry.Extent2D;
 const Coordinates2D = geometry.Coordinates2D;
@@ -43,11 +38,11 @@ const Font = fontana.Font(.{
         .Extent2DPixel = Extent2D(u32),
         .Extent2DNative = Extent2D(f32),
         .Coordinates2DNative = Coordinates2D(f32),
-        .Scale2D = ScaleFactor2D(f64),
+        .Scale2D = ScaleFactor2D(f32),
     },
 });
 
-const event_system = @import("../event_system.zig");
+const event_system = @import("wayland/event_system.zig");
 const audio = @import("../audio.zig");
 
 const graphics = @import("../graphics.zig");
@@ -61,10 +56,9 @@ const renderer = @import("../vulkan_renderer.zig");
 // TODO: eww
 const texture_layer_dimensions = renderer.texture_layer_dimensions;
 
-// TODO: Move widgets into wayland folder
-const widget = @import("../widgets.zig");
-const Button = widget.Button;
-const Checkbox = widget.Checkbox;
+const widgets = @import("wayland/widgets.zig");
+const Button = widgets.Button;
+const Checkbox = widgets.Checkbox;
 
 const application_name = "reel";
 const background_color = RGBA.fromInt(90, 90, 90, 255);
@@ -74,6 +68,8 @@ const RequestBuffer = app_core.RequestBuffer;
 const Request = app_core.Request;
 
 const RequestEncoder = @import("../RequestEncoder.zig");
+
+var ui_state: UIState = undefined;
 
 const TextWriterInterface = struct {
     quad_writer: *FaceWriter,
@@ -85,25 +81,6 @@ const TextWriterInterface = struct {
         (try self.quad_writer.create(QuadFace)).* = graphics.quadTextured(
             screen_extent,
             texture_extent,
-            .bottom_left,
-        );
-    }
-};
-
-const information_bar = struct {
-    const height_pixels = ScreenLength{ .pixel = 30 };
-    const background_color = RGB.fromInt(50, 50, 50);
-
-    pub fn draw() !void {
-        const extent = ScreenExtent{
-            .x = side_left,
-            .y = side_bottom,
-            .width = width_full,
-            .height = height_pixels,
-        };
-        (try face_writer.create(QuadFace)).* = graphics.quadColored(
-            extent.toNative(screen_scale),
-            information_bar.background_color.toRGBA(),
             .bottom_left,
         );
     }
@@ -129,7 +106,7 @@ const XCursor = struct {
 /// clicked one of these will be sent with the event.
 /// https://wayland-book.com/seat/pointer.html
 /// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
-pub const MouseButton = enum(c_int) {
+pub const MouseButton = enum(i32) {
     left = 0x110,
     right = 0x111,
     middle = 0x112,
@@ -143,7 +120,7 @@ pub const ButtonClicked = enum(u16) {
     left,
 };
 
-var face_writer: FaceWriter = undefined;
+pub var face_writer: FaceWriter = undefined;
 
 var is_draw_required: bool = true;
 var is_render_requested: bool = true;
@@ -158,10 +135,6 @@ var is_record_requested: bool = true;
 var record_button_color_normal = RGBA{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1.0 };
 var record_button_color_hover = RGBA{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
 
-//
-// Text Rendering
-//
-
 var texture_atlas: Atlas = undefined;
 var font: Font = undefined;
 
@@ -169,96 +142,12 @@ const pen_options = fontana.PenOptions{
     .pixel_format = .r32g32b32a32,
     .PixelType = RGBA,
 };
-var pen: Font.PenConfig(pen_options) = undefined;
+pub var pen: Font.PenConfig(pen_options) = undefined;
 
 const asset_path_font = "assets/Roboto-Regular.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 
-// const record_button = struct {
-//     internal: Button,
-//     color: RGB.fromInt(50, 50, 50),
-//     color_hovered: RGB.fromInt(70, 70, 70),
-
-//     const Event = enum {
-//         is_clicked,
-//     };
-
-//     pub inline fn update(self: *@This()) void {
-//         const state = record_button.state();
-//         if (state.hover_enter) {
-//             self.internal.setColor(self.color_hovered);
-//             is_render_requested = true;
-//         }
-//         if (state.hover_exit) {
-//             self.internal.setColor(self.color);
-//             is_render_requested = true;
-//         }
-
-//         while (record_button.update()) |event| {
-//             switch (event) {
-//                 .left_click_release => {
-//                     switch (video_stream_state) {
-//                         .is_streaming => stream.stop(),
-//                         .idle => stream.start(),
-//                     }
-//                 },
-//             }
-//         }
-//     }
-// };
-
-var record_button_opt: ?Button = null;
-var enable_preview_checkbox: ?Checkbox = null;
 var gpu_texture_mutex: std.Thread.Mutex = undefined;
-
-// const StreamState = enum(u8) {
-//     idle,
-//     preview,
-//     record,
-//     record_preview,
-// };
-
-// var stream_state: StreamState = .idle;
-// var video_stream_frame_index: u32 = 0;
-// var audio_input_interface: audio.Interface = undefined;
-// var audio_volume_level_widget: widget.AudioVolumeLevelHorizontal = undefined;
-
-// var audio_callback_count: usize = 0;
-
-// const bin_count = 256;
-
-// var audio_power_table_mutex: std.Thread.Mutex = .{};
-// var audio_power_table = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (bin_count / 8);
-
-// const decibel_range_lower = -7.0;
-
-// const hamming_table: [bin_count]f32 = audio.calculateHammingWindowTable(bin_count);
-// var audio_spectogram_bins = [1]f32{0.00000000001} ** audio_visual_bin_count;
-// var audio_input_quads: ?[]graphics.QuadFace = null;
-// const audio_visual_bin_count = 64;
-// const reference_max_audio: f32 = 128.0 * 4.0;
-
-// var unity_table: [bin_count]zmath.F32x4 = undefined;
-// const sample_rate = 44100;
-// const freq_resolution: f32 = sample_rate / bin_count;
-
-// const mel_table: [audio_visual_bin_count]f32 = audio.generateMelTable(audio_visual_bin_count, freq_resolution);
-// const mel_upper: f32 = audio.melScale(freq_resolution * (bin_count / 2.0));
-
-// const freq_to_mel_table: [bin_count / 2]f32 = audio.calculateFreqToMelTable(bin_count / 2, freq_resolution);
-// const filter_spread: f32 = 4.0;
-
-// var audio_sample_ring_buffer: audio.SampleRingBuffer(f32, 2048, 20) = .{};
-
-// const preview_background_color = graphics.RGB(f32).fromInt(120, 120, 120);
-// const preview_background_color_recording = graphics.RGB(f32).fromInt(120, 20, 20);
-
-// var audio_input_device_list_opt: ?[]audio.InputDeviceInfo = null;
-
-//
-// TODO: This is kind of hacky
-//
-// var audio_frame_buffer: [3]*[2048]f32 = undefined;
 
 pub var previous_mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
 pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
@@ -286,6 +175,7 @@ var is_draw_requested: bool = true;
 var is_shutdown_requested: bool = false;
 
 var allocator_ref: std.mem.Allocator = undefined;
+var request_encoder: RequestEncoder = .{};
 
 pub const InitError = error{
     FontInitFail,
@@ -296,41 +186,10 @@ pub const InitError = error{
     FontPenInitFail,
     AudioInputInitFail,
     TextureAtlasInitFail,
+    OutOfMemory,
 };
 
 pub const UpdateError = error{ VulkanRendererRenderFrameFail, UserInterfaceDrawFail };
-
-fn initWaylandClient() !void {
-    surface = try wayland_core.compositor.createSurface();
-
-    xdg_surface = try wayland_core.xdg_wm_base.getXdgSurface(surface);
-    xdg_surface.setListener(*wl.Surface, xdgSurfaceListener, surface);
-
-    xdg_toplevel = try xdg_surface.getToplevel();
-    xdg_toplevel.setListener(*bool, xdgToplevelListener, &is_shutdown_requested);
-
-    frame_callback = try surface.frame();
-    frame_callback.setListener(*const void, frameListener, &{});
-
-    wayland_core.pointer.setListener(*const void, pointerListener, &{});
-
-    // TODO: Don't hardcode
-    xdg_toplevel.setTitle("reel");
-    surface.commit();
-
-    if (wayland_core.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
-
-    //
-    // Load cursor theme
-    //
-
-    cursor_surface = try wayland_core.compositor.createSurface();
-
-    const cursor_size = 24;
-    cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_core.shared_memory);
-    cursor = cursor_theme.getCursor(XCursor.left_ptr).?;
-    xcursor = XCursor.left_ptr;
-}
 
 pub fn init(allocator: std.mem.Allocator) !void {
     std.log.info("wayland init", .{});
@@ -385,7 +244,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     face_writer = renderer.faceWriter();
 
-    widget.init(
+    widgets.init(
         &face_writer,
         face_writer.vertices,
         &mouse_coordinates,
@@ -393,24 +252,154 @@ pub fn init(allocator: std.mem.Allocator) !void {
         &is_mouse_in_screen,
     );
 
-    // audio_input_interface = audio.createBestInterface(&onAudioInputRead);
+    ui_state.record_button = Button.create();
+    ui_state.enable_preview_checkbox = try Checkbox.create();
 
-    // audio_input_interface.init(
-    //     &handleAudioInputInitSuccess,
-    //     &handleAudioInputInitFail,
-    // ) catch return error.AudioInputInitFail;
+    //
+    // TODO: Don't hardcode bin count
+    //
+    ui_state.audio_input_mel_bins = allocator.alloc(f32, 64) catch return error.OutOfMemory;
+    zmath.fftInitUnityTable(&audio_utils.unity_table);
+}
 
-    // screencast_interface = screencast.createBestInterface(
-    //     writeScreencastPixelBufferCallback,
-    // ) orelse std.log.warn("No screencast backends detected", .{});
+pub fn update(model: *const Model) UpdateError!RequestBuffer {
+    request_encoder.used = 0;
 
-    // button_close.init();
+    if (is_shutdown_requested) {
+        request_encoder.write(.core_shutdown) catch unreachable;
+        return request_encoder.toRequestBuffer();
+    }
+
+    if (framebuffer_resized) {
+        std.log.info("Recreate swapchain", .{});
+        framebuffer_resized = false;
+        renderer.recreateSwapchain(screen_dimensions) catch |err| {
+            std.log.err("Failed to recreate swapchain. Error: {}", .{err});
+        };
+        is_draw_required = true;
+    }
+
+    {
+        const state = ui_state.record_button.state();
+        if (state.hover_enter) {
+            ui_state.record_button.setColor(record_button_color_hover);
+            is_render_requested = true;
+        }
+        if (state.hover_exit) {
+            ui_state.record_button.setColor(record_button_color_normal);
+            is_render_requested = true;
+        }
+    }
+
+    const mouse_position = mouseCoordinatesNDCR();
+    //
+    // TODO: This is silly. Why can't I just pass button_clicked directly?
+    //
+    switch (button_clicked) {
+        .left => event_system.handleMouseClick(&mouse_position, .left, button_state),
+        .right => event_system.handleMouseClick(&mouse_position, .right, button_state),
+        .middle => event_system.handleMouseClick(&mouse_position, .middle, button_state),
+        else => {},
+    }
+
+    if (is_mouse_moved) {
+        is_mouse_moved = false;
+        event_system.handleMouseMovement(&mouse_position);
+    }
+
+    if (is_draw_required) {
+        is_draw_required = false;
+
+        face_writer.reset();
+        //
+        // Switch here based on screen dimensions
+        //
+        layout_medium.draw(
+            model,
+            &ui_state,
+            screen_scale,
+            &pen,
+            &face_writer,
+        ) catch return error.UserInterfaceDrawFail;
+
+        is_record_requested = true;
+    } else {
+        //
+        // Redraw not required, but update widgets
+        //
+        if (model.audio_input_samples) |audio_input_samples| {
+            const audio_power_spectrum = audio_utils.samplesToPowerSpectrum(audio_input_samples);
+            const mel_scaled_bins = audio_utils.powerSpectrumToMelScale(audio_power_spectrum, 64);
+            ui_state.audio_input_spectogram.update(mel_scaled_bins, screen_scale) catch unreachable;
+
+            const volume_dbs = audio_utils.powerSpectrumToVolumeDb(audio_power_spectrum);
+            ui_state.audio_volume_level.setDecibelLevel(volume_dbs);
+
+            is_render_requested = true;
+        }
+    }
+
+    if (is_record_requested) {
+        is_record_requested = false;
+        std.log.info("Record render pass", .{});
+        std.debug.assert(face_writer.indices_used > 0);
+        renderer.recordRenderPass(face_writer.indices_used, screen_dimensions) catch |err| {
+            std.log.err("app: Failed to record renderpass command buffers: Error: {}", .{err});
+        };
+        is_render_requested = true;
+    }
+
+    if (pending_swapchain_images_count > 0) {
+        if (is_render_requested) {
+            is_render_requested = false;
+            pending_swapchain_images_count -= 1;
+
+            gpu_texture_mutex.lock();
+            defer gpu_texture_mutex.unlock();
+            renderer.renderFrame(screen_dimensions) catch return error.VulkanRendererRenderFrameFail;
+        }
+    }
+
+    return request_encoder.toRequestBuffer();
+}
+
+pub fn deinit() void {
+    std.log.info("wayland deinit", .{});
+}
+
+fn initWaylandClient() !void {
+    surface = try wayland_core.compositor.createSurface();
+
+    xdg_surface = try wayland_core.xdg_wm_base.getXdgSurface(surface);
+    xdg_surface.setListener(*wl.Surface, xdgSurfaceListener, surface);
+
+    xdg_toplevel = try xdg_surface.getToplevel();
+    xdg_toplevel.setListener(*bool, xdgToplevelListener, &is_shutdown_requested);
+
+    frame_callback = try surface.frame();
+    frame_callback.setListener(*const void, frameListener, &{});
+
+    wayland_core.pointer.setListener(*const void, pointerListener, &{});
+
+    // TODO: Don't hardcode
+    xdg_toplevel.setTitle("reel");
+    surface.commit();
+
+    if (wayland_core.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
+
+    //
+    // Load cursor theme
+    //
+
+    cursor_surface = try wayland_core.compositor.createSurface();
+
+    const cursor_size = 24;
+    cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_core.shared_memory);
+    cursor = cursor_theme.getCursor(XCursor.left_ptr).?;
+    xcursor = XCursor.left_ptr;
 }
 
 fn drawPreviewEnableCheckbox() !void {
-    if (enable_preview_checkbox == null)
-        enable_preview_checkbox = try Checkbox.create();
-
     const preview_margin_left: f64 = 20.0 * screen_scale.horizontal;
     const checkbox_radius_pixels = 11;
     const checkbox_width = checkbox_radius_pixels * screen_scale.horizontal * 2;
@@ -420,7 +409,7 @@ fn drawPreviewEnableCheckbox() !void {
         .y = 0.5 + y_offset,
     };
     const is_set = true; // (stream_state == .preview or stream_state == .record_preview);
-    try enable_preview_checkbox.?.draw(
+    try ui_state.enable_preview_checkbox.draw(
         center,
         checkbox_radius_pixels,
         screen_scale,
@@ -448,157 +437,6 @@ fn drawPreviewEnableCheckbox() !void {
         // screen_scale,
         &text_writer_interface,
     );
-}
-
-fn drawRecordControls() !void {
-    const width_pixels: f32 = 500;
-    const height_pixels: f32 = 200;
-    const margin_right_pixels: f32 = 15;
-    const margin_bottom_pixels: f32 = information_bar.height_pixels + 15;
-    const border_color = RGBA.fromInt(155, 155, 155, 255);
-    const border_width: f32 = 1 * screen_scale.horizontal;
-    const extent = Extent2D(f32){
-        .x = 1.0 - @floatCast(f32, (width_pixels + margin_right_pixels) * screen_scale.horizontal),
-        .y = 1.0 - @floatCast(f32, margin_bottom_pixels * screen_scale.vertical),
-        .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
-        .height = @floatCast(f32, height_pixels * screen_scale.vertical),
-    };
-
-    try widget.Section.draw(
-        extent,
-        "Controls",
-        screen_scale,
-        &pen,
-        border_color,
-        border_width,
-    );
-}
-
-fn drawRecordButton() !void {
-    if (record_button_opt == null) {
-        record_button_opt = try Button.create();
-    }
-
-    if (record_button_opt) |*record_button| {
-        const right_margin_pixels: f32 = 25;
-        const bottom_margin_pixels: f32 = 25 + information_bar.height_pixels;
-        const width_pixels: f32 = 120;
-        //
-        // Even height values are causing text distortion
-        // https://github.com/kdchambers/reel/issues/11
-        //
-        const height_pixels: f32 = 31;
-        const extent = Extent2D(f32){
-            .x = 1.0 - @floatCast(f32, (right_margin_pixels + width_pixels) * screen_scale.horizontal),
-            .y = 1.0 - @floatCast(f32, bottom_margin_pixels * screen_scale.vertical),
-            .width = @floatCast(f32, width_pixels * screen_scale.horizontal),
-            .height = @floatCast(f32, height_pixels * screen_scale.vertical),
-        };
-        try record_button.draw(
-            extent,
-            record_button_color_normal,
-            "Record",
-            // if (video_encoder.state == .encoding) "Stop" else "Record",
-            &pen,
-            screen_scale,
-            .{ .rounding_radius = null },
-        );
-    }
-}
-
-fn drawBackground() !void {
-    const extent = Extent2D(f32){
-        .x = -1.0,
-        .y = 1.0,
-        .width = 2.0,
-        .height = 2.0,
-    };
-    (try face_writer.create(QuadFace)).* = graphics.quadColored(extent, background_color.toRGBA(), .top_left);
-}
-
-fn draw() !void {
-    face_writer.reset();
-    try information_bar.draw();
-    try drawPreviewEnableCheckbox();
-}
-
-var request_encoder: RequestEncoder = .{};
-
-pub fn update() UpdateError!RequestBuffer {
-    request_encoder.used = 0;
-
-    if (is_shutdown_requested) {
-        request_encoder.write(.core_shutdown) catch unreachable;
-        return request_encoder.toRequestBuffer();
-    }
-
-    if (framebuffer_resized) {
-        std.log.info("Recreate swapchain", .{});
-        framebuffer_resized = false;
-        renderer.recreateSwapchain(screen_dimensions) catch |err| {
-            std.log.err("Failed to recreate swapchain. Error: {}", .{err});
-        };
-        is_draw_required = true;
-    }
-
-    if (record_button_opt) |record_button| {
-        const state = record_button.state();
-        if (state.hover_enter) {
-            record_button.setColor(record_button_color_hover);
-            is_render_requested = true;
-        }
-        if (state.hover_exit) {
-            record_button.setColor(record_button_color_normal);
-            is_render_requested = true;
-        }
-    }
-
-    const mouse_position = mouseCoordinatesNDCR();
-    switch (button_clicked) {
-        .left => event_system.handleMouseClick(&mouse_position, .left, button_state),
-        .right => event_system.handleMouseClick(&mouse_position, .right, button_state),
-        .middle => event_system.handleMouseClick(&mouse_position, .middle, button_state),
-        else => {},
-    }
-
-    if (is_mouse_moved) {
-        is_mouse_moved = false;
-        event_system.handleMouseMovement(&mouse_position);
-    }
-
-    if (is_draw_required) {
-        is_draw_required = false;
-        draw() catch return error.UserInterfaceDrawFail;
-        is_record_requested = true;
-    }
-
-    if (is_record_requested) {
-        is_record_requested = false;
-        std.log.info("Record render pass", .{});
-        std.debug.assert(face_writer.indices_used > 0);
-        renderer.recordRenderPass(face_writer.indices_used, screen_dimensions) catch |err| {
-            std.log.err("app: Failed to record renderpass command buffers: Error: {}", .{err});
-        };
-        is_render_requested = true;
-    }
-
-    if (pending_swapchain_images_count > 0) {
-        if (is_render_requested) {
-            is_render_requested = false;
-            pending_swapchain_images_count -= 1;
-
-            gpu_texture_mutex.lock();
-            defer gpu_texture_mutex.unlock();
-            std.log.info("Render frame", .{});
-            renderer.renderFrame(screen_dimensions) catch return error.VulkanRendererRenderFrameFail;
-        }
-    }
-
-    return request_encoder.toRequestBuffer();
-}
-
-pub fn deinit() void {
-    std.log.info("wayland deinit", .{});
 }
 
 fn xdgSurfaceListener(xdg_surface_ref: *xdg.Surface, event: xdg.Surface.Event, surface_ref: *wl.Surface) void {
@@ -660,12 +498,6 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, _: *const voi
                 return;
             };
             frame_callback.setListener(*const void, frameListener, &{});
-
-            // var i: usize = 0;
-            // while (i < frame_tick_callback_count) : (i += 1) {
-            //     const entry_ptr = frame_tick_callback_buffer[i];
-            //     entry_ptr.callback(frame_index, entry_ptr.data);
-            // }
             frame_index += 1;
             pending_swapchain_images_count += 1;
         },
@@ -810,18 +642,3 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
         .axis_discrete => |_| std.log.info("Mouse: axis_discrete", .{}),
     }
 }
-
-// pub const ScreenPoint = union(enum) {
-//     native: f32,
-//     pixel: f32,
-//     norm: f32,
-
-//     pub inline fn toNative(self: @This(), screen_scale: f32) f32 {
-//         return switch (self) {
-//             .native => |native| native,
-//             .pixel => |pixel| -1.0 + (pixel * screen_scale),
-//             .norm => |norm| -1.0 + (norm * 2.0),
-//         };
-//     }
-// };
-
