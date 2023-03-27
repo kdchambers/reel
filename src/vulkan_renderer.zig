@@ -151,9 +151,9 @@ pub fn init(
     wayland_display: *Display,
     wayland_surface: *Surface,
     atlas: *Atlas,
+    swapchain_dimensions: geometry.Dimensions2D(u16),
 ) !void {
     texture_atlas = atlas;
-    const swapchain_dimensions = defines.initial_screen_dimensions;
 
     try vulkan_core.init(
         @ptrCast(*vk.wl_display, wayland_display),

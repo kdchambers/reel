@@ -14,67 +14,19 @@ const wlr = wayland.client.zwlr;
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 
-const XCursor = struct {
-    const hidden = "hidden";
-    const left_ptr = "left_ptr";
-    const text = "text";
-    const xterm = "xterm";
-    const hand2 = "hand2";
-    const top_left_corner = "top_left_corner";
-    const top_right_corner = "top_right_corner";
-    const bottom_left_corner = "bottom_left_corner";
-    const bottom_right_corner = "bottom_right_corner";
-    const left_side = "left_side";
-    const right_side = "right_side";
-    const top_side = "top_side";
-    const bottom_side = "bottom_side";
-};
-
-/// Wayland uses linux' input-event-codes for keys and buttons. When a mouse button is
-/// clicked one of these will be sent with the event.
-/// https://wayland-book.com/seat/pointer.html
-/// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
-pub const MouseButton = enum(c_int) {
-    left = 0x110,
-    right = 0x111,
-    middle = 0x112,
-    _,
-};
-
-pub const ButtonClicked = enum(u16) {
-    none,
-    right,
-    middle,
-    left,
-};
-
-//
-// Public Variables
-//
-
 pub var display: *wl.Display = undefined;
 pub var screencopy_manager_opt: ?*wlr.ScreencopyManagerV1 = null;
 pub var output_opt: ?*wl.Output = null;
 pub var shared_memory: *wl.Shm = undefined;
 
-//
-// Internal Variables
-//
+pub var registry: *wl.Registry = undefined;
+pub var compositor: *wl.Compositor = undefined;
+pub var xdg_wm_base: *xdg.WmBase = undefined;
 
-var registry: *wl.Registry = undefined;
-var compositor: *wl.Compositor = undefined;
-var xdg_wm_base: *xdg.WmBase = undefined;
+pub var wayland_fd: i32 = undefined;
 
-var wayland_fd: i32 = undefined;
-
-var cursor_theme: *wl.CursorTheme = undefined;
-var cursor: *wl.Cursor = undefined;
-var cursor_surface: *wl.Surface = undefined;
-var xcursor: [:0]const u8 = undefined;
-var seat: *wl.Seat = undefined;
-var pointer: *wl.Pointer = undefined;
-
-// var display_buffer: [512]u8 = undefined;
+pub var seat: *wl.Seat = undefined;
+pub var pointer: *wl.Pointer = undefined;
 
 pub var display_list: std.ArrayList([]const u8) = undefined;
 
@@ -104,8 +56,11 @@ pub fn init(allocator: std.mem.Allocator) !void {
     if (display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
 
     xdg_wm_base.setListener(*const void, xdgWmBaseListener, &{});
+    shared_memory.setListener(*const void, shmListener, &{});
 
     wayland_fd = display.getFd();
+
+    if (display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
 
     state = .initialized;
 
@@ -122,10 +77,6 @@ pub fn deinit() void {
     compositor = undefined;
     xdg_wm_base = undefined;
     wayland_fd = -1;
-    cursor_theme = undefined;
-    cursor = undefined;
-    cursor_surface = undefined;
-    xcursor = undefined;
     shared_memory = undefined;
     seat = undefined;
     pointer = undefined;
@@ -191,23 +142,11 @@ fn xdgWmBaseListener(xdg_wm_base_ref: *xdg.WmBase, event: xdg.WmBase.Event, _: *
     }
 }
 
-fn xdgSurfaceListener(xdg_surface_ref: *xdg.Surface, event: xdg.Surface.Event, surface_ref: *wl.Surface) void {
-    switch (event) {
-        .configure => |configure| {
-            std.log.info("wayland_client: xdg_surface configure", .{});
-            xdg_surface_ref.ackConfigure(configure.serial);
-            surface_ref.commit();
-        },
-    }
-}
-
-fn shmListener(shm: *wl.Shm, event: wl.Shm.Event, _: *const void) void {
-    _ = shm;
-    switch (event) {
-        .format => |format| {
-            std.log.info("wayland_client: Shm format: {}", .{format});
-        },
-    }
+fn shmListener(_: *wl.Shm, event: wl.Shm.Event, _: *const void) void {
+    _ = event;
+    // switch (event) {
+    //     .format => |format| std.log.info("wayland_client: Shm format: {}", .{format}),
+    // }
 }
 
 fn outputListener(output: *wl.Output, event: wl.Output.Event, _: *const void) void {
