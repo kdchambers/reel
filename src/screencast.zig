@@ -60,6 +60,7 @@ pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelTy
 pub const PauseFn = fn () void;
 pub const UnpauseFn = fn () void;
 pub const CloseFn = fn () void;
+pub const ScreenshotFn = fn(output_path: []const u8) void;
 
 pub const Interface = struct {
     //
@@ -70,6 +71,7 @@ pub const Interface = struct {
     pause: *const PauseFn,
     unpause: *const UnpauseFn,
     close: *const CloseFn,
+    screenshot: *const ScreenshotFn,
 };
 
 var backend_buffer: [2]Backend = undefined;
