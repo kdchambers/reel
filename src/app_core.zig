@@ -199,8 +199,6 @@ pub fn run() !void {
         }
         runtime_ns += ns_per_frame;
     }
-
-    std.time.sleep(std.time.ns_per_s * 1);
 }
 
 pub fn deinit() void {
