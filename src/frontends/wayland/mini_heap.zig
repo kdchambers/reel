@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Keith Chambers
 
-// TODO: Benchmark
-
 const std = @import("std");
 
 const heap_alignment = 8;

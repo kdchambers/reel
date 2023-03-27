@@ -3,6 +3,8 @@
 
 const std = @import("std");
 const geometry = @import("geometry.zig");
+const Extent2D = geometry.Extent2D;
+const ScaleFactor2D = geometry.ScaleFactor2D;
 
 pub fn Image(comptime PixelType: type) type {
     return struct {
@@ -275,7 +277,6 @@ pub const ColorVertex = extern struct {
     color: RGBA(u8),
 };
 
-// 8 * 4 = 32 bytes
 pub const GenericVertex = extern struct {
     x: f32 = 1.0,
     y: f32 = 1.0,
@@ -347,50 +348,365 @@ pub fn RGBA(comptime BaseType: type) type {
     };
 }
 
+pub fn drawCircle(
+    center: geometry.Coordinates2D(f64),
+    radius_pixels: f64,
+    color: RGBA(f32),
+    screen_scale: geometry.ScaleFactor2D(f32),
+    face_writer: *FaceWriter,
+) !void {
+    const point_count = @max(20, @floatToInt(u16, @divFloor(radius_pixels, 2)));
 
-// fn imageCrop(
-//     comptime Pixel: type,
-//     src_width: u32,
-//     crop_extent: geometry.Extent2D(u32),
-//     input_pixels: [*]const Pixel,
-//     output_pixels: [*]Pixel,
-// ) !void {
-//     var y: usize = crop_extent.y;
-//     const y_end: usize = y + crop_extent.height;
-//     const row_size: usize = crop_extent.width * @sizeOf(Pixel);
-//     while (y < y_end) : (y += 1) {
-//         std.debug.assert(y < crop_extent.y + crop_extent.height);
-//         const src_index: usize = crop_extent.x + (y * src_width);
-//         const dst_index: usize = crop_extent.width * y;
-//         @memcpy(
-//             @ptrCast([*]u8, &output_pixels[dst_index]),
-//             @ptrCast([*]const u8, &input_pixels[src_index]),
-//             row_size,
-//         );
-//     }
-// }
+    const radius_h: f64 = radius_pixels * screen_scale.horizontal;
+    const radius_v: f64 = radius_pixels * screen_scale.vertical;
 
-// fn imageCopyExact(
-//     comptime Pixel: type,
-//     src_position: geometry.Coordinates2D(u32),
-//     dst_position: geometry.Coordinates2D(u32),
-//     dimensions: geometry.Dimensions2D(u32),
-//     src_stride: u32,
-//     dst_stride: u32,
-//     input_pixels: [*]const Pixel,
-//     output_pixels: [*]Pixel,
-// ) void {
-//     var y: usize = 0;
-//     const row_size: usize = dimensions.width * @sizeOf(Pixel);
-//     while (y < dimensions.height) : (y += 1) {
-//         const src_y = src_position.y + y;
-//         const dst_y = dst_position.y + y;
-//         const src_index = src_position.x + (src_y * src_stride);
-//         const dst_index = dst_position.x + (dst_y * dst_stride);
-//         @memcpy(
-//             @ptrCast([*]u8, &output_pixels[dst_index]),
-//             @ptrCast([*]const u8, &input_pixels[src_index]),
-//             row_size,
-//         );
-//     }
-// }
+    const degreesToRadians = std.math.degreesToRadians;
+
+    const rotation_per_point = degreesToRadians(f64, 360 / @intToFloat(f64, point_count));
+
+    const vertices_index: u16 = face_writer.vertices_used;
+    var indices_index: u16 = face_writer.indices_used;
+
+    face_writer.vertices[vertices_index] = GenericVertex{
+        .x = @floatCast(f32, center.x),
+        .y = @floatCast(f32, center.y),
+        .color = color,
+    };
+
+    //
+    // Draw first on-curve point
+    //
+    face_writer.vertices[vertices_index + 1] = GenericVertex{
+        .x = @floatCast(f32, center.x + (radius_h * @cos(0.0))),
+        .y = @floatCast(f32, center.y + (radius_v * @sin(0.0))),
+        .color = color,
+    };
+
+    var i: u16 = 1;
+    while (i <= point_count) : (i += 1) {
+        const angle_radians: f64 = rotation_per_point * @intToFloat(f64, i);
+        face_writer.vertices[vertices_index + i + 1] = GenericVertex{
+            .x = @floatCast(f32, center.x + (radius_h * @cos(angle_radians))),
+            .y = @floatCast(f32, center.y + (radius_v * @sin(angle_radians))),
+            .color = color,
+        };
+        face_writer.indices[indices_index + 0] = vertices_index; // Center
+        face_writer.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+        face_writer.indices[indices_index + 2] = vertices_index + i + 1; // Current
+        indices_index += 3;
+    }
+
+    face_writer.vertices_used += point_count + 2;
+    face_writer.indices_used += point_count * 3;
+}
+
+// TODO: Move to graphics
+pub fn drawRoundRect(
+    extent: Extent2D(f32),
+    color: RGBA(f32),
+    radius: f64,
+    screen_scale: ScaleFactor2D(f32),
+    face_writer: *FaceWriter,
+) !void {
+    const radius_v = @floatCast(f32, radius * screen_scale.vertical);
+    const radius_h = @floatCast(f32, radius * screen_scale.horizontal);
+
+    const middle_extent = Extent2D(f32){
+        .x = extent.x,
+        .y = extent.y - radius_v,
+        .width = extent.width,
+        .height = extent.height - (radius_v * 2.0),
+    };
+    const top_extent = Extent2D(f32){
+        .x = extent.x + radius_h,
+        .y = extent.y - extent.height + radius_v,
+        .width = extent.width - (radius_h * 2.0),
+        .height = radius_v,
+    };
+    const bottom_extent = Extent2D(f32){
+        .x = extent.x + radius_h,
+        .y = extent.y,
+        .width = extent.width - (radius_h * 2.0),
+        .height = radius_v,
+    };
+
+    (try face_writer.create(QuadFace)).* = quadColored(middle_extent, color, .bottom_left);
+    (try face_writer.create(QuadFace)).* = quadColored(top_extent, color, .bottom_left);
+    (try face_writer.create(QuadFace)).* = quadColored(bottom_extent, color, .bottom_left);
+
+    const points_per_curve = @floatToInt(u16, @floor(radius));
+    const rotation_per_point = std.math.degreesToRadians(f64, 90 / @intToFloat(f64, points_per_curve - 1));
+
+    {
+        //
+        // Top Left
+        //
+        const vertices_index: u16 = face_writer.vertices_used;
+        const start_indices_index: u16 = face_writer.indices_used;
+        const corner_x = extent.x + radius_h;
+        const corner_y = extent.y - (extent.height - radius_v);
+        //
+        // Draw corner point
+        //
+        face_writer.vertices[vertices_index] = GenericVertex{
+            .x = corner_x,
+            .y = corner_y,
+            .color = color,
+        };
+        //
+        // Draw first on-curve point
+        //
+        var angle_radians = std.math.degreesToRadians(f64, 0);
+        face_writer.vertices[vertices_index + 1] = GenericVertex{
+            .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+            .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+            .color = color,
+        };
+        var i: u16 = 1;
+        while (i < points_per_curve) : (i += 1) {
+            angle_radians += rotation_per_point;
+            face_writer.vertices[vertices_index + i + 1] = GenericVertex{
+                .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                .color = color,
+            };
+            const indices_index = start_indices_index + ((i - 1) * 3);
+            face_writer.indices[indices_index + 0] = vertices_index; // Corner
+            face_writer.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+            face_writer.indices[indices_index + 2] = vertices_index + i + 1; // Current
+        }
+        face_writer.vertices_used += points_per_curve + 2;
+        face_writer.indices_used += (points_per_curve - 1) * 3;
+    }
+
+    {
+        //
+        // Top Right
+        //
+        const vertices_index: u16 = face_writer.vertices_used;
+        const start_indices_index: u16 = face_writer.indices_used;
+        const corner_x = extent.x + extent.width - radius_h;
+        const corner_y = extent.y - (extent.height - radius_v);
+        //
+        // Draw corner point
+        //
+        face_writer.vertices[vertices_index] = GenericVertex{
+            .x = corner_x,
+            .y = corner_y,
+            .color = color,
+        };
+        //
+        // Draw first on-curve point
+        //
+        var start_angle_radians = std.math.degreesToRadians(f64, 180);
+
+        face_writer.vertices[vertices_index + 1] = GenericVertex{
+            .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
+            .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
+            .color = color,
+        };
+        var i: u16 = 1;
+        while (i < points_per_curve) : (i += 1) {
+            const angle_radians: f64 = start_angle_radians - (rotation_per_point * @intToFloat(f64, i));
+            face_writer.vertices[vertices_index + i + 1] = GenericVertex{
+                .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                .color = color,
+            };
+            const indices_index = start_indices_index + ((i - 1) * 3);
+            face_writer.indices[indices_index + 0] = vertices_index + i + 1; // Current
+            face_writer.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+            face_writer.indices[indices_index + 2] = vertices_index; // Corner
+        }
+        face_writer.vertices_used += points_per_curve + 2;
+        face_writer.indices_used += (points_per_curve - 1) * 3;
+    }
+
+    {
+        //
+        // Bottom Left
+        //
+        const vertices_index: u16 = face_writer.vertices_used;
+        const start_indices_index: u16 = face_writer.indices_used;
+        const corner_x = extent.x + radius_h;
+        const corner_y = extent.y - radius_v;
+        //
+        // Draw corner point
+        //
+        face_writer.vertices[vertices_index] = GenericVertex{
+            .x = corner_x,
+            .y = corner_y,
+            .color = color,
+        };
+        //
+        // Draw first on-curve point
+        //
+        var start_angle_radians = std.math.degreesToRadians(f64, 270);
+
+        face_writer.vertices[vertices_index + 1] = GenericVertex{
+            .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
+            .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
+            .color = color,
+        };
+        var i: u16 = 1;
+        while (i < points_per_curve) : (i += 1) {
+            const angle_radians: f64 = start_angle_radians + (rotation_per_point * @intToFloat(f64, i));
+            face_writer.vertices[vertices_index + i + 1] = GenericVertex{
+                .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                .color = color,
+            };
+            const indices_index = start_indices_index + ((i - 1) * 3);
+            face_writer.indices[indices_index + 0] = vertices_index + i + 1; // Current
+            face_writer.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+            face_writer.indices[indices_index + 2] = vertices_index; // Corner
+        }
+        face_writer.vertices_used += points_per_curve + 2;
+        face_writer.indices_used += (points_per_curve - 1) * 3;
+    }
+
+    {
+        //
+        // Bottom Right
+        //
+        const vertices_index: u16 = face_writer.vertices_used;
+        const start_indices_index: u16 = face_writer.indices_used;
+        const corner_x = extent.x + extent.width - radius_h;
+        const corner_y = extent.y - radius_v;
+        //
+        // Draw corner point
+        //
+        face_writer.vertices[vertices_index] = GenericVertex{
+            .x = corner_x,
+            .y = corner_y,
+            .color = color,
+        };
+        //
+        // Draw first on-curve point
+        //
+        var start_angle_radians = std.math.degreesToRadians(f64, 180);
+
+        face_writer.vertices[vertices_index + 1] = GenericVertex{
+            .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
+            .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
+            .color = color,
+        };
+        var i: u16 = 1;
+        while (i < points_per_curve) : (i += 1) {
+            const angle_radians: f64 = start_angle_radians + (rotation_per_point * @intToFloat(f64, i));
+            face_writer.vertices[vertices_index + i + 1] = GenericVertex{
+                .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                .color = color,
+            };
+            const indices_index = start_indices_index + ((i - 1) * 3);
+            face_writer.indices[indices_index + 0] = vertices_index + i + 1; // Current
+            face_writer.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+            face_writer.indices[indices_index + 2] = vertices_index; // Corner
+        }
+        face_writer.vertices_used += points_per_curve + 2;
+        face_writer.indices_used += (points_per_curve - 1) * 3;
+    }
+}
+
+// TODO: Move to graphics
+pub fn drawCross(
+    extent: Extent2D(f32),
+    width_horizontal: f32,
+    width_vertical: f32,
+    color: RGBA(f32),
+    face_writer: *FaceWriter,
+) !void {
+    const point_topleft = geometry.Coordinates2D(f32){
+        .x = extent.x,
+        .y = extent.y - extent.height,
+    };
+    const point_topright = geometry.Coordinates2D(f32){
+        .x = extent.x + extent.width,
+        .y = extent.y - extent.height,
+    };
+    const point_bottomleft = geometry.Coordinates2D(f32){
+        .x = extent.x,
+        .y = extent.y,
+    };
+    const point_bottomright = geometry.Coordinates2D(f32){
+        .x = extent.x + extent.width,
+        .y = extent.y,
+    };
+    const vertices_index: u16 = face_writer.vertices_used;
+    const indices_index: u16 = face_writer.indices_used;
+
+    const half_width_v: f32 = width_vertical / 2.0;
+    const half_width_h: f32 = width_horizontal / 2.0;
+
+    // Top right upper
+    face_writer.vertices[vertices_index + 0] = GenericVertex{
+        .x = point_topright.x - half_width_h,
+        .y = point_topright.y,
+        .color = color,
+    };
+    // Top right lower
+    face_writer.vertices[vertices_index + 1] = GenericVertex{
+        .x = point_topright.x,
+        .y = point_topright.y + half_width_v,
+        .color = color,
+    };
+
+    // bottom left lower
+    face_writer.vertices[vertices_index + 2] = GenericVertex{
+        .x = point_bottomleft.x + half_width_h,
+        .y = point_bottomleft.y,
+        .color = color,
+    };
+
+    // bottom left upper
+    face_writer.vertices[vertices_index + 3] = GenericVertex{
+        .x = point_bottomleft.x,
+        .y = point_bottomleft.y - half_width_v,
+        .color = color,
+    };
+
+    face_writer.indices[indices_index + 0] = vertices_index + 0; // TRU
+    face_writer.indices[indices_index + 1] = vertices_index + 1; // TRL
+    face_writer.indices[indices_index + 2] = vertices_index + 2; // BLL
+
+    face_writer.indices[indices_index + 3] = vertices_index + 2; // BBL
+    face_writer.indices[indices_index + 4] = vertices_index + 3; // BLU
+    face_writer.indices[indices_index + 5] = vertices_index + 0; // TRU
+
+    // Top left lower
+    face_writer.vertices[vertices_index + 4] = GenericVertex{
+        .x = point_topleft.x,
+        .y = point_topleft.y + half_width_v,
+        .color = color,
+    };
+    // Top left upper
+    face_writer.vertices[vertices_index + 5] = GenericVertex{
+        .x = point_topleft.x + half_width_h,
+        .y = point_topleft.y,
+        .color = color,
+    };
+    // Bottom right upper
+    face_writer.vertices[vertices_index + 6] = GenericVertex{
+        .x = point_bottomright.x,
+        .y = point_bottomright.y - half_width_v,
+        .color = color,
+    };
+    // Bottom right lower
+    face_writer.vertices[vertices_index + 7] = GenericVertex{
+        .x = point_bottomright.x - half_width_h,
+        .y = point_bottomright.y,
+        .color = color,
+    };
+
+    face_writer.indices[indices_index + 6] = vertices_index + 4; // TLL
+    face_writer.indices[indices_index + 7] = vertices_index + 5; // TLU
+    face_writer.indices[indices_index + 8] = vertices_index + 6; // BRU
+
+    face_writer.indices[indices_index + 9] = vertices_index + 6; // BRU
+    face_writer.indices[indices_index + 10] = vertices_index + 7; // BRL
+    face_writer.indices[indices_index + 11] = vertices_index + 4; // TLL
+
+    face_writer.vertices_used += 8;
+    face_writer.indices_used += 12;
+}

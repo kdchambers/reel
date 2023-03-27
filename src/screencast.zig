@@ -2,10 +2,14 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const build_options = @import("build_options");
 const graphics = @import("graphics.zig");
 
 const backend_pipewire = @import("screencast_backends/pipewire/screencast_pipewire.zig");
-const backend_wlroots = @import("screencast_backends/wlroots/screencast_wlroots.zig");
+const backend_wlroots = if (build_options.have_wayland)
+    @import("screencast_backends/wlroots/screencast_wlroots.zig")
+else
+    void;
 
 pub const State = enum(u8) {
     uninitialized,
@@ -23,13 +27,27 @@ pub const OpenOnErrorFn = fn () void;
 pub const PixelType = graphics.RGBA(u8);
 pub const FrameImage = graphics.Image(PixelType);
 
-/// List of backends for screencasting, ordered in terms of preference
-/// Top of the list being the most preferable
-pub const Backend = enum(u16) {
-    pipewire,
-    wlroots,
-    invalid = std.math.maxInt(u16),
-};
+pub const Backend = GenerateBackendEnum();
+
+fn GenerateBackendEnum() type {
+    const EnumField = std.builtin.Type.EnumField;
+    var fields: []const EnumField = &[_]EnumField{};
+    var index = 0;
+    fields = fields ++ &[_]EnumField{.{ .name = "pipewire", .value = index }};
+    index += 1;
+    if (build_options.have_wayland) {
+        fields = fields ++ &[_]EnumField{ .{ .name = "wlroots", .value = index } };
+        index += 1;
+    }
+    return @Type(std.builtin.Type{
+        .Enum = .{
+            .tag_type = u16,
+            .is_exhaustive = true,
+            .fields = fields,
+            .decls = &.{},
+        },
+    });
+}
 
 //
 // TODO: This is to merge the error sets of all backends
@@ -56,14 +74,22 @@ pub const Interface = struct {
 
 var backend_buffer: [2]Backend = undefined;
 
+const InterfaceBackends = union(Backend) {
+    pipewire: Interface,
+    wlroots: Interface,
+};
+
+fn createInterfaceInternal(comptime backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
+    if(comptime build_options.have_wayland and backend == .wlroots)
+        return backend_wlroots.createInterface(onFrameReady);
+    if(comptime backend == .pipewire)
+        return backend_pipewire.createInterface(onFrameReady);
+    unreachable;
+}
+
 pub fn createInterface(backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
-    return switch (backend) {
-        .pipewire => backend_pipewire.createInterface(onFrameReady),
-        .wlroots => backend_wlroots.createInterface(onFrameReady),
-        //
-        // TODO: Implement other backends
-        //
-        else => unreachable,
+    return switch(backend) {
+        inline else => |b| createInterfaceInternal(b, onFrameReady),
     };
 }
 
@@ -86,12 +112,15 @@ pub fn createBestInterface(onFrameReady: *const OnFrameReadyFn) ?Interface {
 
 pub fn detectBackends() []Backend {
     var index: usize = 0;
-    const have_wlroots = backend_wlroots.detectSupport();
-    const have_pipewire = backend_pipewire.detectSupport();
-    if (have_wlroots) {
-        backend_buffer[index] = .wlroots;
-        index += 1;
+    if (comptime build_options.have_wayland) {
+        const have_wlroots = backend_wlroots.detectSupport();
+        if (have_wlroots) {
+            backend_buffer[index] = .wlroots;
+            index += 1;
+        }
     }
+
+    const have_pipewire = backend_pipewire.detectSupport();
     if (have_pipewire) {
         backend_buffer[index] = .pipewire;
         index += 1;
