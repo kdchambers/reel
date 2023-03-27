@@ -106,6 +106,7 @@ pub fn createInterface(
         .pause = pause,
         .unpause = unpause,
         .close = close,
+        .screenshot = screenshot,
     };
 }
 
@@ -156,6 +157,11 @@ pub fn unpause() void {
     // TODO: Handle return
     _ = pw.pw_stream_set_active(stream, true);
     stream_state = .open;
+}
+
+// TODO: Implement
+pub fn screenshot(file_path: []const u8) void {
+    _ = file_path;
 }
 
 pub fn state() screencast.State {
