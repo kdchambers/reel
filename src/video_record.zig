@@ -41,7 +41,6 @@ pub const RecordOptions = struct {
     fps: u32,
     dimensions: geometry.Dimensions2D(u32),
     output_path: [*:0]const u8,
-    base_index: u64,
 };
 
 var processing_thread: std.Thread = undefined;

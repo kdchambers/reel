@@ -7,7 +7,7 @@ const geometry = @import("geometry.zig");
 const Dimensions2D = geometry.Dimensions2D;
 
 const graphics = @import("graphics.zig");
-const RGB = graphics.RGB;
+const RGBA = graphics.RGBA;
 
 pub const VideoSource = enum(u8) {
     desktop,
@@ -43,16 +43,16 @@ pub const RecordingContext = struct {
 
     format: VideoFormat,
     quality: VideoQuality,
-    start: i126,
-    duration: u64,
+    start: i128,
     video_streams: []VideoStream,
     audio_streams: []AudioStream,
     state: State = .idle,
 };
 
 pub const VideoFrame = struct {
-    pixels: [*]RGB(u8),
-    dimensions: Dimensions2D(u16),
+    index: u64,
+    pixels: [*]const RGBA(u8),
+    dimensions: Dimensions2D(u32),
 };
 
 //

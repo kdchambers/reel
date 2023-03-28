@@ -8,6 +8,7 @@ const build_options = @import("build_options");
 const frontend = @import("frontend.zig");
 const Model = @import("Model.zig");
 const zmath = @import("zmath");
+const video_encoder = @import("video_record.zig");
 
 const audio_input = @import("audio.zig");
 var audio_input_interface: audio_input.Interface = undefined;
@@ -87,6 +88,7 @@ pub const InitError = error{
     IncorrectState,
     WaylandInitFail,
     NoScreencaptureBackend,
+    ScreencaptureInitFail,
     FrontendInitFail,
     AudioInputInitFail,
     OutOfMemory,
@@ -104,7 +106,6 @@ var model: Model = .{
         .format = .mp4,
         .quality = .low,
         .start = 0,
-        .duration = 0,
         .video_streams = undefined,
         .audio_streams = undefined,
         .state = .idle,
@@ -112,6 +113,10 @@ var model: Model = .{
 };
 
 var model_mutex: std.Thread.Mutex = .{};
+
+var screencapture_open: bool = false;
+var screencapture_stream: ?screencapture.StreamInterface = null;
+var frame_index: u64 = 0;
 
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
@@ -141,6 +146,8 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
             }
         }
     } else return error.NoScreencaptureBackend;
+
+    screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
 
     _ = wayland_core.sync();
 
@@ -189,6 +196,27 @@ pub fn run() !void {
                     const display_list = displayList();
                     std.log.info("Screenshot display set to: {s}", .{display_list[display_index]});
                 },
+                .record_start => {
+                    const options = video_encoder.RecordOptions{
+                        .output_path = "reel_test.mp4",
+                        .dimensions = .{
+                            .width = 1920,
+                            .height = 1080,
+                        },
+                        .fps = 60,
+                    };
+                    video_encoder.open(options) catch |err| {
+                        std.log.err("app: Failed to start video encoder. Error: {}", .{err});
+                    };
+                    model.recording_context = .{
+                        .format = .mp4,
+                        .quality = .low,
+                        .start = std.time.nanoTimestamp(),
+                        .video_streams = undefined,
+                        .audio_streams = undefined,
+                        .state = .recording,
+                    };
+                },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
@@ -218,8 +246,17 @@ pub fn displayList() [][]const u8 {
 }
 
 fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
-    _ = pixels;
-    log.info("width {d}, height {d}", .{ width, height });
+    model_mutex.lock();
+    defer model_mutex.unlock();
+    model.desktop_capture_frame = .{
+        .dimensions = .{
+            .width = width,
+            .height = height,
+        },
+        .index = frame_index,
+        .pixels = pixels,
+    };
+    frame_index += 1;
 }
 
 /// NOTE: This will be called on a separate thread
@@ -252,4 +289,30 @@ fn handleAudioInputOpenSuccess() void {
 
 fn handleAudioInputOpenFail(err: audio_input.OpenError) void {
     std.log.err("Failed to open audio input device. Error: {}", .{err});
+}
+
+//
+// Screen capture callbacks
+//
+
+fn openStreamSuccessCallback(opened_stream: screencapture.StreamInterface) void {
+    screencapture_stream = opened_stream;
+}
+
+fn openStreamErrorCallback() void {
+    // TODO:
+    std.log.err("Failed to open screencapture stream", .{});
+}
+
+fn screenCaptureInitSuccess() void {
+    screencapture_interface.openStream(
+        &openStreamSuccessCallback,
+        &openStreamErrorCallback,
+    );
+}
+
+fn screenCaptureInitFail(errcode: screencapture.InitErrorSet) void {
+    // TODO: Handle
+    std.log.err("app: Failed to open screen capture stream. Code: {}", .{errcode});
+    std.debug.assert(false);
 }

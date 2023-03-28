@@ -8,6 +8,8 @@ const Model = @import("../../../Model.zig");
 const UIState = @import("../UIState.zig");
 const audio = @import("../audio.zig");
 
+const renderer = @import("../../../vulkan_renderer.zig");
+
 const widgets = @import("../widgets.zig");
 const Section = widgets.Section;
 
@@ -83,7 +85,7 @@ const Region = struct {
 
     pub fn toExtent(self: @This()) Extent2D(f32) {
         const x = self.anchor.left orelse self.anchor.right.? - self.width.? - self.margin.right;
-        const y = self.anchor.bottom orelse unreachable;
+        const y = self.anchor.bottom orelse self.anchor.top.? + self.height.? + self.margin.top;
         const width = blk: {
             if (self.width) |width| {
                 break :blk width;
@@ -95,7 +97,6 @@ const Region = struct {
         };
         const height = blk: {
             if (self.height) |height| {
-                assert(self.anchor.top == null);
                 break :blk height;
             }
             if (self.anchor.top) |top_anchor| {
@@ -166,6 +167,64 @@ pub fn draw(
             background_color.toRGBA(),
             .bottom_left,
         );
+    }
+
+    if (model.desktop_capture_frame != null) {
+        const max_height_pixels: f32 = 540;
+
+        var preview_region: Region = .{};
+        preview_region.anchor.left = window.left();
+        preview_region.anchor.top = window.top();
+        preview_region.anchor.right = window.right();
+        preview_region.height = @divExact(1080, 2) * screen_scale.vertical;
+        preview_region.margin.left = 15 * screen_scale.horizontal;
+        preview_region.margin.right = 15 * screen_scale.horizontal;
+        preview_region.margin.top = 15 * screen_scale.vertical;
+
+        var preview_extent = preview_region.toExtent();
+
+        const aspect_ratio: f32 = 1080.0 / 1920.0;
+        const would_be_width_pixels = preview_extent.width / screen_scale.horizontal;
+        const would_be_height_pixels = would_be_width_pixels * aspect_ratio;
+
+        if (would_be_height_pixels > max_height_pixels) {
+            std.log.info("Height exceeded: {d} > {d}", .{
+                would_be_height_pixels,
+                max_height_pixels,
+            });
+            const max_height = max_height_pixels * screen_scale.vertical;
+            preview_region.height = max_height;
+            const actual_width = (max_height_pixels / aspect_ratio) * screen_scale.horizontal;
+            std.log.info("Aspect ratio: {d}, {d}", .{
+                aspect_ratio,
+                max_height / actual_width,
+            });
+            const margin = (2.0 - actual_width) / 2.0;
+            preview_region.margin.left = margin;
+            preview_region.margin.right = margin;
+        } else {
+            preview_region.height = would_be_height_pixels * screen_scale.vertical;
+        }
+
+        preview_extent = preview_region.toExtent();
+
+        preview_region.margin.left -= 1 * screen_scale.horizontal;
+        preview_region.margin.right -= 1 * screen_scale.horizontal;
+        preview_region.margin.top -= 1 * screen_scale.vertical;
+        preview_region.height.? += 2 * screen_scale.vertical;
+
+        const background_color = RGB.fromInt(150, 150, 150);
+        (try face_writer.create(QuadFace)).* = graphics.quadColored(
+            preview_region.toExtent(),
+            background_color.toRGBA(),
+            .bottom_left,
+        );
+
+        // TODO: This hurts my soul
+        renderer.video_stream_placement.x = preview_extent.x;
+        renderer.video_stream_placement.y = preview_extent.y;
+        renderer.video_stream_output_dimensions.width = preview_extent.width;
+        renderer.video_stream_output_dimensions.height = preview_extent.height;
     }
 
     var audio_input_section_region: Region = .{};

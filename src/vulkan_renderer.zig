@@ -129,9 +129,9 @@ pub const VideoFrameBuffer = struct {
     height: u32,
 };
 
-pub var video_stream_dimensions: geometry.Dimensions2D(f32) = .{ .width = 1920, .height = 1080 };
+pub var video_stream_dimensions: geometry.Dimensions2D(f32) = .{ .width = 1920.0, .height = 1080 };
 pub var video_stream_placement: geometry.Coordinates2D(f32) = .{ .x = -0.8, .y = -0.8 };
-pub var video_stream_output_dimensions: geometry.Dimensions2D(f32) = .{ .width = (1920.0 / 4.0), .height = (1080 / 4.0) };
+pub var video_stream_output_dimensions: geometry.Dimensions2D(f32) = .{ .width = 0.2, .height = 0.2 };
 pub var video_stream_enabled: bool = false;
 
 pub fn videoFrame() VideoFrameBuffer {
@@ -570,27 +570,27 @@ pub fn recordRenderPass(
         //
         const vertex_x: f32 = video_stream_placement.x;
         const vertex_y: f32 = video_stream_placement.y;
-        const vertex_width: f32 = video_stream_output_dimensions.width * (2.0 / @intToFloat(f32, screen_dimensions.width));
-        const vertex_height: f32 = video_stream_output_dimensions.height * (2.0 / @intToFloat(f32, screen_dimensions.height));
+        const vertex_width: f32 = video_stream_output_dimensions.width;
+        const vertex_height: f32 = video_stream_output_dimensions.height;
         var vertex_top_left = &texture_pipeline.vertices_buffer[0];
         var vertex_top_right = &texture_pipeline.vertices_buffer[1];
         var vertex_bottom_right = &texture_pipeline.vertices_buffer[2];
         var vertex_bottom_left = &texture_pipeline.vertices_buffer[3];
         vertex_top_left.x = vertex_x;
-        vertex_top_left.y = vertex_y;
+        vertex_top_left.y = vertex_y - vertex_height;
         vertex_top_right.x = vertex_x + vertex_width;
-        vertex_top_right.y = vertex_y;
+        vertex_top_right.y = vertex_y - vertex_height;
         vertex_bottom_right.x = vertex_x + vertex_width;
-        vertex_bottom_right.y = vertex_y + vertex_height;
+        vertex_bottom_right.y = vertex_y;
         vertex_bottom_left.x = vertex_x;
-        vertex_bottom_left.y = vertex_y + vertex_height;
+        vertex_bottom_left.y = vertex_y;
         //
         // UV coordinates
         //
         const texture_x: f32 = 0;
         const texture_y: f32 = 0;
-        const texture_width: f32 = video_stream_output_dimensions.width / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.width);
-        const texture_height: f32 = video_stream_output_dimensions.height / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.height);
+        const texture_width: f32 = video_stream_dimensions.width / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.width);
+        const texture_height: f32 = video_stream_dimensions.height / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.height);
         std.debug.assert(texture_width <= 1.0);
         std.debug.assert(texture_width >= 0.0);
         vertex_top_left.u = texture_x;
@@ -636,8 +636,8 @@ pub fn recordRenderPass(
             const dst_region_offsets = [2]vk.Offset3D{
                 .{ .x = 0, .y = 0, .z = 0 },
                 .{
-                    .x = @floatToInt(i32, @floor(video_stream_output_dimensions.width)),
-                    .y = @floatToInt(i32, @floor(video_stream_output_dimensions.height)),
+                    .x = @floatToInt(i32, @floor(video_stream_dimensions.width)),
+                    .y = @floatToInt(i32, @floor(video_stream_dimensions.height)),
                     .z = 1,
                 },
             };

@@ -101,14 +101,25 @@ pub fn createInterface(
 ) screencast.Interface {
     frameReadyCallback = onFrameReadyCallback;
     return .{
-        .requestOpen = open,
-        .state = state,
-        .pause = pause,
-        .unpause = unpause,
-        .close = close,
+        .init = _init,
+        .deinit = deinit,
+        .openStream = openStream,
+        // .requestOpen = open,
+        // .state = state,
+        // .pause = pause,
+        // .unpause = unpause,
+        // .close = close,
         .screenshot = screenshot,
     };
 }
+
+pub fn deinit() void {}
+pub fn _init(_: *const screencast.InitOnSuccessFn, _: *const screencast.InitOnErrorFn) void {}
+
+pub fn openStream(
+    _: *const screencast.OpenStreamOnSuccessFn,
+    _: *const screencast.OpenStreamOnErrorFn,
+) void {}
 
 pub fn detectSupport() bool {
     var err: dbus.Error = undefined;

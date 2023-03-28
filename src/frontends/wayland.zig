@@ -23,6 +23,15 @@ var xdg_toplevel: *xdg.Toplevel = undefined;
 var xdg_surface: *xdg.Surface = undefined;
 var surface: *wl.Surface = undefined;
 
+pub const FrameTickCallbackFn = fn (frame_index: u32) void;
+pub var frame_listener_callbacks_count: usize = 0;
+pub var frame_listener_callbacks: [10]*const FrameTickCallbackFn = undefined;
+
+pub fn addOnFrameCallback(callback: *const FrameTickCallbackFn) void {
+    frame_listener_callbacks[frame_listener_callbacks_count] = callback;
+    frame_listener_callbacks_count += 1;
+}
+
 const layout_medium = @import("wayland/layouts/desktop_medium.zig");
 
 const geometry = @import("../geometry.zig");
@@ -262,6 +271,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
     zmath.fftInitUnityTable(&audio_utils.unity_table);
 }
 
+var last_preview_frame: u64 = 0;
+
 pub fn update(model: *const Model) UpdateError!RequestBuffer {
     request_encoder.used = 0;
 
@@ -279,6 +290,35 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         is_draw_required = true;
     }
 
+    if (model.desktop_capture_frame) |captured_frame| {
+        renderer.video_stream_enabled = true;
+        if (last_preview_frame != captured_frame.index) {
+            const src_width = captured_frame.dimensions.width;
+            const src_height = captured_frame.dimensions.height;
+            var src_pixels = captured_frame.pixels;
+            var video_frame = renderer.videoFrame();
+            var y: usize = 0;
+            var src_index: usize = 0;
+            var dst_index: usize = 0;
+            while (y < src_height) : (y += 1) {
+                @memcpy(
+                    @ptrCast([*]u8, &video_frame.pixels[dst_index]),
+                    @ptrCast([*]const u8, &src_pixels[src_index]),
+                    src_width * @sizeOf(graphics.RGBA(u8)),
+                );
+                src_index += src_width;
+                dst_index += video_frame.width;
+            }
+
+            if (last_preview_frame == 0) {
+                std.log.info("Forcing redraw", .{});
+                is_draw_required = true;
+            }
+            last_preview_frame = captured_frame.index;
+            is_render_requested = true;
+        }
+    }
+
     {
         const state = ui_state.record_button.state();
         if (state.hover_enter) {
@@ -288,6 +328,11 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         if (state.hover_exit) {
             ui_state.record_button.setColor(record_button_color_normal);
             is_render_requested = true;
+        }
+
+        if (state.left_click_release) {
+            request_encoder.write(.record_start) catch unreachable;
+            is_draw_required = true;
         }
     }
 
@@ -498,6 +543,11 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, _: *const voi
                 return;
             };
             frame_callback.setListener(*const void, frameListener, &{});
+
+            for (frame_listener_callbacks[0..frame_listener_callbacks_count]) |user_callback| {
+                user_callback(frame_index);
+            }
+
             frame_index += 1;
             pending_swapchain_images_count += 1;
         },

@@ -4,6 +4,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
 const graphics = @import("graphics.zig");
+const geometry = @import("geometry.zig");
 
 const backend_pipewire = @import("screencast_backends/pipewire/screencast_pipewire.zig");
 const backend_wlroots = if (build_options.have_wayland)
@@ -21,6 +22,11 @@ pub const State = enum(u8) {
     paused,
 };
 
+pub const InitErrorSet = backend_wlroots.InitErrorSet;
+
+pub const InitOnSuccessFn = fn () void;
+pub const InitOnErrorFn = fn (errcode: InitErrorSet) void;
+
 pub const OpenOnSuccessFn = fn (width: u32, height: u32) void;
 pub const OpenOnErrorFn = fn () void;
 
@@ -36,7 +42,7 @@ fn GenerateBackendEnum() type {
     fields = fields ++ &[_]EnumField{.{ .name = "pipewire", .value = index }};
     index += 1;
     if (build_options.have_wayland) {
-        fields = fields ++ &[_]EnumField{ .{ .name = "wlroots", .value = index } };
+        fields = fields ++ &[_]EnumField{.{ .name = "wlroots", .value = index }};
         index += 1;
     }
     return @Type(std.builtin.Type{
@@ -52,25 +58,44 @@ fn GenerateBackendEnum() type {
 //
 // TODO: This is to merge the error sets of all backends
 //
-pub const RequestOpenErrorSet = backend_pipewire.InitErrorSet;
 
-pub const RequestOpenFn = fn (onSuccess: *const OpenOnSuccessFn, onError: *const OpenOnErrorFn) RequestOpenErrorSet!void;
-pub const StateFn = fn () State;
+pub const InitFn = fn (onSuccess: *const InitOnSuccessFn, onError: *const InitOnErrorFn) void;
+pub const OpenStreamFn = fn (on_success: *const OpenStreamOnSuccessFn, on_error: *const OpenStreamOnErrorFn) void;
+pub const DeinitFn = fn () void;
+pub const ScreenshotFn = fn (output_path: []const u8) void;
+
 pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
-pub const PauseFn = fn () void;
-pub const UnpauseFn = fn () void;
-pub const CloseFn = fn () void;
-pub const ScreenshotFn = fn(output_path: []const u8) void;
+
+pub const OpenStreamOnSuccessFn = fn (stream_interface: StreamInterface) void;
+pub const OpenStreamOnErrorFn = fn () void;
+
+pub const StreamInterface = struct {
+    pub const State = enum {
+        running,
+        paused,
+    };
+
+    pub const PauseFn = fn (self: @This(), is_paused: bool) void;
+    pub const StateFn = fn (self: @This()) StreamInterface.State;
+    pub const CloseFn = fn (self: @This()) void;
+
+    //
+    // Internal handle that represents the display
+    //
+    index: u32,
+
+    pause: *const PauseFn,
+    close: *const CloseFn,
+    state: *const StateFn,
+};
 
 pub const Interface = struct {
     //
     // Vtable connecting to specific backend
     //
-    requestOpen: *const RequestOpenFn,
-    state: *const StateFn,
-    pause: *const PauseFn,
-    unpause: *const UnpauseFn,
-    close: *const CloseFn,
+    init: *const InitFn,
+    openStream: *const OpenStreamFn,
+    deinit: *const DeinitFn,
     screenshot: *const ScreenshotFn,
 };
 
@@ -82,15 +107,15 @@ const InterfaceBackends = union(Backend) {
 };
 
 fn createInterfaceInternal(comptime backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
-    if(comptime build_options.have_wayland and backend == .wlroots)
+    if (comptime build_options.have_wayland and backend == .wlroots)
         return backend_wlroots.createInterface(onFrameReady);
-    if(comptime backend == .pipewire)
+    if (comptime backend == .pipewire)
         return backend_pipewire.createInterface(onFrameReady);
     unreachable;
 }
 
 pub fn createInterface(backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
-    return switch(backend) {
+    return switch (backend) {
         inline else => |b| createInterfaceInternal(b, onFrameReady),
     };
 }
