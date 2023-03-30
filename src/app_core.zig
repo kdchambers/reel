@@ -169,11 +169,10 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 
 pub fn run() !void {
     const input_fps = 120;
-    const target_runtime_ns = std.time.ns_per_s * 30;
     const ns_per_frame = @divFloor(std.time.ns_per_s, input_fps);
     var runtime_ns: u64 = 0;
 
-    while (runtime_ns <= target_runtime_ns) {
+    while (true) {
         var frame_start = std.time.nanoTimestamp();
         _ = wayland_core.sync();
 
