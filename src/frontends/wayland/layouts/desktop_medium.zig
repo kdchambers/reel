@@ -18,6 +18,21 @@ const Extent2D = geometry.Extent2D;
 const Coordinates2D = geometry.Coordinates2D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 
+const TextWriterInterface = struct {
+    quad_writer: *FaceWriter,
+    pub fn write(
+        self: *@This(),
+        screen_extent: Extent2D(f32),
+        texture_extent: Extent2D(f32),
+    ) !void {
+        (try self.quad_writer.create(QuadFace)).* = graphics.quadTextured(
+            screen_extent,
+            texture_extent,
+            .bottom_left,
+        );
+    }
+};
+
 const fontana = @import("fontana");
 const Font = fontana.Font(.{
     .backend = .freetype_harfbuzz,
@@ -80,7 +95,7 @@ const Region = struct {
 
     pub inline fn right(self: @This()) f32 {
         const base = self.anchor.right orelse self.anchor.left.? + self.margin.left + self.width.?;
-        return base + self.margin.right;
+        return base - self.margin.right;
     }
 
     pub fn toExtent(self: @This()) Extent2D(f32) {
@@ -93,6 +108,7 @@ const Region = struct {
             if (self.anchor.right) |right_anchor| {
                 break :blk (right_anchor - self.margin.right) - (x + self.margin.left);
             }
+            std.debug.assert(false);
             unreachable;
         };
         const height = blk: {
@@ -102,6 +118,7 @@ const Region = struct {
             if (self.anchor.top) |top_anchor| {
                 break :blk @fabs(y - top_anchor);
             }
+            std.debug.assert(false);
             unreachable;
         };
         return .{
@@ -188,17 +205,9 @@ pub fn draw(
         const would_be_height_pixels = would_be_width_pixels * aspect_ratio;
 
         if (would_be_height_pixels > max_height_pixels) {
-            std.log.info("Height exceeded: {d} > {d}", .{
-                would_be_height_pixels,
-                max_height_pixels,
-            });
             const max_height = max_height_pixels * screen_scale.vertical;
             preview_region.height = max_height;
             const actual_width = (max_height_pixels / aspect_ratio) * screen_scale.horizontal;
-            std.log.info("Aspect ratio: {d}, {d}", .{
-                aspect_ratio,
-                max_height / actual_width,
-            });
             const margin = (2.0 - actual_width) / 2.0;
             preview_region.margin.left = margin;
             preview_region.margin.right = margin;
@@ -287,30 +296,98 @@ pub fn draw(
         }
     }
 
+    var control_section_region: Region = .{};
     {
-        //
-        // Draw Record Button
-        //
-        var record_button_region: Region = .{};
-        record_button_region.anchor.right = window.right();
-        record_button_region.margin.right = 15 * screen_scale.horizontal;
-        record_button_region.anchor.bottom = information_bar_region.top();
-        record_button_region.margin.bottom = 15 * screen_scale.vertical;
-        record_button_region.width = 120 * screen_scale.horizontal;
-        record_button_region.height = 31 * screen_scale.vertical;
+        control_section_region.anchor.right = window.right();
+        control_section_region.anchor.left = audio_input_section_region.right();
+        control_section_region.anchor.bottom = information_bar_region.top();
 
-        const label = switch (model.recording_context.state) {
-            .idle => "Record",
-            .recording => "Stop",
-            .paused => "Resume",
-        };
-        try ui_state.record_button.draw(
-            record_button_region.toExtent(),
-            record_button_color_normal,
-            label,
-            pen,
+        control_section_region.margin.bottom = 15 * screen_scale.vertical;
+        control_section_region.margin.right = 15 * screen_scale.horizontal;
+        control_section_region.margin.left = 15 * screen_scale.horizontal;
+        control_section_region.height = 200 * screen_scale.vertical;
+
+        const section_title = "Recorder";
+        const section_border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
+
+        try Section.draw(
+            control_section_region.toExtent(),
+            section_title,
             screen_scale,
-            .{ .rounding_radius = null },
+            pen,
+            section_border_color,
+            1 * screen_scale.horizontal,
         );
+
+        {
+            //
+            // Draw Record Button
+            //
+            var record_button_region: Region = .{};
+            record_button_region.anchor.right = control_section_region.right();
+            record_button_region.margin.right = 10 * screen_scale.horizontal;
+            record_button_region.anchor.bottom = control_section_region.bottom();
+            record_button_region.margin.bottom = 10 * screen_scale.vertical;
+            record_button_region.width = 120 * screen_scale.horizontal;
+            record_button_region.height = 31 * screen_scale.vertical;
+
+            const label = switch (model.recording_context.state) {
+                .idle => "Record",
+                .recording => "Stop",
+                .paused => "Resume",
+            };
+            try ui_state.record_button.draw(
+                record_button_region.toExtent(),
+                record_button_color_normal,
+                label,
+                pen,
+                screen_scale,
+                .{ .rounding_radius = null },
+            );
+        }
+
+        var record_format_region: Region = .{};
+        {
+            record_format_region.anchor.left = control_section_region.left();
+            record_format_region.margin.left = 70 * screen_scale.horizontal;
+            record_format_region.anchor.top = control_section_region.top();
+            record_format_region.margin.top = 10 * screen_scale.vertical;
+            record_format_region.width = 100 * screen_scale.horizontal;
+            record_format_region.height = 30 * screen_scale.vertical;
+
+            const labels = [_][]const u8{
+                "mp4",
+                "avi",
+                "mkv",
+            };
+
+            const dropdown_extent = record_format_region.toExtent();
+            const dropdown_label = "Format";
+
+            const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
+            const label_extent = Extent2D(f32){
+                .x = record_format_region.anchor.left.? + (10 * screen_scale.horizontal),
+                .y = dropdown_extent.y,
+                //
+                // TODO: Seems like calculateRenderDimensions isn't calculating enough space for
+                //       the glyphs. writeCentered is failing sometimes because it doesn't have enough
+                //       space to fit the text into
+                //
+                .width = dropdown_label_dimensions.width * screen_scale.horizontal + 0.01,
+                .height = dropdown_extent.height,
+            };
+            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer };
+            try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
+
+            try ui_state.record_format.draw(
+                dropdown_extent,
+                &labels,
+                0,
+                pen,
+                screen_scale,
+                record_button_color_normal,
+                false,
+            );
+        }
     }
 }

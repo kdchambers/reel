@@ -4,6 +4,8 @@
 const widgets = @import("widgets.zig");
 
 record_button: widgets.Button,
+record_format: widgets.Dropdown,
+
 enable_preview_checkbox: widgets.Checkbox,
 audio_input_spectogram: widgets.AudioSpectogram,
 audio_volume_level: widgets.AudioVolumeLevelHorizontal,

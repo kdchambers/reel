@@ -122,20 +122,34 @@ pub const Section = packed struct(u64) {
     }
 };
 
-pub const Dropdown = packed struct(u64) {
+pub const Dropdown = struct {
+    is_open: bool,
+    item_count: u8,
     state_index: Index(HoverZoneState),
     extent_index: Index(geometry.Extent2D(f32)),
-    opened_extent_index: Index(geometry.Extent2D(f32)),
-    reserved: u16 = 0,
 
-    pub fn create() !@This() {
+    item_states: [8]Index(HoverZoneState),
+    item_extents: [8]Index(geometry.Extent2D(f32)),
+
+    pub fn create(item_count: u8) !@This() {
+        std.debug.assert(item_count <= 8);
         const state_index = event_system.reserveState();
         state_index.getPtr().reset();
-        return @This(){
+        var result = @This(){
+            .is_open = false,
+            .item_count = item_count,
             .state_index = state_index,
             .extent_index = .{ .index = std.math.maxInt(u16) },
-            .opened_extent_index = .{ .index = std.math.maxInt(u16) },
+            .item_states = undefined,
+            .item_extents = undefined,
         };
+        var i: usize = 0;
+        while (i < item_count) : (i += 1) {
+            result.item_states[i] = event_system.reserveState();
+            result.item_states[i].getPtr().reset();
+            result.item_extents[i] = .{ .index = std.math.maxInt(u16) };
+        }
+        return result;
     }
 
     pub fn draw(

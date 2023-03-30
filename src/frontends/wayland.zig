@@ -68,6 +68,7 @@ const texture_layer_dimensions = renderer.texture_layer_dimensions;
 const widgets = @import("wayland/widgets.zig");
 const Button = widgets.Button;
 const Checkbox = widgets.Checkbox;
+const Dropdown = widgets.Dropdown;
 
 const application_name = "reel";
 const background_color = RGBA.fromInt(90, 90, 90, 255);
@@ -262,6 +263,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     );
 
     ui_state.record_button = Button.create();
+    ui_state.record_format = try Dropdown.create(3);
     ui_state.enable_preview_checkbox = try Checkbox.create();
 
     //
@@ -311,7 +313,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
             }
 
             if (last_preview_frame == 0) {
-                std.log.info("Forcing redraw", .{});
                 is_draw_required = true;
             }
             last_preview_frame = captured_frame.index;
