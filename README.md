@@ -69,7 +69,7 @@ To build, you'll need a master build of the zig compiler. The latest version tes
 
 To build simply invoke the stardand build command
 
-```zig
+```sh
 git clone https://github.com/kdchambers/reel --recursive
 cd reel
 zig build run -Doptimize=ReleaseSafe
