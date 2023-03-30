@@ -14,8 +14,11 @@ pub const format_labels = [_][]const u8{
     @tagName(VideoFormat.mkv),
 };
 
+pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
+
 record_button: widgets.Button,
 record_format: widgets.Dropdown,
+record_quality: widgets.Dropdown,
 
 enable_preview_checkbox: widgets.Checkbox,
 audio_input_spectogram: widgets.AudioSpectogram,

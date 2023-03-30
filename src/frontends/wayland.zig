@@ -267,6 +267,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_format.labels = &UIState.format_labels;
     ui_state.record_format.selected_index = 0;
 
+    ui_state.record_quality = try Dropdown.create(3);
+    ui_state.record_quality.labels = &UIState.quality_labels;
+    ui_state.record_quality.selected_index = 0;
+
     ui_state.enable_preview_checkbox = try Checkbox.create();
 
     //
@@ -354,12 +358,54 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                 is_render_requested = true;
             }
             if (state_copy.left_click_release) {
-                if(i != ui_state.record_format.selected_index) {
+                if (i != ui_state.record_format.selected_index) {
                     request_encoder.write(.record_format_set) catch unreachable;
                     request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
                 }
                 ui_state.record_format.selected_index = @intCast(u16, i);
                 ui_state.record_format.is_open = false;
+                is_draw_required = true;
+            }
+        }
+    }
+
+    //
+    // Recording format selection dropdown
+    //
+    if (!ui_state.record_quality.is_open) {
+        const state = ui_state.record_quality.state();
+        if (state.hover_enter) {
+            ui_state.record_quality.setColor(record_button_color_hover);
+            is_render_requested = true;
+        }
+        if (state.hover_exit) {
+            ui_state.record_quality.setColor(record_button_color_normal);
+            is_render_requested = true;
+        }
+        if (state.left_click_release) {
+            ui_state.record_quality.is_open = true;
+            is_draw_required = true;
+        }
+    } else {
+        const item_count = ui_state.record_quality.item_count;
+        for (ui_state.record_quality.item_states[0..item_count], 0..) |item_state, i| {
+            const state_copy = item_state.get();
+            item_state.getPtr().clear();
+            if (state_copy.hover_enter) {
+                ui_state.record_quality.setItemColor(i, record_button_color_hover);
+                is_render_requested = true;
+            }
+            if (state_copy.hover_exit) {
+                ui_state.record_quality.setItemColor(i, record_button_color_normal);
+                is_render_requested = true;
+            }
+            if (state_copy.left_click_release) {
+                if (i != ui_state.record_quality.selected_index) {
+                    request_encoder.write(.record_quality_set) catch unreachable;
+                    request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
+                }
+                ui_state.record_quality.selected_index = @intCast(u16, i);
+                ui_state.record_quality.is_open = false;
                 is_draw_required = true;
             }
         }

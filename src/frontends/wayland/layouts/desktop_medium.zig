@@ -79,12 +79,12 @@ const Region = struct {
     height: ?f32 = null,
 
     pub inline fn top(self: @This()) f32 {
-        const base = self.anchor.top orelse self.anchor.bottom.? - self.height.?;
+        const base = self.anchor.top orelse self.anchor.bottom.? - self.margin.bottom - self.height.?;
         return base - self.margin.top;
     }
 
     pub inline fn bottom(self: @This()) f32 {
-        const base = self.anchor.bottom orelse unreachable;
+        const base = self.anchor.bottom orelse self.anchor.top.? + self.margin.top + self.height.?;
         return base - self.margin.bottom;
     }
 
@@ -172,6 +172,8 @@ pub fn draw(
     pen: *Pen,
     face_writer: *FaceWriter,
 ) !void {
+    var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer };
+
     var information_bar_region: Region = .{};
     {
         information_bar_region.anchor.left = window.left();
@@ -351,7 +353,7 @@ pub fn draw(
             record_format_region.anchor.left = control_section_region.left();
             record_format_region.margin.left = 70 * screen_scale.horizontal;
             record_format_region.anchor.top = control_section_region.top();
-            record_format_region.margin.top = 10 * screen_scale.vertical;
+            record_format_region.margin.top = 30 * screen_scale.vertical;
             record_format_region.width = 100 * screen_scale.horizontal;
             record_format_region.height = 30 * screen_scale.vertical;
 
@@ -370,10 +372,39 @@ pub fn draw(
                 .width = dropdown_label_dimensions.width * screen_scale.horizontal + 0.01,
                 .height = dropdown_extent.height,
             };
-            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer };
             try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
 
             try ui_state.record_format.draw(
+                dropdown_extent,
+                pen,
+                screen_scale,
+                record_button_color_normal,
+            );
+        }
+
+        var record_quality_region: Region = .{};
+        {
+            record_quality_region.anchor.left = control_section_region.left();
+            record_quality_region.margin.left = 70 * screen_scale.horizontal;
+            record_quality_region.anchor.top = record_format_region.bottom();
+            record_quality_region.margin.top = 10 * screen_scale.vertical;
+            record_quality_region.width = 100 * screen_scale.horizontal;
+            record_quality_region.height = 30 * screen_scale.vertical;
+
+            const dropdown_extent = record_quality_region.toExtent();
+            const dropdown_label = "Quality";
+
+            const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
+            const label_extent = Extent2D(f32){
+                .x = record_quality_region.anchor.left.? + (10 * screen_scale.horizontal),
+                .y = dropdown_extent.y,
+                .width = dropdown_label_dimensions.width * screen_scale.horizontal + 0.01,
+                .height = dropdown_extent.height,
+            };
+
+            try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
+
+            try ui_state.record_quality.draw(
                 dropdown_extent,
                 pen,
                 screen_scale,

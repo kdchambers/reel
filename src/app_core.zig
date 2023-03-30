@@ -185,6 +185,11 @@ pub fn run() !void {
                     model.recording_context.format = @intToEnum(Model.VideoFormat, format_index);
                     std.log.info("Video format set to {s}", .{@tagName(model.recording_context.format)});
                 },
+                .record_quality_set => {
+                    const quality_index = request_buffer.readInt(u16) catch 0;
+                    model.recording_context.quality = @intToEnum(Model.VideoQuality, quality_index);
+                    std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.format)});
+                },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
