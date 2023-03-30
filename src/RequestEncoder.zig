@@ -4,8 +4,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const RequestBuffer = @import("RequestBuffer.zig");
 const app_core = @import("app_core.zig");
-const RequestBuffer = app_core.RequestBuffer;
 const Request = app_core.Request;
 
 buffer: [512]u8 = undefined,

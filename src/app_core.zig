@@ -9,6 +9,7 @@ const frontend = @import("frontend.zig");
 const Model = @import("Model.zig");
 const zmath = @import("zmath");
 const video_encoder = @import("video_record.zig");
+const RequestBuffer = @import("RequestBuffer.zig");
 
 const audio_input = @import("audio.zig");
 var audio_input_interface: audio_input.Interface = undefined;
@@ -31,43 +32,6 @@ pub const Request = enum(u8) {
     screenshot_region_set,
     screenshot_display_set,
     screenshot_do,
-};
-
-pub const RequestBuffer = struct {
-    buffer: []u8,
-    index: usize,
-
-    //
-    // TODO: Implement readArray, readArraySentinal
-    // Probably better to write size of array, then array contents
-    // Using 0 as terminator would be problamatic
-    //
-
-    pub fn next(self: *@This()) ?Request {
-        if (self.index == self.buffer.len)
-            return null;
-        std.debug.assert(self.index < self.buffer.len);
-        defer self.index += 1;
-        return @intToEnum(Request, self.buffer[self.index]);
-    }
-
-    pub fn readParam(self: *@This(), comptime T: type) !T {
-        const alignment = @alignOf(T);
-        const misaligment = self.index % alignment;
-        if (misaligment > 0) {
-            std.debug.assert(misaligment < alignment);
-            const padding_required = alignment - misaligment;
-            std.debug.assert(padding_required < alignment);
-            self.index += padding_required;
-            std.debug.assert(self.index % alignment == 0);
-        }
-
-        const bytes_to_read = @sizeOf(T);
-        if (self.index + bytes_to_read > self.buffer.len)
-            return error.EndOfBuffer;
-        defer self.index += bytes_to_read;
-        return @ptrCast(*T, @alignCast(alignment, &self.buffer[self.index])).*;
-    }
 };
 
 pub const ScreenCaptureBackend = screencapture.Backend;
@@ -191,7 +155,7 @@ pub fn run() !void {
                 },
                 .screenshot_do => screencapture_interface.screenshot("screenshot.png"),
                 .screenshot_display_set => {
-                    const display_index = request_buffer.readParam(u16) catch 0;
+                    const display_index = request_buffer.readInt(u16) catch 0;
                     const display_list = displayList();
                     std.log.info("Screenshot display set to: {s}", .{display_list[display_index]});
                 },
@@ -248,10 +212,7 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
     model_mutex.lock();
     defer model_mutex.unlock();
     model.desktop_capture_frame = .{
-        .dimensions = .{
-            .width = width,
-            .height = height,
-        },
+        .dimensions = .{ .width = width, .height = height },
         .index = frame_index,
         .pixels = pixels,
     };

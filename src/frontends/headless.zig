@@ -4,9 +4,7 @@
 const std = @import("std");
 
 const Model = @import("../Model.zig");
-
-const app_core = @import("../app_core.zig");
-const RequestBuffer = app_core.RequestBuffer;
+const RequestBuffer = @import("../RequestBuffer.zig");
 
 pub const InitError = error{};
 pub const UpdateError = error{};

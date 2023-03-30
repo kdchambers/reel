@@ -5,9 +5,8 @@ const std = @import("std");
 const linux = std.os.linux;
 
 const Model = @import("../Model.zig");
-
+const RequestBuffer = @import("../RequestBuffer.zig");
 const app_core = @import("../app_core.zig");
-const RequestBuffer = app_core.RequestBuffer;
 const Request = app_core.Request;
 
 const RequestEncoder = @import("../RequestEncoder.zig");

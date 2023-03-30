@@ -4,6 +4,7 @@
 const std = @import("std");
 
 const Model = @import("../Model.zig");
+const RequestBuffer = @import("../RequestBuffer.zig");
 const UIState = @import("wayland/UIState.zig");
 const audio_utils = @import("wayland/audio.zig");
 const zmath = @import("zmath");
@@ -74,7 +75,6 @@ const application_name = "reel";
 const background_color = RGBA.fromInt(90, 90, 90, 255);
 
 const app_core = @import("../app_core.zig");
-const RequestBuffer = app_core.RequestBuffer;
 const Request = app_core.Request;
 
 const RequestEncoder = @import("../RequestEncoder.zig");
