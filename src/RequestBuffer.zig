@@ -23,6 +23,14 @@ pub fn next(self: *@This()) ?Request {
     return @intToEnum(Request, self.buffer[self.index]);
 }
 
+pub fn readString(self: *@This()) []const u8 {
+    const len = self.readInt(u16);
+    const index_start = self.index;
+    const index_end = index_start + len;
+    self.index += len;
+    return self.buffer[index_start .. index_end];
+}
+
 pub fn readInt(self: *@This(), comptime T: type) !T {
     const alignment = @alignOf(T);
     const misaligment = self.index % alignment;

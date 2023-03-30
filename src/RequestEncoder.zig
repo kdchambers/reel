@@ -19,10 +19,22 @@ pub fn write(self: *@This(), request: Request) !void {
     self.used += 1;
 }
 
-pub fn writeParam(self: *@This(), comptime T: type, value: T) !void {
+pub fn writeString(self: *@This(), bytes: []const u8) !void {
+    if ((self.used + bytes.len + @sizeOf(u16)) >= self.buffer.len)
+        return error.EndOfBuffer;
+    self.writeInt(u16, @intCast(u16, bytes.len)) catch unreachable;
+    var i: usize = self.used;
+    for (bytes) |char| {
+        self.buffer[i] = char;
+        i += 1;
+    }
+    self.used += bytes.len;
+}
+
+pub fn writeInt(self: *@This(), comptime T: type, value: T) !void {
     const alignment = @alignOf(T);
     const misaligment = self.used % alignment;
-    if(misaligment > 0) {
+    if (misaligment > 0) {
         std.debug.assert(misaligment < alignment);
         const padding_required = alignment - misaligment;
         std.debug.assert(padding_required < alignment);

@@ -128,7 +128,7 @@ pub fn update(_: *const Model) UpdateError!RequestBuffer {
             .screenshot => request_encoder.write(.screenshot_do) catch {},
             .screenshot_display_set => {
                 request_encoder.write(.screenshot_display_set) catch {};
-                request_encoder.writeParam(u16, screenshot_display_index) catch {};
+                request_encoder.writeInt(u16, screenshot_display_index) catch {};
             },
             .quit => request_encoder.write(.core_shutdown) catch {},
             .display_list => {
