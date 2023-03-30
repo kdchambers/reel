@@ -230,8 +230,8 @@ pub const Dropdown = struct {
         triangle_vertices[2].color = triangle_color;
 
         const triangle_height: f32 = extent.height / 4.0;
-        const triangle_height_pixels = triangle_height / screen_scale.horizontal;
-        const triangle_width: f32 = (triangle_height_pixels * 2.0) * screen_scale.vertical;
+        const triangle_height_pixels = triangle_height / screen_scale.vertical;
+        const triangle_width: f32 = (triangle_height_pixels * 1.5) * screen_scale.horizontal;
         const triangle_left: f32 = extent.x + (extent.width * 0.75);
         const triangle_bottom: f32 = extent.y - (extent.height * 0.33);
 
