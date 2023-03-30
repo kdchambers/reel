@@ -124,10 +124,22 @@ pub const Section = packed struct(u64) {
 };
 
 pub const Dropdown = struct {
+    //
+    // TODO: Implement
+    //
+    const Model = struct {
+        is_open: bool,
+        selected_index: u16,
+        labels: [][]const u8,
+    };
+
     is_open: bool,
     item_count: u8,
     state_index: Index(HoverZoneState),
     extent_index: Index(geometry.Extent2D(f32)),
+    vertex_index: u16,
+    labels: []const []const u8,
+    selected_index: u16,
 
     item_states: [8]Index(HoverZoneState),
     item_extents: [8]Index(geometry.Extent2D(f32)),
@@ -138,6 +150,9 @@ pub const Dropdown = struct {
         state_index.getPtr().reset();
         var result = @This(){
             .is_open = false,
+            .labels = undefined,
+            .selected_index = 0,
+            .vertex_index = std.math.maxInt(u16),
             .item_count = item_count,
             .state_index = state_index,
             .extent_index = .{ .index = std.math.maxInt(u16) },
@@ -153,54 +168,95 @@ pub const Dropdown = struct {
         return result;
     }
 
+    pub inline fn state(self: @This()) HoverZoneState {
+        const state_copy = self.state_index.get();
+        self.state_index.getPtr().clear();
+        return state_copy;
+    }
+
+    pub fn setColor(self: @This(), color: graphics.RGBA(f32)) void {
+        var i = self.vertex_index;
+        const end_index = self.vertex_index + 4;
+        while (i < end_index) : (i += 1) {
+            vertices_buffer_ref[i].color = color;
+        }
+    }
+
+    pub fn setItemColor(self: @This(), index: usize, color: graphics.RGBA(f32)) void {
+        const vertex_index = blk: {
+            var vertices_count: usize = 7 + (self.labels[self.selected_index].len * 4);
+            var i: usize = 0;
+            while (i < index) : (i += 1) {
+                vertices_count += 4 + (self.labels[i].len * 4);
+            }
+            break :blk vertices_count;
+        };
+        var i = vertex_index + self.vertex_index;
+        const end_index = i + 4;
+        while (i < end_index) : (i += 1) {
+            vertices_buffer_ref[i].color = color;
+        }
+    }
+
     pub fn draw(
         self: *@This(),
         extent: Extent2D(f32),
-        labels: []const []const u8,
-        selected_index: u32,
         pen: anytype,
         screen_scale: ScaleFactor2D(f32),
         color: graphics.RGBA(f32),
-        is_open: bool,
     ) !void {
-        if (!is_open) {
-            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent, color, .bottom_left);
+        self.vertex_index = @intCast(u16, face_writer_ref.vertices_used);
 
-            const label_extent = Extent2D(f32){
-                .x = extent.x,
-                .y = extent.y,
-                .width = extent.width * 0.7,
-                .height = extent.height,
-            };
-            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
-            try pen.writeCentered(labels[selected_index], label_extent, screen_scale, &text_writer_interface);
+        (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent, color, .bottom_left);
 
-            var triangle_vertices: *TriangleFace = try face_writer_ref.create(TriangleFace);
-            const triangle_color = graphics.RGBA(f32).fromInt(200, 200, 200, 255);
+        const label_extent = Extent2D(f32){
+            .x = extent.x,
+            .y = extent.y,
+            .width = extent.width * 0.7,
+            .height = extent.height,
+        };
+        var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+        try pen.writeCentered(self.labels[self.selected_index], label_extent, screen_scale, &text_writer_interface);
 
-            triangle_vertices[0] = .{};
-            triangle_vertices[1] = .{};
-            triangle_vertices[2] = .{};
+        var triangle_vertices: *TriangleFace = try face_writer_ref.create(TriangleFace);
+        const triangle_color = graphics.RGBA(f32).fromInt(200, 200, 200, 255);
 
-            triangle_vertices[0].color = triangle_color;
-            triangle_vertices[1].color = triangle_color;
-            triangle_vertices[2].color = triangle_color;
+        triangle_vertices[0] = .{};
+        triangle_vertices[1] = .{};
+        triangle_vertices[2] = .{};
 
-            const triangle_height: f32 = extent.height / 4.0;
-            const triangle_height_pixels = triangle_height / screen_scale.horizontal;
-            const triangle_width: f32 = (triangle_height_pixels * 2.0) * screen_scale.vertical;
-            const triangle_left: f32 = extent.x + (extent.width * 0.75);
-            const triangle_bottom: f32 = extent.y - (extent.height * 0.33);
+        triangle_vertices[0].color = triangle_color;
+        triangle_vertices[1].color = triangle_color;
+        triangle_vertices[2].color = triangle_color;
 
-            triangle_vertices[0].x = triangle_left;
-            triangle_vertices[0].y = triangle_bottom - triangle_height;
-            triangle_vertices[1].x = triangle_left + triangle_width;
-            triangle_vertices[1].y = triangle_bottom - triangle_height;
-            triangle_vertices[2].x = triangle_left + (triangle_width / 2.0);
-            triangle_vertices[2].y = triangle_bottom;
+        const triangle_height: f32 = extent.height / 4.0;
+        const triangle_height_pixels = triangle_height / screen_scale.horizontal;
+        const triangle_width: f32 = (triangle_height_pixels * 2.0) * screen_scale.vertical;
+        const triangle_left: f32 = extent.x + (extent.width * 0.75);
+        const triangle_bottom: f32 = extent.y - (extent.height * 0.33);
 
-            const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
-            event_system.bindStateToMouseEvent(self.state_index, extent, &self.extent_index, bind_options);
+        triangle_vertices[0].x = triangle_left;
+        triangle_vertices[0].y = triangle_bottom - triangle_height;
+        triangle_vertices[1].x = triangle_left + triangle_width;
+        triangle_vertices[1].y = triangle_bottom - triangle_height;
+        triangle_vertices[2].x = triangle_left + (triangle_width / 2.0);
+        triangle_vertices[2].y = triangle_bottom;
+
+        const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+        event_system.bindStateToMouseEvent(self.state_index, extent, &self.extent_index, bind_options);
+
+        if (self.is_open) {
+            for (self.labels, 0..) |label, i| {
+                const item_extent = Extent2D(f32){
+                    .x = extent.x,
+                    .y = extent.y + (extent.height * @intToFloat(f32, i + 1)),
+                    .width = extent.width,
+                    .height = extent.height,
+                };
+                (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(item_extent, color, .bottom_left);
+                try pen.writeCentered(label, item_extent, screen_scale, &text_writer_interface);
+                event_system.bindStateToMouseEvent(self.item_states[i], item_extent, &self.item_extents[i], bind_options);
+            }
         }
     }
 };

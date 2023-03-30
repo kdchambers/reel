@@ -26,6 +26,7 @@ pub const AudioStream = struct {
 pub const VideoFormat = enum(u8) {
     mp4,
     avi,
+    mkv,
 };
 
 pub const VideoQuality = enum(u8) {

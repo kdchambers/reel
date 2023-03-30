@@ -2,6 +2,17 @@
 // Copyright (c) 2023 Keith Chambers
 
 const widgets = @import("widgets.zig");
+const Model = @import("../../Model.zig");
+const VideoFormat = Model.VideoFormat;
+
+pub const format_labels = [_][]const u8{
+    //
+    // TODO: Use a comptime function to generate format_labels
+    //
+    @tagName(VideoFormat.mp4),
+    @tagName(VideoFormat.avi),
+    @tagName(VideoFormat.mkv),
+};
 
 record_button: widgets.Button,
 record_format: widgets.Dropdown,

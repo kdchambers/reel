@@ -355,12 +355,6 @@ pub fn draw(
             record_format_region.width = 100 * screen_scale.horizontal;
             record_format_region.height = 30 * screen_scale.vertical;
 
-            const labels = [_][]const u8{
-                "mp4",
-                "avi",
-                "mkv",
-            };
-
             const dropdown_extent = record_format_region.toExtent();
             const dropdown_label = "Format";
 
@@ -381,12 +375,9 @@ pub fn draw(
 
             try ui_state.record_format.draw(
                 dropdown_extent,
-                &labels,
-                0,
                 pen,
                 screen_scale,
                 record_button_color_normal,
-                false,
             );
         }
     }

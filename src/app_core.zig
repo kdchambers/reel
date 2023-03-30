@@ -180,6 +180,11 @@ pub fn run() !void {
                         .state = .recording,
                     };
                 },
+                .record_format_set => {
+                    const format_index = request_buffer.readInt(u16) catch 0;
+                    model.recording_context.format = @intToEnum(Model.VideoFormat, format_index);
+                    std.log.info("Video format set to {s}", .{@tagName(model.recording_context.format)});
+                },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
