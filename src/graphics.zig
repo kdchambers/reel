@@ -150,7 +150,7 @@ pub const FaceWriter = struct {
         self.indices[indices_used + 1] = vertices_used + 1;
         self.indices[indices_used + 2] = vertices_used + 2;
 
-        self.vertex_used += 3;
+        self.vertices_used += 3;
         self.indices_used += 3;
 
         return @ptrCast(*TriangleFace, &self.vertices[vertices_used]);

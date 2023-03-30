@@ -18,6 +18,7 @@ const graphics = @import("../../../graphics.zig");
 const Vertex = graphics.GenericVertex;
 const FaceWriter = graphics.FaceWriter;
 const QuadFace = graphics.QuadFace;
+const TriangleFace = graphics.TriangleFace;
 const RGBA = graphics.RGBA;
 
 const TextWriterInterface = struct {
@@ -165,8 +166,38 @@ pub const Dropdown = struct {
         if (!is_open) {
             (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent, color, .bottom_left);
 
+            const label_extent = Extent2D(f32){
+                .x = extent.x,
+                .y = extent.y,
+                .width = extent.width * 0.7,
+                .height = extent.height,
+            };
             var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
-            try pen.writeCentered(labels[selected_index], extent, screen_scale, &text_writer_interface);
+            try pen.writeCentered(labels[selected_index], label_extent, screen_scale, &text_writer_interface);
+
+            var triangle_vertices: *TriangleFace = try face_writer_ref.create(TriangleFace);
+            const triangle_color = graphics.RGBA(f32).fromInt(200, 200, 200, 255);
+
+            triangle_vertices[0] = .{};
+            triangle_vertices[1] = .{};
+            triangle_vertices[2] = .{};
+
+            triangle_vertices[0].color = triangle_color;
+            triangle_vertices[1].color = triangle_color;
+            triangle_vertices[2].color = triangle_color;
+
+            const triangle_height: f32 = extent.height / 4.0;
+            const triangle_height_pixels = triangle_height / screen_scale.horizontal;
+            const triangle_width: f32 = (triangle_height_pixels * 2.0) * screen_scale.vertical;
+            const triangle_left: f32 = extent.x + (extent.width * 0.75);
+            const triangle_bottom: f32 = extent.y - (extent.height * 0.33);
+
+            triangle_vertices[0].x = triangle_left;
+            triangle_vertices[0].y = triangle_bottom - triangle_height;
+            triangle_vertices[1].x = triangle_left + triangle_width;
+            triangle_vertices[1].y = triangle_bottom - triangle_height;
+            triangle_vertices[2].x = triangle_left + (triangle_width / 2.0);
+            triangle_vertices[2].y = triangle_bottom;
 
             const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
             event_system.bindStateToMouseEvent(self.state_index, extent, &self.extent_index, bind_options);
