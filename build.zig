@@ -103,7 +103,6 @@ pub fn build(b: *Builder) void {
     // TODO: Remove header dependencies
     // TODO: Use pkg-config when linking dbus and pipewire
     //
-    exe.addIncludePath("/usr/include/dbus-1.0/");
     exe.addIncludePath("/usr/include/pipewire-0.3/");
     exe.addIncludePath("/usr/include/spa-0.2/");
     exe.linkSystemLibrary("dbus-1");
