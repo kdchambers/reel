@@ -56,7 +56,148 @@ pub fn init(
     is_mouse_in_screen_ref = is_mouse_in_screen;
 }
 
-pub const Section = packed struct(u64) {
+pub const TabbedSection = struct {
+    headings: []const []const u8,
+    active_index: u16,
+    underline_color: graphics.RGB(f32),
+    state_indices: mini_heap.SliceIndex(Index(HoverZoneState)),
+    vertex_indices: mini_heap.SliceIndex(u16),
+
+    pub fn create(
+        headings: []const []const u8,
+        underline_color: graphics.RGB(f32),
+    ) @This() {
+        std.debug.assert(headings.len <= 32);
+        var state_buffer: [32]Index(HoverZoneState) = undefined;
+        for (0..headings.len) |heading_i| {
+            state_buffer[heading_i] = event_system.reserveState();
+            state_buffer[heading_i].getPtr().clear();
+        }
+        const vertex_indices = mini_heap.reserve(
+            u16,
+            @intCast(u16, headings.len),
+            .{ .check_alignment = true },
+        );
+        const state_indices = mini_heap.writeSlice(
+            Index(HoverZoneState),
+            state_buffer[0..headings.len],
+            .{ .check_alignment = true },
+        );
+        return .{
+            .headings = headings,
+            .active_index = 0,
+            .underline_color = underline_color,
+            .state_indices = state_indices,
+            .vertex_indices = vertex_indices,
+        };
+    }
+
+    pub const UpdateResult = struct {
+        tab_changed: bool = false,
+    };
+
+    pub fn update(self: *@This()) UpdateResult {
+        const color_hovered = graphics.RGBA(f32).fromInt(50, 50, 50, 50);
+        const color_normal = graphics.RGBA(f32).fromInt(0, 0, 0, 0);
+        var vertex_indices = self.vertex_indices.get();
+
+        var result: UpdateResult = .{};
+
+        var state_indices = self.state_indices.get();
+        for (state_indices, 0..) |state_index, i| {
+            const state_copy = state_index.get();
+            state_index.getPtr().clear();
+            if (state_copy.hover_enter) {
+                const index_start = vertex_indices[i];
+                const index_end: usize = index_start + 4;
+                for (vertices_buffer_ref[index_start..index_end]) |*vertex| {
+                    vertex.color = color_hovered;
+                }
+            }
+            if (state_copy.hover_exit) {
+                const index_start = vertex_indices[i];
+                const index_end: usize = index_start + 4;
+                for (vertices_buffer_ref[index_start..index_end]) |*vertex| {
+                    vertex.color = color_normal;
+                }
+            }
+
+            if (state_copy.left_click_press) {
+                self.active_index = @intCast(u16, i);
+                result.tab_changed = true;
+            }
+        }
+
+        return result;
+    }
+
+    pub fn draw(
+        self: *@This(),
+        extent: Extent2D(f32),
+        screen_scale: ScaleFactor2D(f32),
+        pen: anytype,
+        border_width: f32,
+    ) !void {
+        _ = border_width;
+        if (screen_scale.horizontal == 0 or screen_scale.vertical == 0)
+            return;
+
+        const box_height: f32 = 40.0 * screen_scale.vertical;
+        const box_spacing: f32 = 60.0 * screen_scale.horizontal;
+        const text_padding: f32 = 5 * screen_scale.horizontal;
+
+        var vertex_indices = self.vertex_indices.get();
+        const background_color = graphics.RGBA(f32).fromInt(0, 0, 0, 0);
+
+        var state_indices = self.state_indices.get();
+
+        var current_x_offset: f32 = box_spacing / 2.0;
+        for (self.headings, 0..) |title, i| {
+            const title_width: f32 = pen.calculateRenderDimensions(title).width * screen_scale.horizontal;
+            const text_extent = geometry.Extent2D(f32){
+                .x = extent.x + current_x_offset,
+                .y = (extent.y - extent.height) + box_height,
+                .width = title_width + text_padding,
+                .height = box_height,
+            };
+            const box_extent = geometry.Extent2D(f32){
+                .x = extent.x + current_x_offset - (box_spacing / 2.0),
+                .y = (extent.y - extent.height) + box_height,
+                .width = title_width + box_spacing,
+                .height = box_height,
+            };
+
+            vertex_indices[i] = face_writer_ref.vertices_used;
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(box_extent, background_color, .bottom_left);
+
+            var dummy_extent_index = Index(geometry.Extent2D(f32)){ .index = std.math.maxInt(u16) };
+
+            const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+            event_system.bindStateToMouseEvent(state_indices[i], text_extent, &dummy_extent_index, bind_options);
+
+            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+            pen.writeCentered(title, text_extent, screen_scale, &text_writer_interface) catch |err| {
+                std.log.err("Failed to draw {}. Lack of space", .{err});
+            };
+
+            if (i == self.active_index) {
+                const underline_color = graphics.RGBA(f32).fromInt(150, 35, 57, 255);
+                const underline_width = box_spacing + title_width;
+                const underline_extent = geometry.Extent2D(f32){
+                    .x = extent.x + current_x_offset - (box_spacing / 2.0),
+                    .y = (extent.y - extent.height) + box_height,
+                    .width = underline_width,
+                    .height = 2 * screen_scale.vertical,
+                };
+                (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(underline_extent, underline_color, .bottom_left);
+            }
+
+            current_x_offset += (box_spacing + title_width);
+        }
+    }
+};
+
+pub const Section = struct {
     pub fn draw(
         extent: Extent2D(f32),
         title: []const u8,

@@ -6,6 +6,7 @@ const base = @import("widgets/base.zig");
 pub const init = base.init;
 
 pub const Section = base.Section;
+pub const TabbedSection = base.TabbedSection;
 pub const Dropdown = base.Dropdown;
 pub const Checkbox = base.Checkbox;
 pub const ImageButton = base.ImageButton;
