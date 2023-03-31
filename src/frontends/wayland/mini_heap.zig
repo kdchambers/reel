@@ -57,7 +57,7 @@ pub fn SliceIndex(comptime Type: type) type {
         count: u16,
 
         pub inline fn get(self: @This()) []Type {
-            const index = self.index.index;
+            const index = self.index;
             return @ptrCast([*]Type, @alignCast(alignment, &heap_memory[index]))[0..self.count];
         }
     };
@@ -154,10 +154,6 @@ pub inline fn usedBytesCount() u16 {
 pub inline fn reserve(comptime Type: type, count: u16, comptime options: WriteOptions) SliceIndex(Type) {
     const allocation_size = @sizeOf(Type) * @intCast(u16, count);
     const misalignment = allocation_size % heap_alignment;
-    //
-    // Even if `check_alignment` is false, we still want to check alignment in debug mode
-    //
-    std.debug.assert(misalignment == 0);
     const result_index = heap_index;
     heap_index += allocation_size;
     if (options.check_alignment) {
@@ -220,7 +216,7 @@ pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime opti
     std.debug.assert(slice.len <= std.math.maxInt(u16));
     const allocation_size = type_size * slice.len;
     // TODO: This is a hefty calculation for this function
-    const alignment_padding: u16 = @mod(heap_alignment - @mod(allocation_size, heap_alignment), heap_alignment);
+    const alignment_padding: u16 = @intCast(u16, @mod(heap_alignment - @mod(allocation_size, heap_alignment), heap_alignment));
     @memcpy(
         @ptrCast([*]u8, &heap_memory[heap_index]),
         @ptrCast([*]const u8, slice.ptr),
