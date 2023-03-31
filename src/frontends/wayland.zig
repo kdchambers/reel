@@ -70,6 +70,7 @@ const widgets = @import("wayland/widgets.zig");
 const Button = widgets.Button;
 const Checkbox = widgets.Checkbox;
 const Dropdown = widgets.Dropdown;
+const TabbedSection = widgets.TabbedSection;
 
 const application_name = "reel";
 const background_color = RGBA.fromInt(90, 90, 90, 255);
@@ -267,11 +268,18 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_format.labels = &UIState.format_labels;
     ui_state.record_format.selected_index = 0;
 
+    ui_state.screenshot_button = Button.create();
+
     ui_state.record_quality = try Dropdown.create(3);
     ui_state.record_quality.labels = &UIState.quality_labels;
     ui_state.record_quality.selected_index = 0;
 
     ui_state.enable_preview_checkbox = try Checkbox.create();
+
+    ui_state.action_tab = TabbedSection.create(
+        &UIState.tab_headings,
+        graphics.RGB(f32).fromInt(150, 35, 57),
+    );
 
     //
     // TODO: Don't hardcode bin count
@@ -408,6 +416,28 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                 ui_state.record_quality.is_open = false;
                 is_draw_required = true;
             }
+        }
+    }
+
+    const action_tab_update = ui_state.action_tab.update();
+    if(action_tab_update.tab_changed) {
+        std.log.info("Tab changed", .{});
+        is_draw_required = true;
+    }
+
+    {
+        const state = ui_state.screenshot_button.state();
+        if (state.hover_enter) {
+            ui_state.screenshot_button.setColor(record_button_color_hover);
+            is_render_requested = true;
+        }
+        if (state.hover_exit) {
+            ui_state.screenshot_button.setColor(record_button_color_normal);
+            is_render_requested = true;
+        }
+
+        if (state.left_click_release) {
+            request_encoder.write(.screenshot_do) catch unreachable;
         }
     }
 

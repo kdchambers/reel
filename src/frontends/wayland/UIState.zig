@@ -14,11 +14,21 @@ pub const format_labels = [_][]const u8{
     @tagName(VideoFormat.mkv),
 };
 
+pub const tab_headings = [_][]const u8{
+    "Record",
+    "Screenshot",
+    "Stream",
+};
+
 pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
+
+action_tab: widgets.TabbedSection,
 
 record_button: widgets.Button,
 record_format: widgets.Dropdown,
 record_quality: widgets.Dropdown,
+
+screenshot_button: widgets.Button,
 
 enable_preview_checkbox: widgets.Checkbox,
 audio_input_spectogram: widgets.AudioSpectogram,

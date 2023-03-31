@@ -102,11 +102,16 @@ pub const TabbedSection = struct {
         var vertex_indices = self.vertex_indices.get();
 
         var result: UpdateResult = .{};
-
         var state_indices = self.state_indices.get();
+
         for (state_indices, 0..) |state_index, i| {
             const state_copy = state_index.get();
             state_index.getPtr().clear();
+
+            std.debug.assert(state_index.get().hover_enter == false);
+            std.debug.assert(state_index.get().hover_exit == false);
+            std.debug.assert(state_index.get().left_click_press == false);
+
             if (state_copy.hover_enter) {
                 const index_start = vertex_indices[i];
                 const index_end: usize = index_start + 4;
@@ -123,8 +128,10 @@ pub const TabbedSection = struct {
             }
 
             if (state_copy.left_click_press) {
-                self.active_index = @intCast(u16, i);
-                result.tab_changed = true;
+                if (self.active_index != i) {
+                    self.active_index = @intCast(u16, i);
+                    result.tab_changed = true;
+                }
             }
         }
 

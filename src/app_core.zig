@@ -3,6 +3,8 @@
 
 const std = @import("std");
 const log = std.log;
+const zigimg = @import("zigimg");
+const graphics = @import("graphics.zig");
 const screencapture = @import("screencast.zig");
 const build_options = @import("build_options");
 const frontend = @import("frontend.zig");
@@ -82,9 +84,13 @@ var screencapture_open: bool = false;
 var screencapture_stream: ?screencapture.StreamInterface = null;
 var frame_index: u64 = 0;
 
+var gpa: std.mem.Allocator = undefined;
+
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
         return error.IncorrectState;
+
+    gpa = allocator;
 
     std.debug.assert(options.screencapture_order.len != 0);
 
@@ -153,7 +159,10 @@ pub fn run() !void {
                     std.log.info("core: shutdown request", .{});
                     return;
                 },
-                .screenshot_do => screencapture_interface.screenshot("screenshot.png"),
+                .screenshot_do => {
+                    std.log.info("Taking screenshot!", .{});
+                    screencapture_interface.screenshot(&onScreenshotReady);
+                },
                 .screenshot_display_set => {
                     const display_index = request_buffer.readInt(u16) catch 0;
                     const display_list = displayList();
@@ -188,7 +197,7 @@ pub fn run() !void {
                 .record_quality_set => {
                     const quality_index = request_buffer.readInt(u16) catch 0;
                     model.recording_context.quality = @intToEnum(Model.VideoQuality, quality_index);
-                    std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.format)});
+                    std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.quality)});
                 },
                 else => std.log.err("Invalid core request", .{}),
             }
@@ -285,4 +294,35 @@ fn screenCaptureInitFail(errcode: screencapture.InitErrorSet) void {
     // TODO: Handle
     std.log.err("app: Failed to open screen capture stream. Code: {}", .{errcode});
     std.debug.assert(false);
+}
+
+fn onScreenshotReady(width: u32, height: u32, pixels: [*]const graphics.RGBA(u8)) void {
+    const save_image_thread = std.Thread.spawn(.{}, saveImageToFile, .{ width, height, pixels, "screenshot.png" }) catch |err| {
+        std.log.err("Failed to create thread to open pipewire screencast. Error: {}", .{
+            err,
+        });
+        return;
+    };
+    save_image_thread.detach();
+}
+
+fn saveImageToFile(
+    width: u32,
+    height: u32,
+    pixels: [*]const graphics.RGBA(u8),
+    file_path: []const u8,
+) void {
+    const pixel_count: usize = @intCast(usize, width) * height;
+    var pixels_copy = gpa.dupe(graphics.RGBA(u8), pixels[0..pixel_count]) catch unreachable;
+    var image = zigimg.Image.create(gpa, width, height, .rgba32) catch {
+        std.log.err("Failed to create screenshot image", .{});
+        return;
+    };
+    const converted_pixels = @ptrCast([*]zigimg.color.Rgba32, pixels_copy.ptr)[0..pixel_count];
+    image.pixels = .{ .rgba32 = converted_pixels };
+    image.writeToFilePath(file_path, .{ .png = .{} }) catch {
+        std.log.err("Failed to write screenshot to path", .{});
+        return;
+    };
+    std.log.info("Screenshot saved!", .{});
 }

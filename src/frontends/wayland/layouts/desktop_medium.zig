@@ -12,6 +12,7 @@ const renderer = @import("../../../vulkan_renderer.zig");
 
 const widgets = @import("../widgets.zig");
 const Section = widgets.Section;
+const TabbedSection = widgets.TabbedSection;
 
 const geometry = @import("../../../geometry.zig");
 const Extent2D = geometry.Extent2D;
@@ -116,7 +117,7 @@ const Region = struct {
                 break :blk height;
             }
             if (self.anchor.top) |top_anchor| {
-                break :blk @fabs(y - top_anchor);
+                break :blk (y - top_anchor) - self.margin.top;
             }
             std.debug.assert(false);
             unreachable;
@@ -172,8 +173,6 @@ pub fn draw(
     pen: *Pen,
     face_writer: *FaceWriter,
 ) !void {
-    var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer };
-
     var information_bar_region: Region = .{};
     {
         information_bar_region.anchor.left = window.left();
@@ -188,10 +187,10 @@ pub fn draw(
         );
     }
 
-    if (model.desktop_capture_frame != null) {
+    var preview_region: Region = .{};
+    {
         const max_height_pixels: f32 = 540;
 
-        var preview_region: Region = .{};
         preview_region.anchor.left = window.left();
         preview_region.anchor.top = window.top();
         preview_region.anchor.right = window.right();
@@ -231,22 +230,48 @@ pub fn draw(
             .bottom_left,
         );
 
-        // TODO: This hurts my soul
-        renderer.video_stream_placement.x = preview_extent.x;
-        renderer.video_stream_placement.y = preview_extent.y;
-        renderer.video_stream_output_dimensions.width = preview_extent.width;
-        renderer.video_stream_output_dimensions.height = preview_extent.height;
+        if (model.desktop_capture_frame != null) {
+            // TODO: This hurts my soul
+            renderer.video_stream_placement.x = preview_extent.x;
+            renderer.video_stream_placement.y = preview_extent.y;
+            renderer.video_stream_output_dimensions.width = preview_extent.width;
+            renderer.video_stream_output_dimensions.height = preview_extent.height;
+        }
+    }
+
+    var action_tab_region: Region = .{};
+    {
+        action_tab_region.anchor.left = window.left();
+        action_tab_region.anchor.right = window.right();
+        action_tab_region.anchor.bottom = information_bar_region.top();
+        action_tab_region.height = 200 * screen_scale.vertical;
+
+        const background_color = RGB.fromInt(28, 28, 28);
+        const background_quad_ptr = try face_writer.create(QuadFace);
+        background_quad_ptr.* = graphics.quadColored(
+            action_tab_region.toExtent(),
+            background_color.toRGBA(),
+            .bottom_left,
+        );
+
+        const extent = action_tab_region.toExtent();
+        try ui_state.action_tab.draw(
+            extent,
+            screen_scale,
+            pen,
+            1 * screen_scale.horizontal,
+        );
     }
 
     var audio_input_section_region: Region = .{};
     {
         audio_input_section_region.anchor.left = window.left();
-        audio_input_section_region.anchor.bottom = information_bar_region.top();
-
+        audio_input_section_region.anchor.bottom = action_tab_region.top();
+        audio_input_section_region.anchor.top = preview_region.bottom();
         audio_input_section_region.margin.bottom = 15 * screen_scale.vertical;
         audio_input_section_region.margin.left = 15 * screen_scale.horizontal;
+        audio_input_section_region.margin.top = 40 * screen_scale.vertical;
         audio_input_section_region.width = 400 * screen_scale.horizontal;
-        audio_input_section_region.height = 200 * screen_scale.vertical;
 
         const section_title = "Audio Source";
         const section_border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
@@ -268,11 +293,11 @@ pub fn draw(
             spectrogram_region.anchor.left = audio_input_section_region.left();
 
             spectrogram_region.anchor.bottom = audio_input_section_region.bottom();
-            spectrogram_region.margin.bottom = 50 * screen_scale.vertical;
+            spectrogram_region.margin.bottom = 40 * screen_scale.vertical;
 
             ui_state.audio_input_spectogram.min_cutoff_db = -7.0;
             ui_state.audio_input_spectogram.max_cutoff_db = -2.0;
-            ui_state.audio_input_spectogram.height_pixels = 200;
+            ui_state.audio_input_spectogram.height_pixels = 150;
 
             try ui_state.audio_input_spectogram.draw(
                 mel_scaled_bins,
@@ -298,118 +323,157 @@ pub fn draw(
         }
     }
 
-    var control_section_region: Region = .{};
-    {
-        control_section_region.anchor.right = window.right();
-        control_section_region.anchor.left = audio_input_section_region.right();
-        control_section_region.anchor.bottom = information_bar_region.top();
-
-        control_section_region.margin.bottom = 15 * screen_scale.vertical;
-        control_section_region.margin.right = 15 * screen_scale.horizontal;
-        control_section_region.margin.left = 15 * screen_scale.horizontal;
-        control_section_region.height = 200 * screen_scale.vertical;
-
-        const section_title = "Recorder";
-        const section_border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
-
-        try Section.draw(
-            control_section_region.toExtent(),
-            section_title,
-            screen_scale,
-            pen,
-            section_border_color,
-            1 * screen_scale.horizontal,
-        );
-
-        {
-            //
-            // Draw Record Button
-            //
-            var record_button_region: Region = .{};
-            record_button_region.anchor.right = control_section_region.right();
-            record_button_region.margin.right = 10 * screen_scale.horizontal;
-            record_button_region.anchor.bottom = control_section_region.bottom();
-            record_button_region.margin.bottom = 10 * screen_scale.vertical;
-            record_button_region.width = 120 * screen_scale.horizontal;
-            record_button_region.height = 31 * screen_scale.vertical;
-
-            const label = switch (model.recording_context.state) {
-                .idle => "Record",
-                .recording => "Stop",
-                .paused => "Resume",
-            };
-            try ui_state.record_button.draw(
-                record_button_region.toExtent(),
-                record_button_color_normal,
-                label,
-                pen,
-                screen_scale,
-                .{ .rounding_radius = null },
-            );
-        }
-
-        var record_format_region: Region = .{};
-        {
-            record_format_region.anchor.left = control_section_region.left();
-            record_format_region.margin.left = 70 * screen_scale.horizontal;
-            record_format_region.anchor.top = control_section_region.top();
-            record_format_region.margin.top = 30 * screen_scale.vertical;
-            record_format_region.width = 100 * screen_scale.horizontal;
-            record_format_region.height = 30 * screen_scale.vertical;
-
-            const dropdown_extent = record_format_region.toExtent();
-            const dropdown_label = "Format";
-
-            const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
-            const label_extent = Extent2D(f32){
-                .x = record_format_region.anchor.left.? + (10 * screen_scale.horizontal),
-                .y = dropdown_extent.y,
-                //
-                // TODO: Seems like calculateRenderDimensions isn't calculating enough space for
-                //       the glyphs. writeCentered is failing sometimes because it doesn't have enough
-                //       space to fit the text into
-                //
-                .width = dropdown_label_dimensions.width * screen_scale.horizontal + 0.01,
-                .height = dropdown_extent.height,
-            };
-            try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
-
-            try ui_state.record_format.draw(
-                dropdown_extent,
-                pen,
-                screen_scale,
-                record_button_color_normal,
-            );
-        }
-
-        var record_quality_region: Region = .{};
-        {
-            record_quality_region.anchor.left = control_section_region.left();
-            record_quality_region.margin.left = 70 * screen_scale.horizontal;
-            record_quality_region.anchor.top = record_format_region.bottom();
-            record_quality_region.margin.top = 10 * screen_scale.vertical;
-            record_quality_region.width = 100 * screen_scale.horizontal;
-            record_quality_region.height = 30 * screen_scale.vertical;
-
-            const dropdown_extent = record_quality_region.toExtent();
-            const dropdown_label = "Quality";
-
-            const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
-            const label_extent = Extent2D(f32){
-                .x = record_quality_region.anchor.left.? + (10 * screen_scale.horizontal),
-                .y = dropdown_extent.y,
-                .width = dropdown_label_dimensions.width * screen_scale.horizontal + 0.01,
-                .height = dropdown_extent.height,
-            };
-
-            try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
-
-            try ui_state.record_quality.draw(
-                dropdown_extent,
-                pen,
-                screen_scale,
-                record_button_color_normal,
-            );
-        }
+    switch (ui_state.action_tab.active_index) {
+        0 => try drawSectionRecord(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
+        1 => try drawSectionScreenshot(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
+        2 => try drawSectionStream(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
+        else => unreachable,
     }
+}
+
+fn drawSectionScreenshot(
+    model: *const Model,
+    ui_state: *UIState,
+    screen_scale: ScaleFactor2D(f32),
+    pen: *Pen,
+    face_writer: *FaceWriter,
+    section_region: Region,
+) !void {
+    _ = model;
+    _ = face_writer;
+    var screenshot_button_region: Region = .{};
+    {
+        screenshot_button_region.anchor.right = section_region.right();
+        screenshot_button_region.anchor.bottom = section_region.bottom();
+        screenshot_button_region.margin.right = 10 * screen_scale.horizontal;
+        screenshot_button_region.margin.bottom = 10 * screen_scale.vertical;
+        screenshot_button_region.width = 100 * screen_scale.horizontal;
+        screenshot_button_region.height = 30 * screen_scale.vertical;
+
+        try ui_state.screenshot_button.draw(
+            screenshot_button_region.toExtent(),
+            record_button_color_normal,
+            "Screenshot",
+            pen,
+            screen_scale,
+            .{ .rounding_radius = null },
+        );
+    }
+}
+
+fn drawSectionRecord(
+    model: *const Model,
+    ui_state: *UIState,
+    screen_scale: ScaleFactor2D(f32),
+    pen: *Pen,
+    face_writer: *FaceWriter,
+    section_region: Region,
+) !void {
+    var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer };
+
+    //
+    // Draw Record Button
+    //
+    var record_button_region: Region = .{};
+    {
+        record_button_region.anchor.right = section_region.right();
+        record_button_region.margin.right = 10 * screen_scale.horizontal;
+        record_button_region.anchor.bottom = section_region.bottom();
+        record_button_region.margin.bottom = 10 * screen_scale.vertical;
+        record_button_region.width = 120 * screen_scale.horizontal;
+        record_button_region.height = 31 * screen_scale.vertical;
+
+        const label = switch (model.recording_context.state) {
+            .idle => "Record",
+            .recording => "Stop",
+            .paused => "Resume",
+        };
+        try ui_state.record_button.draw(
+            record_button_region.toExtent(),
+            record_button_color_normal,
+            label,
+            pen,
+            screen_scale,
+            .{ .rounding_radius = null },
+        );
+    }
+
+    var record_format_region: Region = .{};
+    {
+        record_format_region.anchor.left = section_region.left();
+        record_format_region.margin.left = 10 * screen_scale.horizontal;
+        record_format_region.anchor.top = section_region.top();
+        record_format_region.margin.top = 80 * screen_scale.vertical;
+
+        const dropdown_label = "Format";
+        const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
+        record_format_region.width = (dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
+        record_format_region.height = 30 * screen_scale.vertical;
+
+        const label_extent = record_format_region.toExtent();
+
+        try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
+
+        var dropdown_region: Region = .{};
+        dropdown_region.anchor.left = record_format_region.right();
+        dropdown_region.margin.left = 10 * screen_scale.horizontal;
+        dropdown_region.anchor.top = section_region.top();
+        dropdown_region.margin.top = 80 * screen_scale.vertical;
+        dropdown_region.width = 100 * screen_scale.horizontal;
+        dropdown_region.height = record_format_region.height;
+
+        try ui_state.record_format.draw(
+            dropdown_region.toExtent(),
+            pen,
+            screen_scale,
+            record_button_color_normal,
+        );
+    }
+
+    var record_quality_region: Region = .{};
+    {
+        record_quality_region.anchor.left = section_region.left();
+        record_quality_region.margin.left = 10 * screen_scale.horizontal;
+        record_quality_region.anchor.top = record_format_region.bottom();
+        record_quality_region.margin.top = 20 * screen_scale.vertical;
+
+        const dropdown_label = "Quality";
+        const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
+        record_quality_region.width = (dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
+        record_quality_region.height = 30 * screen_scale.vertical;
+
+        const label_extent = record_quality_region.toExtent();
+        try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
+
+        var dropdown_region: Region = .{};
+        dropdown_region.anchor.left = record_quality_region.right();
+        dropdown_region.margin.left = 10 * screen_scale.horizontal;
+        dropdown_region.anchor.top = record_format_region.bottom();
+        dropdown_region.margin.top = 20 * screen_scale.vertical;
+        dropdown_region.width = 100 * screen_scale.horizontal;
+        dropdown_region.height = record_format_region.height;
+
+        try ui_state.record_quality.draw(
+            dropdown_region.toExtent(),
+            pen,
+            screen_scale,
+            record_button_color_normal,
+        );
+    }
+}
+
+fn drawSectionStream(
+    model: *const Model,
+    ui_state: *UIState,
+    screen_scale: ScaleFactor2D(f32),
+    pen: *Pen,
+    face_writer: *FaceWriter,
+    section_region: Region,
+) !void {
+    _ = section_region;
+    _ = model;
+    _ = ui_state;
+    _ = screen_scale;
+    _ = pen;
+    _ = face_writer;
 }
