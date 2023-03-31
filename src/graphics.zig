@@ -400,7 +400,6 @@ pub fn drawCircle(
     face_writer.indices_used += point_count * 3;
 }
 
-// TODO: Move to graphics
 pub fn drawRoundRect(
     extent: Extent2D(f32),
     color: RGBA(f32),
@@ -609,7 +608,6 @@ pub fn drawRoundRect(
     }
 }
 
-// TODO: Move to graphics
 pub fn drawCross(
     extent: Extent2D(f32),
     width_horizontal: f32,
@@ -709,4 +707,41 @@ pub fn drawCross(
 
     face_writer.vertices_used += 8;
     face_writer.indices_used += 12;
+}
+
+pub fn drawBox(
+    extent: Extent2D(f32),
+    border_color: RGBA(f32),
+    border_width: f32,
+    face_writer: *FaceWriter,
+) !void {
+    const extent_left = geometry.Extent2D(f32){
+        .x = extent.x,
+        .y = extent.y,
+        .width = border_width,
+        .height = extent.height,
+    };
+    const extent_right = geometry.Extent2D(f32){
+        .x = extent.x + extent.width - border_width,
+        .y = extent.y,
+        .width = border_width,
+        .height = extent.height,
+    };
+    const extent_top = geometry.Extent2D(f32){
+        .x = extent.x + border_width,
+        .y = (extent.y - extent.height) + border_width,
+        .width = extent.width - border_width,
+        .height = border_width,
+    };
+    const extent_bottom = geometry.Extent2D(f32){
+        .x = extent.x + border_width,
+        .y = extent.y,
+        .width = extent.width - (border_width * 2.0),
+        .height = border_width,
+    };
+    const border_quads = try face_writer.allocate(QuadFace, 4);
+    border_quads[0] = quadColored(extent_left, border_color, .bottom_left);
+    border_quads[1] = quadColored(extent_right, border_color, .bottom_left);
+    border_quads[2] = quadColored(extent_top, border_color, .bottom_left);
+    border_quads[3] = quadColored(extent_bottom, border_color, .bottom_left);
 }
