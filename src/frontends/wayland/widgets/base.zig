@@ -62,6 +62,7 @@ pub const TabbedSection = struct {
     underline_color: graphics.RGB(f32),
     state_indices: mini_heap.SliceIndex(Index(HoverZoneState)),
     vertex_indices: mini_heap.SliceIndex(u16),
+    extent_indices: mini_heap.SliceIndex(Index(geometry.Extent2D(f32))),
 
     pub fn create(
         headings: []const []const u8,
@@ -78,6 +79,14 @@ pub const TabbedSection = struct {
             @intCast(u16, headings.len),
             .{ .check_alignment = true },
         );
+        const extent_indices = mini_heap.reserve(
+            Index(geometry.Extent2D(f32)),
+            @intCast(u16, headings.len),
+            .{ .check_alignment = true },
+        );
+        for(extent_indices.get()) |*extent_index| {
+            extent_index.index = std.math.maxInt(u16);
+        }
         const state_indices = mini_heap.writeSlice(
             Index(HoverZoneState),
             state_buffer[0..headings.len],
@@ -89,6 +98,7 @@ pub const TabbedSection = struct {
             .underline_color = underline_color,
             .state_indices = state_indices,
             .vertex_indices = vertex_indices,
+            .extent_indices = extent_indices,
         };
     }
 
@@ -157,6 +167,7 @@ pub const TabbedSection = struct {
         const background_color = graphics.RGBA(f32).fromInt(0, 0, 0, 0);
 
         var state_indices = self.state_indices.get();
+        var extent_indices = self.extent_indices.get();
 
         var current_x_offset: f32 = box_spacing / 2.0;
         for (self.headings, 0..) |title, i| {
@@ -177,10 +188,8 @@ pub const TabbedSection = struct {
             vertex_indices[i] = face_writer_ref.vertices_used;
             (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(box_extent, background_color, .bottom_left);
 
-            var dummy_extent_index = Index(geometry.Extent2D(f32)){ .index = std.math.maxInt(u16) };
-
             const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
-            event_system.bindStateToMouseEvent(state_indices[i], text_extent, &dummy_extent_index, bind_options);
+            event_system.bindStateToMouseEvent(state_indices[i], text_extent, &extent_indices[i], bind_options);
 
             var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
             pen.writeCentered(title, text_extent, screen_scale, &text_writer_interface) catch |err| {
