@@ -19,6 +19,7 @@ var cursor: *wl.Cursor = undefined;
 var cursor_surface: *wl.Surface = undefined;
 var xcursor: [:0]const u8 = undefined;
 
+// Called every time the compositor is ready to accept a new frame
 var frame_callback: *wl.Callback = undefined;
 var xdg_toplevel: *xdg.Toplevel = undefined;
 var xdg_surface: *xdg.Surface = undefined;
@@ -63,17 +64,11 @@ const FaceWriter = graphics.FaceWriter;
 
 const renderer = @import("../vulkan_renderer.zig");
 
-// TODO: eww
-const texture_layer_dimensions = renderer.texture_layer_dimensions;
-
 const widgets = @import("wayland/widgets.zig");
 const Button = widgets.Button;
 const Checkbox = widgets.Checkbox;
 const Dropdown = widgets.Dropdown;
 const TabbedSection = widgets.TabbedSection;
-
-const application_name = "reel";
-const background_color = RGBA.fromInt(90, 90, 90, 255);
 
 const app_core = @import("../app_core.zig");
 const Request = app_core.Request;
@@ -81,21 +76,6 @@ const Request = app_core.Request;
 const RequestEncoder = @import("../RequestEncoder.zig");
 
 var ui_state: UIState = undefined;
-
-const TextWriterInterface = struct {
-    quad_writer: *FaceWriter,
-    pub fn write(
-        self: *@This(),
-        screen_extent: Extent2D(f32),
-        texture_extent: Extent2D(f32),
-    ) !void {
-        (try self.quad_writer.create(QuadFace)).* = graphics.quadTextured(
-            screen_extent,
-            texture_extent,
-            .bottom_left,
-        );
-    }
-};
 
 const XCursor = struct {
     const hidden = "hidden";
@@ -157,10 +137,10 @@ pub var pen: Font.PenConfig(pen_options) = undefined;
 
 const asset_path_font = "assets/Roboto-Regular.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
+const window_title = "reel";
 
 var gpu_texture_mutex: std.Thread.Mutex = undefined;
 
-pub var previous_mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
 pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
 
 pub var screen_dimensions: geometry.Dimensions2D(u16) = .{
@@ -179,10 +159,7 @@ var framebuffer_resized: bool = false;
 pub var button_clicked: ButtonClicked = .none;
 pub var button_state: wl.Pointer.ButtonState = undefined;
 pub var is_mouse_moved: bool = false;
-var is_fullscreen: bool = false;
-var is_draw_requested: bool = true;
 
-// TODO: Remove
 var is_shutdown_requested: bool = false;
 
 var allocator_ref: std.mem.Allocator = undefined;
@@ -202,8 +179,10 @@ pub const InitError = error{
 
 pub const UpdateError = error{ VulkanRendererRenderFrameFail, UserInterfaceDrawFail };
 
+var last_recording_state: Model.RecordingContext.State = .idle;
+var last_preview_frame: u64 = 0;
+
 pub fn init(allocator: std.mem.Allocator) !void {
-    std.log.info("wayland init", .{});
     allocator_ref = allocator;
 
     initWaylandClient() catch return error.WaylandClientInitFail;
@@ -288,10 +267,13 @@ pub fn init(allocator: std.mem.Allocator) !void {
     zmath.fftInitUnityTable(&audio_utils.unity_table);
 }
 
-var last_preview_frame: u64 = 0;
-
 pub fn update(model: *const Model) UpdateError!RequestBuffer {
     request_encoder.used = 0;
+
+    if (model.recording_context.state != last_recording_state) {
+        last_recording_state = model.recording_context.state;
+        is_draw_required = true;
+    }
 
     if (is_shutdown_requested) {
         request_encoder.write(.core_shutdown) catch unreachable;
@@ -335,97 +317,124 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         }
     }
 
-    //
-    // Recording format selection dropdown
-    //
-    if (!ui_state.record_format.is_open) {
-        const state = ui_state.record_format.state();
-        if (state.hover_enter) {
-            ui_state.record_format.setColor(record_button_color_hover);
-            is_render_requested = true;
-        }
-        if (state.hover_exit) {
-            ui_state.record_format.setColor(record_button_color_normal);
-            is_render_requested = true;
-        }
-        if (state.left_click_release) {
-            ui_state.record_format.is_open = true;
-            is_draw_required = true;
-        }
-    } else {
-        const item_count = ui_state.record_format.item_count;
-        for (ui_state.record_format.item_states[0..item_count], 0..) |item_state, i| {
-            const state_copy = item_state.get();
-            item_state.getPtr().clear();
-            if (state_copy.hover_enter) {
-                ui_state.record_format.setItemColor(i, record_button_color_hover);
+    if (ui_state.action_tab.active_index == 0) {
+        //
+        // Recording format selection dropdown
+        //
+        if (!ui_state.record_format.is_open) {
+            const state = ui_state.record_format.state();
+            if (state.hover_enter) {
+                ui_state.record_format.setColor(record_button_color_hover);
                 is_render_requested = true;
             }
-            if (state_copy.hover_exit) {
-                ui_state.record_format.setItemColor(i, record_button_color_normal);
+            if (state.hover_exit) {
+                ui_state.record_format.setColor(record_button_color_normal);
                 is_render_requested = true;
             }
-            if (state_copy.left_click_release) {
-                if (i != ui_state.record_format.selected_index) {
-                    request_encoder.write(.record_format_set) catch unreachable;
-                    request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
-                }
-                ui_state.record_format.selected_index = @intCast(u16, i);
-                ui_state.record_format.is_open = false;
+            if (state.left_click_release) {
+                ui_state.record_format.is_open = true;
                 is_draw_required = true;
             }
+        } else {
+            const item_count = ui_state.record_format.item_count;
+            for (ui_state.record_format.item_states[0..item_count], 0..) |item_state, i| {
+                const state_copy = item_state.get();
+                item_state.getPtr().clear();
+                if (state_copy.hover_enter) {
+                    ui_state.record_format.setItemColor(i, record_button_color_hover);
+                    is_render_requested = true;
+                }
+                if (state_copy.hover_exit) {
+                    ui_state.record_format.setItemColor(i, record_button_color_normal);
+                    is_render_requested = true;
+                }
+                if (state_copy.left_click_release) {
+                    if (i != ui_state.record_format.selected_index) {
+                        request_encoder.write(.record_format_set) catch unreachable;
+                        request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
+                    }
+                    ui_state.record_format.selected_index = @intCast(u16, i);
+                    ui_state.record_format.is_open = false;
+                    is_draw_required = true;
+                }
+            }
         }
-    }
 
-    //
-    // Recording format selection dropdown
-    //
-    if (!ui_state.record_quality.is_open) {
-        const state = ui_state.record_quality.state();
-        if (state.hover_enter) {
-            ui_state.record_quality.setColor(record_button_color_hover);
-            is_render_requested = true;
-        }
-        if (state.hover_exit) {
-            ui_state.record_quality.setColor(record_button_color_normal);
-            is_render_requested = true;
-        }
-        if (state.left_click_release) {
-            ui_state.record_quality.is_open = true;
-            is_draw_required = true;
-        }
-    } else {
-        const item_count = ui_state.record_quality.item_count;
-        for (ui_state.record_quality.item_states[0..item_count], 0..) |item_state, i| {
-            const state_copy = item_state.get();
-            item_state.getPtr().clear();
-            if (state_copy.hover_enter) {
-                ui_state.record_quality.setItemColor(i, record_button_color_hover);
+        //
+        // Recording format selection dropdown
+        //
+        if (!ui_state.record_quality.is_open) {
+            const state = ui_state.record_quality.state();
+            if (state.hover_enter) {
+                ui_state.record_quality.setColor(record_button_color_hover);
                 is_render_requested = true;
             }
-            if (state_copy.hover_exit) {
-                ui_state.record_quality.setItemColor(i, record_button_color_normal);
+            if (state.hover_exit) {
+                ui_state.record_quality.setColor(record_button_color_normal);
                 is_render_requested = true;
             }
-            if (state_copy.left_click_release) {
-                if (i != ui_state.record_quality.selected_index) {
-                    request_encoder.write(.record_quality_set) catch unreachable;
-                    request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
+            if (state.left_click_release) {
+                ui_state.record_quality.is_open = true;
+                is_draw_required = true;
+            }
+        } else {
+            const item_count = ui_state.record_quality.item_count;
+            for (ui_state.record_quality.item_states[0..item_count], 0..) |item_state, i| {
+                const state_copy = item_state.get();
+                item_state.getPtr().clear();
+                if (state_copy.hover_enter) {
+                    ui_state.record_quality.setItemColor(i, record_button_color_hover);
+                    is_render_requested = true;
                 }
-                ui_state.record_quality.selected_index = @intCast(u16, i);
-                ui_state.record_quality.is_open = false;
+                if (state_copy.hover_exit) {
+                    ui_state.record_quality.setItemColor(i, record_button_color_normal);
+                    is_render_requested = true;
+                }
+                if (state_copy.left_click_release) {
+                    if (i != ui_state.record_quality.selected_index) {
+                        request_encoder.write(.record_quality_set) catch unreachable;
+                        request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
+                    }
+                    ui_state.record_quality.selected_index = @intCast(u16, i);
+                    ui_state.record_quality.is_open = false;
+                    is_draw_required = true;
+                }
+            }
+        }
+
+        {
+            const state = ui_state.record_button.state();
+            if (state.hover_enter) {
+                ui_state.record_button.setColor(record_button_color_hover);
+                is_render_requested = true;
+            }
+            if (state.hover_exit) {
+                ui_state.record_button.setColor(record_button_color_normal);
+                is_render_requested = true;
+            }
+
+            if (state.left_click_release) {
+                switch (model.recording_context.state) {
+                    .idle => request_encoder.write(.record_start) catch unreachable,
+                    .recording => request_encoder.write(.record_stop) catch unreachable,
+                    else => {},
+                }
                 is_draw_required = true;
             }
         }
+    } else {
+        _ = ui_state.record_button.state();
+        _ = ui_state.record_quality.state();
+        _ = ui_state.record_format.state();
     }
 
     const action_tab_update = ui_state.action_tab.update();
-    if(action_tab_update.tab_changed) {
+    if (action_tab_update.tab_changed) {
         std.log.info("Tab changed", .{});
         is_draw_required = true;
     }
 
-    {
+    if (ui_state.action_tab.active_index == 1) {
         const state = ui_state.screenshot_button.state();
         if (state.hover_enter) {
             ui_state.screenshot_button.setColor(record_button_color_hover);
@@ -439,23 +448,8 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         if (state.left_click_release) {
             request_encoder.write(.screenshot_do) catch unreachable;
         }
-    }
-
-    {
-        const state = ui_state.record_button.state();
-        if (state.hover_enter) {
-            ui_state.record_button.setColor(record_button_color_hover);
-            is_render_requested = true;
-        }
-        if (state.hover_exit) {
-            ui_state.record_button.setColor(record_button_color_normal);
-            is_render_requested = true;
-        }
-
-        if (state.left_click_release) {
-            request_encoder.write(.record_start) catch unreachable;
-            is_draw_required = true;
-        }
+    } else {
+        _ = ui_state.screenshot_button.state();
     }
 
     const mouse_position = mouseCoordinatesNDCR();
@@ -548,8 +542,7 @@ fn initWaylandClient() !void {
 
     wayland_core.pointer.setListener(*const void, pointerListener, &{});
 
-    // TODO: Don't hardcode
-    xdg_toplevel.setTitle("reel");
+    xdg_toplevel.setTitle(window_title);
     surface.commit();
 
     if (wayland_core.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
@@ -564,46 +557,6 @@ fn initWaylandClient() !void {
     cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_core.shared_memory);
     cursor = cursor_theme.getCursor(XCursor.left_ptr).?;
     xcursor = XCursor.left_ptr;
-}
-
-fn drawPreviewEnableCheckbox() !void {
-    const preview_margin_left: f64 = 20.0 * screen_scale.horizontal;
-    const checkbox_radius_pixels = 11;
-    const checkbox_width = checkbox_radius_pixels * screen_scale.horizontal * 2;
-    const y_offset = 20 * screen_scale.vertical;
-    const center = geometry.Coordinates2D(f64){
-        .x = -1.0 + (preview_margin_left + (checkbox_width / 2)),
-        .y = 0.5 + y_offset,
-    };
-    const is_set = true; // (stream_state == .preview or stream_state == .record_preview);
-    try ui_state.enable_preview_checkbox.draw(
-        center,
-        checkbox_radius_pixels,
-        screen_scale,
-        RGB.fromInt(55, 55, 55).toRGBA(),
-        is_set,
-    );
-
-    // TODO: Vertically aligning label will require knowing it's height
-    //       NOTE: Use writeCentered for this
-    const v_adjustment_hack = 0.85;
-
-    const placement = geometry.Coordinates2D(f32){
-        .x = @floatCast(f32, center.x + checkbox_width),
-        .y = @floatCast(f32, center.y + (checkbox_radius_pixels * screen_scale.vertical * v_adjustment_hack)),
-    };
-
-    var text_writer_interface = TextWriterInterface{ .quad_writer = &face_writer };
-    try pen.write(
-        "Enable Preview",
-        placement,
-        .{
-            .horizontal = screen_scale.horizontal,
-            .vertical = screen_scale.vertical,
-        },
-        // screen_scale,
-        &text_writer_interface,
-    );
 }
 
 fn xdgSurfaceListener(xdg_surface_ref: *xdg.Surface, event: xdg.Surface.Event, surface_ref: *wl.Surface) void {
@@ -629,20 +582,6 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
                 framebuffer_resized = true;
                 screen_dimensions.height = @intCast(u16, configure.height);
                 screen_scale.vertical = 2.0 / @intToFloat(f32, screen_dimensions.height);
-            }
-
-            const state_list = configure.states.slice(xdg.Toplevel.State);
-            is_fullscreen = false;
-            for (state_list) |state| {
-                if (state == .fullscreen) {
-                    is_draw_requested = true;
-                    //
-                    // TODO: This is kind of a hack but we need to force a redraw
-                    //       when the screen is made fullscreen
-                    //
-                    is_fullscreen = true;
-                    std.log.info("Fullscreen activated", .{});
-                }
             }
             frame_callback.destroy();
             frame_callback = surface.frame() catch |err| {
@@ -776,7 +715,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 }
 
                 if (mouse_x > max_width and mouse_y > max_height) {
-                    xdg_toplevel.resize(wayland_core.seat, button.serial, .bottom_right);
+                    xdg_toplevel.resize(wayland_core.seat, button.serial, .top_right);
                     return;
                 }
 
