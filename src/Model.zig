@@ -36,7 +36,7 @@ pub const VideoQuality = enum(u8) {
 };
 
 pub const RecordingContext = struct {
-    const State = enum {
+    pub const State = enum {
         idle,
         recording,
         paused,
