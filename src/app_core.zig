@@ -5,13 +5,15 @@ const std = @import("std");
 const log = std.log;
 const zigimg = @import("zigimg");
 const graphics = @import("graphics.zig");
-const screencapture = @import("screencast.zig");
+const screencapture = @import("screencapture.zig");
 const build_options = @import("build_options");
 const frontend = @import("frontend.zig");
 const Model = @import("Model.zig");
+const Timer = @import("Timer.zig");
 const zmath = @import("zmath");
 const video_encoder = @import("video_record.zig");
 const RequestBuffer = @import("RequestBuffer.zig");
+const geometry = @import("geometry.zig");
 
 const audio_input = @import("audio.zig");
 var audio_input_interface: audio_input.Interface = undefined;
@@ -19,9 +21,6 @@ var audio_input_interface: audio_input.Interface = undefined;
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
 pub const Request = enum(u8) {
-    //
-    // TODO: Probably app_ is better than core_ ?
-    //
     core_shutdown,
 
     record_start,
@@ -65,7 +64,7 @@ var screencapture_interface: screencapture.Interface = undefined;
 var frontend_interface: frontend.Interface = undefined;
 
 var model: Model = .{
-    .audio_input_samples = undefined,
+    .input_audio_buffer = undefined,
     .audio_input_volume_db = -9.0,
     .desktop_capture_frame = null,
     .recording_context = .{
@@ -95,7 +94,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     std.debug.assert(options.screencapture_order.len != 0);
 
     if (comptime build_options.have_wayland) {
-        wayland_core.init(allocator) catch |err| {
+        wayland_core.init(gpa) catch |err| {
             log.err("Failed to initialize Wayland. Error: {}", .{err});
             return error.WaylandInitFail;
         };
@@ -122,12 +121,13 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     _ = wayland_core.sync();
 
     frontend_interface = frontend.interface(options.frontend);
-    frontend_interface.init(allocator) catch return error.FrontendInitFail;
+    frontend_interface.init(gpa) catch return error.FrontendInitFail;
 
     //
-    // TODO: Don't hardcode number of samples
+    // Buffer size of ~10 milliseconds at a sample rate of 44100 and 2 channels
     //
-    model.audio_input_samples = allocator.alloc(i16, 3000) catch return error.OutOfMemory;
+    const buffer_capacity_samples: usize = @divExact(44100, 10) * 2;
+    try model.input_audio_buffer.init(gpa, buffer_capacity_samples);
 
     audio_input_interface = audio_input.createBestInterface(&onAudioInputRead);
 
@@ -138,12 +138,11 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 }
 
 pub fn run() !void {
-    const input_fps = 120;
+    const input_fps = 60;
     const ns_per_frame = @divFloor(std.time.ns_per_s, input_fps);
-    var runtime_ns: u64 = 0;
 
     while (true) {
-        var frame_start = std.time.nanoTimestamp();
+        const frame_timer = Timer.now();
         _ = wayland_core.sync();
 
         model_mutex.lock();
@@ -189,6 +188,11 @@ pub fn run() !void {
                         .state = .recording,
                     };
                 },
+                .record_stop => {
+                    video_encoder.close();
+                    model.recording_context.state = .idle;
+                    std.log.info("Video terminated", .{});
+                },
                 .record_format_set => {
                     const format_index = request_buffer.readInt(u16) catch 0;
                     model.recording_context.format = @intToEnum(Model.VideoFormat, format_index);
@@ -203,16 +207,21 @@ pub fn run() !void {
             }
         }
 
-        const frame_duration = @intCast(u64, std.time.nanoTimestamp() - frame_start);
+        //
+        // if recording, and have a complete video + audio frame, send it to the encoder
+        //
+
+        const frame_duration = frame_timer.duration();
         if (frame_duration < ns_per_frame) {
             std.time.sleep(ns_per_frame - frame_duration);
         }
-        runtime_ns += ns_per_frame;
     }
 }
 
 pub fn deinit() void {
     audio_input_interface.close();
+
+    model.input_audio_buffer.deinit(gpa);
 
     frontend_interface.deinit();
     if (comptime build_options.have_wayland) wayland_core.deinit();
@@ -242,7 +251,8 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
 pub fn onAudioInputRead(pcm_buffer: []i16) void {
     model_mutex.lock();
     defer model_mutex.unlock();
-    std.mem.copy(i16, model.audio_input_samples.?, pcm_buffer);
+
+    model.input_audio_buffer.appendOverwrite(pcm_buffer);
 }
 
 fn handleAudioInputInitSuccess() void {

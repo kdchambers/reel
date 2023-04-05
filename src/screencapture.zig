@@ -6,9 +6,9 @@ const build_options = @import("build_options");
 const graphics = @import("graphics.zig");
 const geometry = @import("geometry.zig");
 
-const backend_pipewire = @import("screencast_backends/pipewire/screencast_pipewire.zig");
+const backend_pipewire = @import("screencapture_backends/pipewire/screencapture_pipewire.zig");
 const backend_wlroots = if (build_options.have_wayland)
-    @import("screencast_backends/wlroots/screencast_wlroots.zig")
+    @import("screencapture_backends/wlroots/screencapture_wlroots.zig")
 else
     void;
 
@@ -62,8 +62,9 @@ fn GenerateBackendEnum() type {
 pub const InitFn = fn (onSuccess: *const InitOnSuccessFn, onError: *const InitOnErrorFn) void;
 pub const OpenStreamFn = fn (on_success: *const OpenStreamOnSuccessFn, on_error: *const OpenStreamOnErrorFn) void;
 pub const DeinitFn = fn () void;
-pub const ScreenshotFn = fn (output_path: []const u8) void;
+pub const ScreenshotFn = fn (callback: *const OnScreenshotReadyFn) void;
 
+pub const OnScreenshotReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
 pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
 
 pub const OpenStreamOnSuccessFn = fn (stream_interface: StreamInterface) void;

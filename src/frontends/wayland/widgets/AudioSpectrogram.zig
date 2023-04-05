@@ -26,11 +26,10 @@ max_cutoff_db: f32,
 
 pub fn draw(
     self: *@This(),
-    freq_bins: []f32,
+    freq_bins: []const f32,
     placement: geometry.Coordinates2D(f32),
     screen_scale: ScaleFactor2D(f32),
 ) !void {
-    std.log.info("Drawing audio input spectogram", .{});
     self.bin_count = @intCast(u16, freq_bins.len);
     const height = self.height_pixels * screen_scale.vertical;
     const bar_width: f32 = 4 * screen_scale.horizontal;

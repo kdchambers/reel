@@ -7,7 +7,7 @@ const builtin = @import("builtin");
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const wlr = wayland.client.zwlr;
-const screencast = @import("../../screencast.zig");
+const screencapture = @import("../../screencapture.zig");
 const wayland_core = @import("../../wayland_core.zig");
 const geometry = @import("../../geometry.zig");
 
@@ -16,9 +16,9 @@ const wayland_client = @import("../../frontends/wayland.zig");
 const WaylandBufferAllocator = @import("BufferAllocator.zig");
 var buffer_allocator: WaylandBufferAllocator = undefined;
 
-const StreamInterface = screencast.StreamInterface;
+const StreamInterface = screencapture.StreamInterface;
 
-const PixelType = screencast.PixelType;
+const PixelType = screencapture.PixelType;
 
 const DisplayInfo = struct {
     width: u32,
@@ -35,7 +35,7 @@ const Entry = struct {
 
 const invalid_frame = std.math.maxInt(u32);
 
-pub var stream_state: screencast.State = .uninitialized;
+pub var stream_state: screencapture.State = .uninitialized;
 
 var display_info: DisplayInfo = undefined;
 
@@ -44,10 +44,10 @@ var entry_buffer: [buffer_entry_count]Entry = undefined;
 
 var screencapture_frame: *wlr.ScreencopyFrameV1 = undefined;
 
-var onOpenSuccessCallback: *const screencast.OpenOnSuccessFn = undefined;
-var onOpenErrorCallback: *const screencast.OpenOnErrorFn = undefined;
+var onOpenSuccessCallback: *const screencapture.OpenOnSuccessFn = undefined;
+var onOpenErrorCallback: *const screencapture.OpenOnErrorFn = undefined;
 
-var frameReadyCallback: *const screencast.OnFrameReadyFn = undefined;
+var frameReadyCallback: *const screencapture.OnFrameReadyFn = undefined;
 
 var frametick_callback_index: u32 = 0;
 
@@ -59,8 +59,8 @@ pub var output_opt: ?*wl.Output = null;
 var screenshot_output_path: []const u8 = undefined;
 
 pub fn createInterface(
-    onFrameReadyCallback: *const screencast.OnFrameReadyFn,
-) screencast.Interface {
+    onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
+) screencapture.Interface {
     frameReadyCallback = onFrameReadyCallback;
     return .{
         .openStream = openStream,
@@ -74,23 +74,23 @@ pub fn detectSupport() bool {
     return (wayland_core.screencopy_manager_opt != null and wayland_core.output_opt != null);
 }
 
-var onInitSuccessCallback: *const screencast.InitOnSuccessFn = undefined;
-var onInitErrorCallback: *const screencast.InitOnErrorFn = undefined;
+var onInitSuccessCallback: *const screencapture.InitOnSuccessFn = undefined;
+var onInitErrorCallback: *const screencapture.InitOnErrorFn = undefined;
 
 pub const InitErrorSet = error{
     NoWaylandDisplay,
     NoWaylandOutput,
     CaptureOutputFail,
     AllocateWaylandBuffersFail,
-    WaylandScreencastFail,
+    WaylandScreencaptureFail,
     OutOfMemory,
 };
 
 pub fn deinit() void {}
 
 pub fn init(
-    on_success_cb: *const screencast.InitOnSuccessFn,
-    on_error_cb: *const screencast.InitOnErrorFn,
+    on_success_cb: *const screencapture.InitOnSuccessFn,
+    on_error_cb: *const screencapture.InitOnErrorFn,
 ) void {
     onInitSuccessCallback = on_success_cb;
     onInitErrorCallback = on_error_cb;
@@ -124,10 +124,10 @@ fn streamClose(self: StreamInterface) void {
 }
 
 pub fn openStream(
-    on_success_cb: *const screencast.OpenStreamOnSuccessFn,
-    on_error_cb: *const screencast.OpenStreamOnErrorFn,
+    on_success_cb: *const screencapture.OpenStreamOnSuccessFn,
+    on_error_cb: *const screencapture.OpenStreamOnErrorFn,
 ) void {
-    std.log.info("Opening wlroots screencast backend", .{});
+    std.log.info("Opening wlroots screencapture backend", .{});
     _ = on_error_cb;
 
     wayland_client.addOnFrameCallback(&onFrameTick);
@@ -140,7 +140,7 @@ pub fn openStream(
     });
 }
 
-pub fn state() screencast.State {
+pub fn state() screencapture.State {
     return stream_state;
 }
 
@@ -153,7 +153,7 @@ fn onFrameTick(frame_index: u32) void {
                 if (entry_ptr.frame_index == std.math.maxInt(u32)) {
                     entry_ptr.frame_index = frame_index;
                     const next_frame = screencopy_manager.captureOutput(1, display_output) catch {
-                        std.log.err("screencast: Failed to capture next frame", .{});
+                        std.log.err("screencapture: Failed to capture next frame", .{});
                         stream_state = .fatal_error;
                         return;
                     };
@@ -171,22 +171,30 @@ fn onFrameTick(frame_index: u32) void {
     //
     // TODO: Just overwrite the older frame and log a warning
     //
-    std.log.err("Screencast internal buffer full", .{});
+    std.log.err("screencapture internal buffer full", .{});
     stream_state = .fatal_error;
 }
 
-pub fn screenshot(file_path: []const u8) void {
-    screenshot_output_path = file_path;
+var screenshot_callback: *const screencapture.OnScreenshotReadyFn = undefined; 
+var screenshot_requested: bool = false;
 
-    const display_output = wayland_core.output_opt.?;
-    const screencopy_manager = wayland_core.screencopy_manager_opt.?;
-    screencapture_frame = screencopy_manager.captureOutput(1, display_output) catch return;
-    screencapture_frame.setListener(
-        *const void,
-        screenshotFrameCaptureCallback,
-        &{},
-    );
+pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn) void {
+    screenshot_callback = callback;
+    screenshot_requested = true;
 }
+
+// pub fn screenshot(file_path: []const u8) void {
+//     screenshot_output_path = file_path;
+
+//     const display_output = wayland_core.output_opt.?;
+//     const screencopy_manager = wayland_core.screencopy_manager_opt.?;
+//     screencapture_frame = screencopy_manager.captureOutput(1, display_output) catch return;
+//     screencapture_frame.setListener(
+//         *const void,
+//         screenshotFrameCaptureCallback,
+//         &{},
+//     );
+// }
 
 fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, entry: *Entry) void {
     switch (event) {
@@ -204,9 +212,14 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
 
             entry.frame_index = invalid_frame;
             frameReadyCallback(display_info.width, display_info.height, unconverted_pixels);
+
+            if(screenshot_requested) {
+                screenshot_requested = false;
+                screenshot_callback(display_info.width, display_info.height, unconverted_pixels);
+            }
         },
         .failed => {
-            std.log.err("screencast: Frame capture failed", .{});
+            std.log.err("screencapture: Frame capture failed", .{});
             frame.destroy();
             stream_state = .fatal_error;
         },
@@ -242,7 +255,7 @@ fn initFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screencopy
         .failed => {
             frame.destroy();
             stream_state = .fatal_error;
-            onInitErrorCallback(error.WaylandScreencastFail);
+            onInitErrorCallback(error.WaylandScreencaptureFail);
         },
         else => {},
     }

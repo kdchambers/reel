@@ -5,7 +5,7 @@ const std = @import("std");
 const dbus = @import("../../dbus.zig");
 
 const graphics = @import("../../graphics.zig");
-const screencast = @import("../../screencast.zig");
+const screencapture = @import("../../screencapture.zig");
 
 // TODO: Remove
 const c = @cImport({
@@ -22,7 +22,7 @@ const pw = @cImport({
 });
 
 //
-// These functions come from pipewire_screencast_extra.c
+// These functions come from pipewire_stream_extra.c
 //
 extern fn parseStreamFormat(params: [*c]const pw.spa_pod) callconv(.C) StreamFormat;
 extern fn buildPipewireParams(builder: *pw.spa_pod_builder) callconv(.C) *pw.spa_pod;
@@ -78,9 +78,9 @@ const stream_events = pw.pw_stream_events{
 };
 
 pub var stream_format: StreamFormat = undefined;
-pub var stream_state: screencast.State = .uninitialized;
+pub var stream_state: screencapture.State = .uninitialized;
 
-pub var frameReadyCallback: *const screencast.OnFrameReadyFn = undefined;
+pub var frameReadyCallback: *const screencapture.OnFrameReadyFn = undefined;
 
 var stream_listener: pw.spa_hook = undefined;
 var stream: *pw.pw_stream = undefined;
@@ -90,15 +90,15 @@ var server_version_sync: i32 = undefined;
 var request_count: u32 = 0;
 var session_count: u32 = 0;
 
-var onOpenSuccessCallback: *const screencast.OpenOnSuccessFn = undefined;
-var onOpenErrorCallback: *const screencast.OpenOnErrorFn = undefined;
+var onOpenSuccessCallback: *const screencapture.OpenOnSuccessFn = undefined;
+var onOpenErrorCallback: *const screencapture.OpenOnErrorFn = undefined;
 
 var init_thread: std.Thread = undefined;
 var once: bool = true;
 
 pub fn createInterface(
-    onFrameReadyCallback: *const screencast.OnFrameReadyFn,
-) screencast.Interface {
+    onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
+) screencapture.Interface {
     frameReadyCallback = onFrameReadyCallback;
     return .{
         .init = _init,
@@ -114,11 +114,11 @@ pub fn createInterface(
 }
 
 pub fn deinit() void {}
-pub fn _init(_: *const screencast.InitOnSuccessFn, _: *const screencast.InitOnErrorFn) void {}
+pub fn _init(_: *const screencapture.InitOnSuccessFn, _: *const screencapture.InitOnErrorFn) void {}
 
 pub fn openStream(
-    _: *const screencast.OpenStreamOnSuccessFn,
-    _: *const screencast.OpenStreamOnErrorFn,
+    _: *const screencapture.OpenStreamOnSuccessFn,
+    _: *const screencapture.OpenStreamOnErrorFn,
 ) void {}
 
 pub fn detectSupport() bool {
@@ -133,8 +133,8 @@ pub fn detectSupport() bool {
 }
 
 pub fn open(
-    on_success_cb: *const screencast.OpenOnSuccessFn,
-    on_error_cb: *const screencast.OpenOnErrorFn,
+    on_success_cb: *const screencapture.OpenOnSuccessFn,
+    on_error_cb: *const screencapture.OpenOnErrorFn,
 ) InitErrorSet!void {
     onOpenSuccessCallback = on_success_cb;
     onOpenErrorCallback = on_error_cb;
@@ -144,7 +144,7 @@ pub fn open(
 
     init_thread = std.Thread.spawn(.{}, init, .{}) catch |err| {
         onOpenErrorCallback();
-        std.log.err("Failed to create thread to open pipewire screencast. Error: {}", .{
+        std.log.err("Failed to create thread to open pipewire screencapture. Error: {}", .{
             err,
         });
         return error.CreateThreadFail;
@@ -171,11 +171,9 @@ pub fn unpause() void {
 }
 
 // TODO: Implement
-pub fn screenshot(file_path: []const u8) void {
-    _ = file_path;
-}
+pub fn screenshot(_: *const screencapture.OnScreenshotReadyFn) void {}
 
-pub fn state() screencast.State {
+pub fn state() screencapture.State {
     return stream_state;
 }
 
@@ -1251,8 +1249,8 @@ fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
     std.debug.assert(stream_state == .open);
     const buffer = pw.pw_stream_dequeue_buffer(stream);
     const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
-    const alignment = @alignOf(screencast.PixelType);
-    const buffer_pixels = @ptrCast([*]const screencast.PixelType, @alignCast(alignment, buffer_bytes));
+    const alignment = @alignOf(screencapture.PixelType);
+    const buffer_pixels = @ptrCast([*]const screencapture.PixelType, @alignCast(alignment, buffer_bytes));
     frameReadyCallback(
         stream_format.width,
         stream_format.height,

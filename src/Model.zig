@@ -9,6 +9,8 @@ const Dimensions2D = geometry.Dimensions2D;
 const graphics = @import("graphics.zig");
 const RGBA = graphics.RGBA;
 
+const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
+
 pub const VideoSource = enum(u8) {
     desktop,
     webcam,
@@ -60,7 +62,7 @@ pub const VideoFrame = struct {
 // This defines all state that is relevant to the user interface
 //
 
-audio_input_samples: ?[]i16,
+input_audio_buffer: AudioSampleRingBuffer,
 audio_input_volume_db: f32,
 desktop_capture_frame: ?VideoFrame,
 recording_context: RecordingContext,

@@ -488,8 +488,18 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         //
         // Redraw not required, but update widgets
         //
-        if (model.audio_input_samples) |audio_input_samples| {
-            const audio_power_spectrum = audio_utils.samplesToPowerSpectrum(audio_input_samples);
+        const sample_range = model.input_audio_buffer.sampleRange();
+        const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
+        if (sample_range.count >= samples_per_frame) {
+            const sample_offset: usize = sample_range.count - samples_per_frame;
+            const sample_index = sample_range.base_sample + sample_offset;
+            var sample_buffer: [samples_per_frame]f32 = undefined;
+            const samples = model.input_audio_buffer.samplesCopyIfRequired(
+                sample_index,
+                samples_per_frame,
+                &sample_buffer,
+            );
+            const audio_power_spectrum = audio_utils.samplesToPowerSpectrum(samples);
             const mel_scaled_bins = audio_utils.powerSpectrumToMelScale(audio_power_spectrum, 64);
             ui_state.audio_input_spectogram.update(mel_scaled_bins, screen_scale) catch unreachable;
 

@@ -48,7 +48,7 @@ const reference_max_audio: f32 = 128.0 * 4.0;
 
 pub fn powerSpectrumToVolumeDb(power_spectrum: [fft_bin_count / 8]zmath.F32x4) f32 {
     var accumulator: zmath.F32x4 = .{ 0, 0, 0, 0 };
-    for(power_spectrum) |values| {
+    for (power_spectrum) |values| {
         accumulator += values;
     }
     const total_power = (accumulator[0] + accumulator[1] + accumulator[2] + accumulator[3]);
@@ -57,9 +57,8 @@ pub fn powerSpectrumToVolumeDb(power_spectrum: [fft_bin_count / 8]zmath.F32x4) f
 }
 
 pub fn powerSpectrumToMelScale(power_spectrum: [fft_bin_count / 8]zmath.F32x4, output_bin_count: u32) []f32 {
-
     const usable_bin_count = power_spectrum.len * 4;
-    var mel_bins = [1]f32{ 0.00000000001} ** usable_bin_count;
+    var mel_bins = [1]f32{0.00000000001} ** usable_bin_count;
 
     var i: usize = 1;
     while (i < usable_bin_count) : (i += 1) {
@@ -100,19 +99,11 @@ pub fn powerSpectrumToMelScale(power_spectrum: [fft_bin_count / 8]zmath.F32x4, o
 
 const hamming_table = audio_input.calculateHammingWindowTable(fft_bin_count);
 
-pub fn samplesToPowerSpectrum(pcm_buffer: []i16) [fft_bin_count / 8]zmath.F32x4 {
-    // audio_power_table_mutex.lock();
-    // defer audio_power_table_mutex.unlock();
-
-    // const fft_buffer: [fft_bin_count / 2]f32 = undefined;
-
+pub fn samplesToPowerSpectrum(pcm_buffer: []const f32) [fft_bin_count / 8]zmath.F32x4 {
     const fft_overlap_samples = @divExact(fft_bin_count, 2);
     const fft_iteration_count = ((pcm_buffer.len / 2) / (fft_overlap_samples - 1)) - 1;
 
     var power_spectrum = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (fft_bin_count / 8);
-
-    // if (stream_state == .record or stream_state == .record_preview)
-    //     audio_sample_ring_buffer.push(pcm_buffer) catch unreachable;
 
     var i: usize = 0;
     while (i < fft_iteration_count) : (i += 1) {
@@ -132,13 +123,12 @@ pub fn samplesToPowerSpectrum(pcm_buffer: []i16) [fft_bin_count / 8]zmath.F32x4 
             var k: usize = 0;
             var j: usize = 0;
             for (&result) |*sample| {
-                const max = std.math.maxInt(i16);
                 // TODO: The indexing here is dependent on the channel count
                 sample.* = .{
-                    ((@intToFloat(f32, pcm_window[j + 0])) / max) * hamming_table[k + 0],
-                    ((@intToFloat(f32, pcm_window[j + 2])) / max) * hamming_table[k + 1],
-                    ((@intToFloat(f32, pcm_window[j + 4])) / max) * hamming_table[k + 2],
-                    ((@intToFloat(f32, pcm_window[j + 6])) / max) * hamming_table[k + 3],
+                    pcm_window[j + 0] * hamming_table[k + 0],
+                    pcm_window[j + 2] * hamming_table[k + 1],
+                    pcm_window[j + 4] * hamming_table[k + 2],
+                    pcm_window[j + 6] * hamming_table[k + 3],
                 };
                 j += 8;
                 k += 4;

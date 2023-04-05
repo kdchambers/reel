@@ -178,7 +178,7 @@ pub fn draw(
         information_bar_region.anchor.left = window.left();
         information_bar_region.anchor.bottom = window.bottom();
         information_bar_region.width = window.width();
-        information_bar_region.height = 30 * screen_scale.horizontal;
+        information_bar_region.height = 30 * screen_scale.vertical;
         const background_color = RGB.fromInt(50, 50, 50);
         (try face_writer.create(QuadFace)).* = graphics.quadColored(
             information_bar_region.toExtent(),
@@ -267,11 +267,10 @@ pub fn draw(
     {
         audio_input_section_region.anchor.left = window.left();
         audio_input_section_region.anchor.bottom = action_tab_region.top();
-        audio_input_section_region.anchor.top = preview_region.bottom();
         audio_input_section_region.margin.bottom = 15 * screen_scale.vertical;
         audio_input_section_region.margin.left = 15 * screen_scale.horizontal;
-        audio_input_section_region.margin.top = 40 * screen_scale.vertical;
         audio_input_section_region.width = 400 * screen_scale.horizontal;
+        audio_input_section_region.height = 200 * screen_scale.vertical;
 
         const section_title = "Audio Source";
         const section_border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
@@ -285,10 +284,7 @@ pub fn draw(
             1 * screen_scale.horizontal,
         );
 
-        if (model.audio_input_samples) |audio_input_samples| {
-            const audio_power_spectrum = audio.samplesToPowerSpectrum(audio_input_samples);
-            const mel_scaled_bins = audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
-
+        {
             var spectrogram_region: Region = .{};
             spectrogram_region.anchor.left = audio_input_section_region.left();
 
@@ -299,11 +295,33 @@ pub fn draw(
             ui_state.audio_input_spectogram.max_cutoff_db = -2.0;
             ui_state.audio_input_spectogram.height_pixels = 150;
 
-            try ui_state.audio_input_spectogram.draw(
-                mel_scaled_bins,
-                spectrogram_region.placement(),
-                screen_scale,
-            );
+            const sample_range = model.input_audio_buffer.sampleRange();
+            const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
+            if (sample_range.count >= samples_per_frame) {
+                const sample_offset: usize = sample_range.count - samples_per_frame;
+                const sample_index = sample_range.base_sample + sample_offset;
+                var sample_buffer: [samples_per_frame]f32 = undefined;
+                const samples = model.input_audio_buffer.samplesCopyIfRequired(
+                    sample_index,
+                    samples_per_frame,
+                    &sample_buffer,
+                );
+
+                const audio_power_spectrum = audio.samplesToPowerSpectrum(samples);
+                const mel_scaled_bins = audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
+                try ui_state.audio_input_spectogram.draw(
+                    mel_scaled_bins,
+                    spectrogram_region.placement(),
+                    screen_scale,
+                );
+            } else {
+                const mel_scaled_bins_buffer = [1]f32{-9.0} ** 64;
+                try ui_state.audio_input_spectogram.draw(
+                    mel_scaled_bins_buffer[0..],
+                    spectrogram_region.placement(),
+                    screen_scale,
+                );
+            }
 
             {
                 var volume_bar_region: Region = .{};
@@ -347,7 +365,7 @@ fn drawSectionScreenshot(
         screenshot_button_region.anchor.bottom = section_region.bottom();
         screenshot_button_region.margin.right = 10 * screen_scale.horizontal;
         screenshot_button_region.margin.bottom = 10 * screen_scale.vertical;
-        screenshot_button_region.width = 100 * screen_scale.horizontal;
+        screenshot_button_region.width = 140 * screen_scale.horizontal;
         screenshot_button_region.height = 30 * screen_scale.vertical;
 
         try ui_state.screenshot_button.draw(
