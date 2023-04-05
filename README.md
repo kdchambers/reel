@@ -12,11 +12,12 @@ ___
 
 ## Goals
 
-- Develop GUI for learning / research
-- Lightweight, visually appealing and light on dependencies
-- Expose user interface over IPC (Controllable via scripts, etc)
-- Support all viable Wayland backends for screen capture and audio
-- Support streaming to services like Twitch, Youtube, etc
+- Visually beautiful
+- Performant and dependency light
+- Simple to compile and modify source code
+- Support all relevant Wayland and Vulkan extensions / protocols
+- Support Wayland compositor specific extensions
+- Expose core funcionality via IPC
 
 ## Progress
 
@@ -27,6 +28,7 @@ This project is very new and can be considered a minimally viable product. The f
 | Screenshot | ❌ |
 | Record Video | ✅ |
 | Stream Video | ❌ |
+| Webcam Input | ❌ |
 | Audio Input Backend ALSA | ❌ |
 | Audio Input Backend Pulse | ✅ |
 | Audio Input Backend Pipewire | ❌ |
@@ -47,6 +49,7 @@ To build, you'll need a master build of the zig compiler. The latest version tes
 
 - Pipewire
 - SPA
+- FFMPEG
 
 ### Runtime requirements:
 
@@ -67,7 +70,7 @@ To build, you'll need a master build of the zig compiler. The latest version tes
 
 - Compositor with [wlr-screencopy](https://wayland.app/protocols/wlr-screencopy-unstable-v1) extensions implemented
 
-To build simply invoke the stardand build command
+To build simply invoke the standard build command
 
 ```sh
 git clone https://github.com/kdchambers/reel --recursive
@@ -75,7 +78,7 @@ cd reel
 zig build run -Doptimize=ReleaseSafe
 ```
 
-If you've attempting to build / run this project and ran into any sort of problem. Please submit an issue so that I can fix it. There are many areas that could cause errors and I don't have a lot of hardware to test various systems. Thank you!
+If you've attempted to build / run this project and ran into any sort of problem. Please submit an issue so that I can fix it. There are many areas that could cause errors and I don't have a lot of hardware to test various systems. Thank you!
 
 ## License
 
