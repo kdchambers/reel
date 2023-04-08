@@ -100,13 +100,25 @@ pub fn sampleRange(self: @This()) SampleRange {
 }
 
 pub inline fn lastNSample(self: @This(), sample_count: usize) usize {
+    assert(sample_count <= self.sample_count);
     return self.total_sample_count - sample_count;
+}
+
+pub inline fn availableSamplesFrom(self: @This(), global_sample_index: usize) u64 {
+    const global_base_index = self.total_sample_count - self.sample_count;
+    if(global_sample_index < global_base_index)
+        return 0;
+    const sample_index = global_sample_index - global_base_index;
+    return self.sample_count - sample_index;
 }
 
 pub fn samplesCopyIfRequired(self: @This(), global_sample_index: usize, sample_count: usize, out_buffer: []f32) []const f32 {
     assert(out_buffer.len >= sample_count);
 
     const start_global_sample_index = self.total_sample_count - self.sample_count;
+
+    assert(global_sample_index >= start_global_sample_index);
+
     const head_offset = global_sample_index - start_global_sample_index;
     const src_index = (self.head_index + head_offset) % self.sample_buffer.len;
     const contigious_space = self.sample_buffer.len - src_index;
@@ -115,7 +127,7 @@ pub fn samplesCopyIfRequired(self: @This(), global_sample_index: usize, sample_c
     }
 
     mem.copy(f32, out_buffer[0..], self.sample_buffer[src_index .. src_index + contigious_space]);
-    mem.copy(f32, out_buffer[contigious_space..], self.sample_buffer[0 .. self.sample_buffer.len - contigious_space]);
+    mem.copy(f32, out_buffer[contigious_space..], self.sample_buffer[0 .. sample_count - contigious_space]);
     return out_buffer[0..sample_count];
 }
 
