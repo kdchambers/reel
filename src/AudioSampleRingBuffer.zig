@@ -6,6 +6,11 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const builtin = @import("builtin");
 
+pub const SampleRange = struct {
+    base_sample: usize,
+    count: usize,
+};
+
 sample_buffer: []f32,
 head_index: usize = 0,
 sample_count: usize = 0,
@@ -33,23 +38,6 @@ pub fn init(self: *@This(), allocator: std.mem.Allocator, capacity_samples: usiz
 pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
     allocator.free(self.sample_buffer);
     self.* = undefined;
-}
-
-inline fn tail(self: @This()) usize {
-    return (self.head_index + self.sample_count) % self.sample_buffer.len;
-}
-
-inline fn remainingSpace(self: @This()) usize {
-    return self.sample_buffer.len - self.sample_count;
-}
-
-inline fn ensureCapacityFor(self: *@This(), sample_count: usize) void {
-    const available_space = self.remainingSpace();
-    if (sample_count > available_space) {
-        const samples_to_delete: usize = sample_count - available_space;
-        self.head_index = (self.head_index + samples_to_delete) % self.sample_buffer.len;
-        self.sample_count -= samples_to_delete;
-    }
 }
 
 pub fn appendOverwrite(self: *@This(), samples: []const i16) void {
@@ -86,11 +74,6 @@ pub fn hasSampleRange(self: @This(), sample_index: usize, sample_count: usize) b
         return false;
     return true;
 }
-
-pub const SampleRange = struct {
-    base_sample: usize,
-    count: usize,
-};
 
 pub fn sampleRange(self: @This()) SampleRange {
     return .{
@@ -129,6 +112,23 @@ pub fn samplesCopyIfRequired(self: @This(), global_sample_index: usize, sample_c
     mem.copy(f32, out_buffer[0..], self.sample_buffer[src_index .. src_index + contigious_space]);
     mem.copy(f32, out_buffer[contigious_space..], self.sample_buffer[0 .. sample_count - contigious_space]);
     return out_buffer[0..sample_count];
+}
+
+inline fn tail(self: @This()) usize {
+    return (self.head_index + self.sample_count) % self.sample_buffer.len;
+}
+
+inline fn remainingSpace(self: @This()) usize {
+    return self.sample_buffer.len - self.sample_count;
+}
+
+inline fn ensureCapacityFor(self: *@This(), sample_count: usize) void {
+    const available_space = self.remainingSpace();
+    if (sample_count > available_space) {
+        const samples_to_delete: usize = sample_count - available_space;
+        self.head_index = (self.head_index + samples_to_delete) % self.sample_buffer.len;
+        self.sample_count -= samples_to_delete;
+    }
 }
 
 test "writing & sample ranges" {
