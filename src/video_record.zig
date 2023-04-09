@@ -10,8 +10,26 @@ const geometry = @import("geometry.zig");
 
 const libav = @import("libav.zig");
 
+const RingBuffer = @import("utils.zig").RingBuffer;
+
 const EAGAIN: i32 = -11;
 const EINVAL: i32 = -22;
+
+pub const PixelType = graphics.RGBA(u8);
+
+pub const State = enum {
+    uninitialized,
+    encoding,
+    closed,
+};
+
+pub const RecordOptions = struct {
+    fps: u32,
+    dimensions: geometry.Dimensions2D(u32),
+    output_path: [*:0]const u8,
+};
+
+pub var state: State = .uninitialized;
 
 var video_codec_context: *libav.CodecContext = undefined;
 var format_context: *libav.FormatContext = undefined;
@@ -28,92 +46,21 @@ var audio_codec_context: *libav.CodecContext = undefined;
 var audio_frame: *libav.Frame = undefined;
 
 var video_frames_written: usize = 0;
-
-pub const State = enum {
-    uninitialized,
-    encoding,
-    closed,
-};
-
-pub const PixelType = graphics.RGBA(u8);
-
-pub const RecordOptions = struct {
-    fps: u32,
-    dimensions: geometry.Dimensions2D(u32),
-    output_path: [*:0]const u8,
-};
-
 var processing_thread: std.Thread = undefined;
 var request_close: bool = false;
-
-pub var state: State = .uninitialized;
 
 const sample_rate = 44100;
 var samples_written: usize = 0;
 
-const Context = struct {
+var context: struct {
     dimensions: geometry.Dimensions2D(u32),
-};
-var context: Context = undefined;
+} = undefined;
 
 const Frame = struct {
     pixels: [*]const PixelType,
     audio_buffer: []const f32,
     frame_index: u64,
 };
-
-fn RingBuffer(comptime T: type, comptime capacity: usize) type {
-    return struct {
-        mutex: std.Thread.Mutex,
-        buffer: [capacity]T,
-        head: u16,
-        len: u16,
-
-        pub const init = @This(){
-            .head = 0,
-            .len = 0,
-            .buffer = undefined,
-            .mutex = undefined,
-        };
-
-        pub fn peek(self: @This()) ?T {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            if (self.len == 0)
-                return null;
-
-            return self.buffer[self.head];
-        }
-
-        pub fn push(self: *@This(), value: T) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            if (self.len == capacity) {
-                // std.debug.assert(false);
-                return error.Full;
-            }
-
-            const dst_index: usize = @intCast(u16, @mod(self.head + self.len, capacity));
-            self.buffer[dst_index] = value;
-            self.len += 1;
-        }
-
-        pub fn pop(self: *@This()) ?T {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            if (self.len == 0)
-                return null;
-
-            const index = self.head;
-            self.head = @intCast(u16, @mod(self.head + 1, capacity));
-            self.len -= 1;
-            return self.buffer[index];
-        }
-    };
-}
 
 var ring_buffer = RingBuffer(Frame, 4).init;
 
@@ -537,14 +484,10 @@ fn encodeAudioFrames(samples: []const f32) !void {
 }
 
 fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index: u32) !void {
-    const dimensions = geometry.Dimensions2D(u32){
-        .width = 1920,
-        .height = 1080,
-    };
 
-    rgbaToPlanarYuv(pixels, dimensions, &yuv_output_buffer);
+    rgbaToPlanarYuv(pixels, context.dimensions, &yuv_output_buffer);
 
-    const pixel_count: u32 = dimensions.width * dimensions.height;
+    const pixel_count: u32 = context.dimensions.width * context.dimensions.height;
 
     const u_channel_base: u32 = 0;
     const y_channel_base: u32 = pixel_count;
@@ -626,6 +569,9 @@ var yuv_output_buffer: [1080 * 1920 * 3]u8 = undefined;
 //
 // Calculations based on:
 // https://learn.microsoft.com/en-us/windows/win32/medfound/recommended-8-bit-yuv-formats-for-video-rendering
+//      Y = ( (  66 * R + 129 * G +  25 * B + 128) >> 8) +  16
+//      U = ( ( -38 * R -  74 * G + 112 * B + 128) >> 8) + 128
+//      V = ( ( 112 * R -  94 * G -  18 * B + 128) >> 8) + 128
 //
 fn rgbaToPlanarYuv(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensions2D(u32), out_buffer: []u8) void {
     const pixel_count = dimensions.width * dimensions.height;

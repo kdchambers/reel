@@ -4,7 +4,7 @@
 const std = @import("std");
 const log = std.log;
 const builtin = @import("builtin");
-const Timer = @import("Timer.zig");
+const Timer = @import("utils.zig").Timer;
 const app_core = @import("app_core.zig");
 
 var stdlib_gpa: if (builtin.mode == .Debug) std.heap.GeneralPurposeAllocator(.{}) else void = .{};
