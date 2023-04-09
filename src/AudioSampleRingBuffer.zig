@@ -106,7 +106,7 @@ pub inline fn lastNSample(self: @This(), sample_count: usize) usize {
 
 pub inline fn availableSamplesFrom(self: @This(), global_sample_index: usize) u64 {
     const global_base_index = self.total_sample_count - self.sample_count;
-    if(global_sample_index < global_base_index)
+    if (global_sample_index < global_base_index)
         return 0;
     const sample_index = global_sample_index - global_base_index;
     return self.sample_count - sample_index;

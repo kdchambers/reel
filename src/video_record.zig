@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const assert = std.debug.assert;
 const builtin = @import("builtin");
 
 const graphics = @import("graphics.zig");
@@ -19,7 +20,6 @@ var output_format: *libav.OutputFormat = undefined;
 var video_filter_source_context: *libav.FilterContext = undefined;
 var video_filter_sink_context: *libav.FilterContext = undefined;
 var video_filter_graph: *libav.FilterGraph = undefined;
-// var hw_device_context: ?*libav.BufferRef = null;
 var hw_frame_context: ?*libav.BufferRef = null;
 var video_frame: *libav.Frame = undefined;
 
@@ -58,7 +58,7 @@ var context: Context = undefined;
 
 const Frame = struct {
     pixels: [*]const PixelType,
-    audio_buffer: []const *[2048]f32,
+    audio_buffer: []const f32,
     frame_index: u64,
 };
 
@@ -120,18 +120,21 @@ var ring_buffer = RingBuffer(Frame, 4).init;
 fn eventLoop() void {
     outer: while (true) {
         while (ring_buffer.pop()) |entry| {
+            const encode_start = std.time.nanoTimestamp();
             writeFrame(entry.pixels, entry.audio_buffer, @intCast(u32, entry.frame_index)) catch |err| {
                 std.log.err("Failed to write frame. Error {}", .{err});
             };
+            const duration = std.time.nanoTimestamp() - encode_start;
+            std.log.info("Frame encoded in {d}ms", .{@divTrunc(duration, std.time.ns_per_ms)});
         }
         if (request_close)
             break :outer;
-        std.time.sleep(std.time.ns_per_ms * 8);
+        std.time.sleep(std.time.ns_per_ms * 4);
     }
     finishVideoStream();
 }
 
-pub fn write(pixels: [*]const graphics.RGBA(u8), audio_samples: []const *[2048]f32, frame_index: u64) !void {
+pub fn write(pixels: [*]const graphics.RGBA(u8), audio_samples: []const f32, frame_index: u64) !void {
     ring_buffer.push(.{
         .pixels = pixels,
         .audio_buffer = audio_samples,
@@ -164,7 +167,6 @@ pub fn close() void {
 }
 
 pub fn open(options: RecordOptions) !void {
-
     context.dimensions = options.dimensions;
     if (builtin.mode == .Debug)
         libav.av_log_set_level(libav.LOG_DEBUG);
@@ -218,14 +220,9 @@ pub fn open(options: RecordOptions) !void {
     video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
     // video_codec_context.gop_size = 300;
     // video_codec_context.max_b_frames = 1;
-    video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.YUV420P);
+    video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.YUV444P);
 
     video_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
-
-    initVideoFilters(options) catch |err| {
-        std.log.err("Failed to init video filters. Error: {}", .{err});
-        return;
-    };
 
     if (hw_frame_context) |frame_context| {
         video_codec_context.hw_frames_ctx = libav.bufferRef(frame_context);
@@ -425,53 +422,51 @@ fn finishVideoStream() void {
     libav.frameFree(&audio_frame);
 }
 
-fn encodeAudioFrames(audio_buffers: []const *[2048]f32) !void {
-    std.log.info("Writing audio {d} x {d} audio samples", .{ audio_buffers.len, audio_buffers[0].len });
+fn encodeAudioFrames(samples: []const f32) !void {
+    std.debug.assert(samples.len % 2048 == 0);
+
+    for (samples) |sample| {
+        std.debug.assert(sample <= 1.0);
+        std.debug.assert(sample >= -1.0);
+    }
 
     audio_frame.format = @enumToInt(libav.SampleFormat.fltp);
     audio_frame.nb_samples = audio_codec_context.frame_size;
 
     std.debug.assert(audio_codec_context.frame_size == 1024);
-
     var planar_buffer: [2048]f32 = [1]f32{1.1} ** 2048;
-    frame_loop: for (audio_buffers) |audio_buffer| {
-        //
-        // Assert valid samples
-        //
-        for (audio_buffer) |sample| {
-            std.debug.assert(sample <= 1.0);
-            std.debug.assert(sample >= -1.0);
-        }
-        //
-        // Convert sample buffer from interleaved to planar
-        //
-        const samples_per_channel: usize = @divExact(audio_buffer.len, 2);
+
+    var sample_index: usize = 0;
+    outer: while (sample_index < samples.len) {
+        const channel_count = 2;
+        const max_samples_per_write = @intCast(usize, audio_codec_context.frame_size) * channel_count;
+        const samples_remaining: usize = samples.len - sample_index;
+        const samples_to_write: usize = @min(samples_remaining, max_samples_per_write);
+        std.debug.assert(samples_to_write == max_samples_per_write);
+        std.debug.assert(max_samples_per_write == 1024 * 2);
+        const samples_per_channel: usize = @divExact(samples_to_write, 2);
+        std.debug.assert(samples_per_channel == 1024);
         for (0..samples_per_channel) |i| {
-            planar_buffer[i] = audio_buffer[i * 2];
-            planar_buffer[i + samples_per_channel] = audio_buffer[i * 2 + 1];
-
-            std.debug.assert(i + samples_per_channel < 2048);
-            std.debug.assert((i * 2 + 1) < 2048);
-
-            std.debug.assert(planar_buffer[i] <= 1.0);
-            std.debug.assert(planar_buffer[i] >= -1.0);
-            std.debug.assert(planar_buffer[i + samples_per_channel] <= 1.0);
-            std.debug.assert(planar_buffer[i + samples_per_channel] >= -1.0);
+            planar_buffer[i] = samples[i * 2];
+            planar_buffer[i + samples_per_channel] = samples[(i * 2) + 1];
         }
-
-        for (planar_buffer) |sample| {
+        for (planar_buffer[0..samples_to_write]) |sample| {
             std.debug.assert(sample <= 1.0);
             std.debug.assert(sample >= -1.0);
         }
 
-        //
-        // Planar buffer ready for action
-        //
-        const channel_count: i32 = 2;
-        const bytes_per_frame: i32 = audio_codec_context.frame_size * @sizeOf(f32) * channel_count;
+        std.debug.assert(samples_to_write > 0);
+        std.debug.assert(samples_to_write % 2048 == 0);
+
+        sample_index += samples_to_write;
+        audio_frame.nb_samples = @divExact(@intCast(i32, samples_to_write), channel_count);
+
+        std.debug.assert(audio_frame.nb_samples == audio_codec_context.frame_size);
+
+        const bytes_per_frame = @intCast(i32, samples_to_write * @sizeOf(f32));
         var fill_audio_frame_code: i32 = libav.codecFillAudioFrame(
             audio_frame,
-            channel_count,
+            @as(i32, channel_count),
             libav.SampleFormat.fltp,
             @ptrCast([*]const u8, &planar_buffer),
             bytes_per_frame,
@@ -486,7 +481,7 @@ fn encodeAudioFrames(audio_buffers: []const *[2048]f32) !void {
 
         audio_frame.pts = @intCast(i64, samples_written);
 
-        samples_written += 1024;
+        samples_written += samples_per_channel;
 
         const send_frame_code = libav.codecSendFrame(audio_codec_context, audio_frame);
         if (send_frame_code == EAGAIN) {
@@ -511,7 +506,7 @@ fn encodeAudioFrames(audio_buffers: []const *[2048]f32) !void {
                     if (resend_frame_code < 0) {
                         return error.ResendFrameFail;
                     }
-                    continue :frame_loop;
+                    continue :outer;
                 }
 
                 if (receive_packet_code == libav.ERROR_EOF) {
@@ -541,70 +536,51 @@ fn encodeAudioFrames(audio_buffers: []const *[2048]f32) !void {
     }
 }
 
-fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const *[2048]f32, frame_index: u32) !void {
+fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index: u32) !void {
+    const dimensions = geometry.Dimensions2D(u32){
+        .width = 1920,
+        .height = 1080,
+    };
 
-    //
-    // Prepare frame
-    //
-    const stride = [1]i32{4 * @intCast(i32, context.dimensions.width)};
+    rgbaToPlanarYuv(pixels, dimensions, &yuv_output_buffer);
 
-    //
-    // NOTE: intToPtr used here instead of ptrCast to get rid of const qualifier.
-    //       The pixels won't be modified, but I'd need to port AVFrame to zig
-    //       to add that constaint and appease the type system
-    //
-    video_frame.data[0] = @intToPtr([*]u8, @ptrToInt(pixels));
-    video_frame.linesize[0] = stride[0];
-    video_frame.format = libav.PIXEL_FORMAT_RGB0; // @enumToInt(libav.PixelFormat.RGB0);
+    const pixel_count: u32 = dimensions.width * dimensions.height;
+
+    const u_channel_base: u32 = 0;
+    const y_channel_base: u32 = pixel_count;
+    const v_channel_base: u32 = pixel_count * 2;
+
+    video_frame.data[0] = &(yuv_output_buffer[y_channel_base]);
+    video_frame.data[1] = &(yuv_output_buffer[u_channel_base]);
+    video_frame.data[2] = &(yuv_output_buffer[v_channel_base]);
+
+    const plane_stride: i32 = @divExact(3 * @intCast(i32, context.dimensions.width), 3);
+    video_frame.linesize[0] = plane_stride;
+    video_frame.linesize[1] = plane_stride;
+    video_frame.linesize[2] = plane_stride;
+
+    video_frame.format = @enumToInt(libav.PixelFormat.YUV444P);
     video_frame.width = @intCast(i32, context.dimensions.width);
     video_frame.height = @intCast(i32, context.dimensions.height);
 
     video_frames_written += 1;
-
     video_frame.pts = frame_index;
 
-    var code = libav.buffersrcAddFrameFlags(video_filter_source_context, video_frame, 0);
-    if (code < 0) {
-        std.log.err("Failed to add frame to source", .{});
-        return;
-    }
+    video_frame.pict_type = libav.AV_PICTURE_TYPE_NONE;
 
-    while (true) {
-        var filtered_frame: *libav.Frame = undefined;
-        filtered_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
-        defer libav.frameFree(&filtered_frame);
+    try encodeFrame(video_frame);
 
-        code = libav.buffersinkGetFrame(
-            video_filter_sink_context,
-            filtered_frame,
-        );
-        if (code < 0) {
-            //
-            // End of stream
-            //
-            if (code == libav.ERROR_EOF) return;
-            //
-            // No error, just no frames to read
-            //
-            if (code == EAGAIN) break;
-            //
-            // An actual error
-            //
-            std.log.err("Failed to get filtered frame", .{});
-            return error.GetFilteredFrameFailed;
-        }
-        filtered_frame.pict_type = libav.AV_PICTURE_TYPE_NONE;
-        try encodeFrame(filtered_frame);
-    }
-
-    if (audio_buffer.len != 0)
+    if (audio_buffer.len != 0) {
         try encodeAudioFrames(audio_buffer);
+    }
 }
 
 fn encodeFrame(frame: ?*libav.Frame) !void {
     var code = libav.codecSendFrame(video_codec_context, frame);
     if (code < 0) {
-        std.log.err("Failed to send frame for encoding", .{});
+        var error_message_buffer: [512]u8 = undefined;
+        _ = libav.strError(code, &error_message_buffer, 512);
+        std.log.err("Failed to send frame for encoding: {d} {s}", .{ code, error_message_buffer });
         return error.EncodeFrameFailed;
     }
 
@@ -642,117 +618,87 @@ fn encodeFrame(frame: ?*libav.Frame) !void {
     }
 }
 
-fn initVideoFilters(options: RecordOptions) !void {
-    video_filter_graph = libav.filterGraphAlloc();
-    _ = libav.optSet(@ptrCast(*void, video_filter_graph), "scale_sws_opts", "flags=fast_bilinear:src_range=1:dst_range=1", 0);
+//
+// TODO: Heap allocate this
+//
+var yuv_output_buffer: [1080 * 1920 * 3]u8 = undefined;
 
-    const source = libav.filterGetByName("buffer") orelse return error.FailedToGetSourceFilter;
-    const sink = libav.filterGetByName("buffersink") orelse return error.FailedToGetSinkFilter;
+//
+// Calculations based on:
+// https://learn.microsoft.com/en-us/windows/win32/medfound/recommended-8-bit-yuv-formats-for-video-rendering
+//
+fn rgbaToPlanarYuv(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensions2D(u32), out_buffer: []u8) void {
+    const pixel_count = dimensions.width * dimensions.height;
 
-    var buffer_filter_config_buffer: [512]u8 = undefined;
-    const buffer_filter_config = try std.fmt.bufPrintZ(
-        buffer_filter_config_buffer[0..],
-        "video_size={d}x{d}:pix_fmt={d}:time_base={d}/{d}:pixel_aspect=1/1",
-        .{
-            1920,
-            1080,
-            libav.PIXEL_FORMAT_RGB0,
-            1,
-            options.fps,
-        },
-    );
+    const u_channel_base: u32 = 0;
+    const y_channel_base: u32 = pixel_count;
+    const v_channel_base: u32 = pixel_count * 2;
 
-    var code = libav.filterGraphCreateFilter(
-        &video_filter_source_context,
-        source,
-        "Source",
-        buffer_filter_config,
-        null,
-        video_filter_graph,
-    );
-    if (code < 0) {
-        std.log.err("Failed to create video source filter", .{});
-        return error.CreateVideoSourceFilterFailed;
+    const y_const_a = @splat(8, @as(i32, 66));
+    const y_const_b = @splat(8, @as(i32, 129));
+    const y_const_c = @splat(8, @as(i32, 25));
+    const y_const_d = @splat(8, @as(i32, 128));
+    const y_const_e = @splat(8, @as(i32, 16));
+
+    const u_const_a = @splat(8, @as(i32, -38));
+    const u_const_b = @splat(8, @as(i32, 74));
+    const u_const_c = @splat(8, @as(i32, 112));
+    const u_const_d = @splat(8, @as(i32, 128));
+    const u_const_e = @splat(8, @as(i32, 128));
+
+    const v_const_a = @splat(8, @as(i32, 112));
+    const v_const_b = @splat(8, @as(i32, 94));
+    const v_const_c = @splat(8, @as(i32, 18));
+    const v_const_d = @splat(8, @as(i32, 128));
+    const v_const_e = @splat(8, @as(i32, 128));
+
+    const divider = @splat(8, @as(i32, 8));
+
+    var i: usize = 0;
+    while (i < pixel_count) : (i += 8) {
+        const r = @Vector(8, i32){
+            pixels[i + 0].r,
+            pixels[i + 1].r,
+            pixels[i + 2].r,
+            pixels[i + 3].r,
+            pixels[i + 4].r,
+            pixels[i + 5].r,
+            pixels[i + 6].r,
+            pixels[i + 7].r,
+        };
+
+        const g = @Vector(8, i32){
+            pixels[i + 0].g,
+            pixels[i + 1].g,
+            pixels[i + 2].g,
+            pixels[i + 3].g,
+            pixels[i + 4].g,
+            pixels[i + 5].g,
+            pixels[i + 6].g,
+            pixels[i + 7].g,
+        };
+
+        const b = @Vector(8, i32){
+            pixels[i + 0].b,
+            pixels[i + 1].b,
+            pixels[i + 2].b,
+            pixels[i + 3].b,
+            pixels[i + 4].b,
+            pixels[i + 5].b,
+            pixels[i + 6].b,
+            pixels[i + 7].b,
+        };
+
+        const y_vector: @Vector(8, i32) = (((y_const_a * r) + (y_const_b * g) + (y_const_c * b) + y_const_d) >> divider) + y_const_e;
+        inline for (0..8) |offset|
+            out_buffer[i + y_channel_base + offset] = @intCast(u8, y_vector[offset]);
+
+        const u_vector: @Vector(8, i32) = (((u_const_a * r) - (u_const_b * g) + (u_const_c * b) + u_const_d) >> divider) + u_const_e;
+        inline for (0..8) |offset|
+            out_buffer[i + u_channel_base + offset] = @intCast(u8, u_vector[offset]);
+
+        const v_vector: @Vector(8, i32) = (((v_const_a * r) - (v_const_b * g) - (v_const_c * b) + v_const_d) >> divider) + v_const_e;
+        inline for (0..8) |offset|
+            out_buffer[i + v_channel_base + offset] = @intCast(u8, v_vector[offset]);
     }
-
-    code = libav.filterGraphCreateFilter(
-        &video_filter_sink_context,
-        sink,
-        "Sink",
-        null,
-        null,
-        video_filter_graph,
-    );
-    if (code < 0) {
-        std.log.err("Failed to create video sink filter", .{});
-        return error.CreateVideoSinkFilterFailed;
-    }
-
-    const supported_pixel_formats = [2]libav.PixelFormat{
-        .YUV444P,
-        .NONE,
-    };
-
-    code = libav.optSetBin(
-        @ptrCast(*void, video_filter_sink_context),
-        "pix_fmts",
-        @ptrCast([*]const u8, &supported_pixel_formats),
-        @sizeOf(libav.PixelFormat),
-        libav.AV_OPT_SEARCH_CHILDREN,
-    );
-    if (code < 0) {
-        std.log.err("Failed to set pix_fmt option", .{});
-        return error.SetPixFmtOptionFailed;
-    }
-
-    var outputs: *libav.FilterInOut = libav.filterInOutAlloc() orelse return error.AllocateInputFilterFailed;
-    outputs.name = libav.strdup("in") orelse return error.LibavOutOfMemory;
-    outputs.filter_ctx = video_filter_source_context;
-    outputs.pad_idx = 0;
-    outputs.next = null;
-
-    var inputs: *libav.FilterInOut = libav.filterInOutAlloc() orelse return error.AllocateOutputFilterFailed;
-    inputs.name = libav.strdup("out");
-    inputs.filter_ctx = video_filter_sink_context;
-    inputs.pad_idx = 0;
-    inputs.next = null;
-
-    code = libav.filterGraphParsePtr(
-        video_filter_graph,
-        "null",
-        &inputs,
-        &outputs,
-        null,
-    );
-    if (code < 0) {
-        std.log.err("Failed to parse graph filter", .{});
-        return error.ParseGraphFilterFailed;
-    }
-
-    // if (hw_device_context) |frame_context| {
-    //     std.debug.assert(false);
-    //     var i: usize = 0;
-    //     while (i < video_filter_graph.nb_filters) : (i += 1) {
-    //         video_filter_graph.filters[i][0].hw_device_ctx = libav.bufferRef(frame_context);
-    //     }
-    // }
-
-    code = libav.filterGraphConfig(video_filter_graph, null);
-    if (code < 0) {
-        std.log.err("Failed to configure graph filter", .{});
-        return error.ConfigureGraphFilterFailed;
-    }
-
-    const filter_output: *libav.FilterLink = video_filter_sink_context.inputs[0];
-    video_codec_context.width = filter_output.w;
-    video_codec_context.height = filter_output.h;
-    video_codec_context.pix_fmt = filter_output.format;
-    video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
-    video_codec_context.framerate = filter_output.frame_rate;
-    video_codec_context.sample_aspect_ratio = filter_output.sample_aspect_ratio;
-
-    hw_frame_context = libav.buffersinkGetHwFramesCtx(video_filter_sink_context);
-
-    libav.filterInOutFree(&inputs);
-    libav.filterInOutFree(&outputs);
 }

@@ -113,12 +113,14 @@ extern fn avfilter_graph_free(graph: **FilterGraph) callconv(.C) void;
 
 pub extern fn av_dict_set(dict: *?*Dictionary, key: [*:0]const u8, value: [*:0]const u8, flags: i32) callconv(.C) i32;
 pub extern fn av_dict_free(dict: *?*Dictionary) callconv(.C) void;
-pub extern fn av_frame_alloc() callconv(.C) ?*Frame;
-pub extern fn av_frame_unref(frame: *Frame) callconv(.C) void;
 pub extern fn av_log_set_level(level: i32) callconv(.C) void;
 pub extern fn av_find_input_format(short_name: [*:0]const u8) callconv(.C) ?*InputFormat;
 pub extern fn av_guess_format(short_name: ?[*:0]const u8, filename: [*:0]const u8, mime_type: ?[*:0]const u8) callconv(.C) ?*OutputFormat;
 pub extern fn av_strdup(value: [*:0]const u8) callconv(.C) ?[*:0]u8;
+
+pub extern fn av_frame_alloc() callconv(.C) ?*Frame;
+pub extern fn av_frame_unref(frame: *Frame) callconv(.C) void;
+pub extern fn av_frame_clone(source_frame: *const Frame) callconv(.C) ?*Frame;
 
 pub extern fn avcodec_find_encoder(codec_id: CodecID) callconv(.C) ?*Codec;
 
@@ -225,6 +227,7 @@ pub const filterInOutAlloc = avfilter_inout_alloc;
 pub const filterInOutFree = avfilter_inout_free;
 
 pub const frameFree = av_frame_free;
+pub const frameClone = av_frame_clone;
 pub const frameGetBuffer = av_frame_get_buffer;
 
 pub const initPacket = av_init_packet;
