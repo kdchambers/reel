@@ -2,8 +2,6 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
-// const assert = std.debug.assert;
-// const builtin = @import("builtin");
 
 pub fn RingBuffer(comptime T: type, comptime capacity: usize) type {
     return struct {

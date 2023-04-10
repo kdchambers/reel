@@ -14,7 +14,6 @@ pub const SampleRange = struct {
 sample_buffer: []f32,
 head_index: usize = 0,
 sample_count: usize = 0,
-
 total_sample_count: u64,
 
 pub fn create(allocator: std.mem.Allocator, capacity_samples: usize) !@This() {
@@ -47,16 +46,18 @@ pub fn appendOverwrite(self: *@This(), samples: []const i16) void {
     const contigious_space = self.sample_buffer.len - dst_index;
     var samples_to_write = @min(contigious_space, samples.len);
 
+    const max = @as(f32, std.math.maxInt(i16));
+
     var src_index: usize = 0;
     while (src_index < samples_to_write) {
-        self.sample_buffer[dst_index] = @max(-1.0, @intToFloat(f32, samples[src_index]) / std.math.maxInt(i16));
+        self.sample_buffer[dst_index] = @max(-1.0, @intToFloat(f32, samples[src_index]) / max);
         dst_index += 1;
         src_index += 1;
     }
 
     dst_index = 0;
     while (src_index < samples.len) {
-        self.sample_buffer[dst_index] = @max(-1.0, @intToFloat(f32, samples[src_index]) / std.math.maxInt(i16));
+        self.sample_buffer[dst_index] = @max(-1.0, @intToFloat(f32, samples[src_index]) / max);
         dst_index += 1;
         src_index += 1;
     }
@@ -89,8 +90,15 @@ pub inline fn lastNSample(self: @This(), sample_count: usize) usize {
 
 pub inline fn availableSamplesFrom(self: @This(), global_sample_index: usize) u64 {
     const global_base_index = self.total_sample_count - self.sample_count;
-    if (global_sample_index < global_base_index)
+    if (global_sample_index < global_base_index) {
+        std.log.err("Sample index {d} out of bounds. Base {d} count {d}", .{
+            global_sample_index,
+            global_base_index,
+            self.sample_count,
+        });
+        assert(false);
         return 0;
+    }
     const sample_index = global_sample_index - global_base_index;
     return self.sample_count - sample_index;
 }
@@ -99,10 +107,10 @@ pub fn samplesCopyIfRequired(self: @This(), global_sample_index: usize, sample_c
     assert(out_buffer.len >= sample_count);
 
     const start_global_sample_index = self.total_sample_count - self.sample_count;
-
     assert(global_sample_index >= start_global_sample_index);
-
     const head_offset = global_sample_index - start_global_sample_index;
+    assert(self.sample_count - head_offset >= sample_count);
+
     const src_index = (self.head_index + head_offset) % self.sample_buffer.len;
     const contigious_space = self.sample_buffer.len - src_index;
     if (contigious_space >= sample_count) {

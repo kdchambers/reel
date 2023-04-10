@@ -90,9 +90,9 @@ var last_screencapture_input_timestamp: i128 = 0;
 var recording_audio_sample_index: usize = 0;
 var recording_start_timestamp: i128 = 0;
 
-var recording_video_frame_count: u32 = 0;
 var recording_sample_count: u64 = 0;
 var recording_sample_base_index: u64 = 0;
+var recording_frame_index_base: u64 = 0;
 
 var gpa: std.mem.Allocator = undefined;
 
@@ -135,7 +135,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     frontend_interface.init(gpa) catch return error.FrontendInitFail;
 
     //
-    // Buffer size of ~10 milliseconds at a sample rate of 44100 and 2 channels
+    // Buffer size of ~100 milliseconds at a sample rate of 44100 and 2 channels
     //
     const buffer_capacity_samples: usize = @divExact(44100, 10) * 2;
     try model.input_audio_buffer.init(gpa, buffer_capacity_samples);
@@ -152,7 +152,7 @@ pub fn run() !void {
     const input_fps = 60;
     const ns_per_frame = @divFloor(std.time.ns_per_s, input_fps);
 
-    while (true) {
+    app_loop: while (true) {
         const frame_timer = Timer.now();
         _ = wayland_core.sync();
 
@@ -167,7 +167,7 @@ pub fn run() !void {
             switch (request) {
                 .core_shutdown => {
                     std.log.info("core: shutdown request", .{});
-                    return;
+                    break :app_loop;
                 },
                 .screenshot_do => {
                     std.log.info("Taking screenshot!", .{});
@@ -223,6 +223,12 @@ pub fn run() !void {
             std.time.sleep(ns_per_frame - frame_duration);
         }
     }
+
+    const application_end = std.time.nanoTimestamp();
+    const screencapture_duration_ns = @intCast(u64, application_end - screencapture_start.?);
+    const screencapture_duration_seconds: f64 = @intToFloat(f64, screencapture_duration_ns) / @as(f64, std.time.ns_per_s);
+    const screencapture_fps = @intToFloat(f64, frame_index) / screencapture_duration_seconds;
+    std.log.info("Display FPS: {d:.2}", .{screencapture_fps});
 }
 
 pub fn deinit() void {
@@ -244,7 +250,9 @@ pub fn displayList() [][]const u8 {
 }
 
 const sample_multiple = 2048;
-var sample_buffer: [sample_multiple * 2]f32 = undefined;
+var sample_buffer: [sample_multiple * 3]f32 = undefined;
+
+var screencapture_start: ?i128 = null;
 
 fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
     model_mutex.lock();
@@ -255,103 +263,48 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
         .pixels = pixels,
     };
 
+    if (screencapture_start == null)
+        screencapture_start = std.time.nanoTimestamp();
+
+    //
+    // Find the audio sample that corresponds to the start of the first video frame
+    //
     if (model.recording_context.state == .sync) {
         model.recording_context.state = .recording;
 
-        const current_timestamp = std.time.nanoTimestamp();
-        const fps = 60.0;
-        const channel_count = 2.0;
-        const samples_per_frame = (44100.0 / fps) * channel_count;
+        recording_start_timestamp = std.time.nanoTimestamp();
 
-        recording_start_timestamp = current_timestamp;
-        const ns_since_last_audio_input = @intCast(u64, current_timestamp - last_audio_input_timestamp);
+        const sample_index = model.input_audio_buffer.lastNSample(sample_multiple);
+        const samples_for_frame = model.input_audio_buffer.samplesCopyIfRequired(
+            sample_index,
+            sample_multiple,
+            sample_buffer[0..sample_multiple],
+        );
 
-        //
-        // Some of the audio samples required to accompany the video frame might still be in
-        // the input audio backend buffer. In that case, we calculate what audio samples belong
-        // to this video frame and wait for the input audio callback to provide the rest of the
-        // samples
-        //
-        const missing_samples: u64 = blk: {
-            const ns_per_frame: u64 = @floatToInt(u64, (1000.0 / fps) * std.time.ns_per_ms);
-            std.log.info("ns_per_frame: {d}", .{ns_per_frame});
-            std.log.info("ns last audio input: {d}", .{ns_since_last_audio_input});
+        video_encoder.write(pixels, samples_for_frame, 0) catch unreachable;
 
-            if (ns_since_last_audio_input > ns_per_frame)
-                break :blk samples_per_frame;
-
-            assert(ns_per_frame >= ns_since_last_audio_input);
-            //
-            // We want all samples between `current_timestamp - ns_per_frame` and `current_timestamp`
-            //
-            const percentage_missing = @intToFloat(f32, ns_since_last_audio_input) / @intToFloat(f32, ns_per_frame);
-            assert(percentage_missing < 1.0);
-            break :blk @floatToInt(u64, @floor(samples_per_frame * percentage_missing));
-        };
-        const samples_to_encode_count: u64 = blk: {
-            const unaligned_count = @as(u64, samples_per_frame) - missing_samples;
-            const misaligned_by = unaligned_count % sample_multiple;
-            break :blk unaligned_count - misaligned_by;
-        };
-        assert(samples_to_encode_count % sample_multiple == 0);
-        const sample_index = model.input_audio_buffer.lastNSample(samples_to_encode_count);
-        if (samples_to_encode_count > 0) {
-            const samples_for_frame = model.input_audio_buffer.samplesCopyIfRequired(
-                sample_index,
-                samples_to_encode_count,
-                sample_buffer[0..],
-            );
-            // TODO: Handle error
-            video_encoder.write(pixels, samples_for_frame, frame_index) catch unreachable;
-            recording_sample_count = samples_to_encode_count;
-        } else {
-            video_encoder.write(pixels, &[0]f32{}, frame_index) catch unreachable;
-            recording_sample_count = 0;
-        }
-        recording_video_frame_count = 1;
+        recording_frame_index_base = frame_index;
+        recording_sample_count = sample_multiple;
         recording_sample_base_index = sample_index;
     } else if (model.recording_context.state == .recording) {
-        const fps = 60.0;
-        const channel_count = 2.0;
-        const samples_per_frame: u64 = @divExact(44100, @as(u64, fps)) * @as(u64, channel_count);
+        const sample_index: u64 = recording_sample_base_index + recording_sample_count;
+        const samples_in_buffer: u64 = model.input_audio_buffer.availableSamplesFrom(sample_index);
+        const overflow: u64 = samples_in_buffer % sample_multiple;
+        const samples_to_load: u64 = @min(samples_in_buffer - overflow, sample_multiple * 3);
+        assert(samples_to_load % sample_multiple == 0);
 
-        const target_samples_count: u64 = (recording_video_frame_count + 1) * samples_per_frame;
-        const missing_sample_count: u64 = target_samples_count - recording_sample_count;
+        const samples_to_encode = if (samples_to_load > 0) model.input_audio_buffer.samplesCopyIfRequired(
+            sample_index,
+            samples_to_load,
+            sample_buffer[0..samples_to_load],
+        ) else &[0]f32{};
 
-        const samples_to_encode_count: u64 = blk: {
-            const misaligned_by = missing_sample_count % sample_multiple;
-            break :blk @min(sample_multiple * 2, missing_sample_count - misaligned_by);
+        const recording_frame_index: u64 = frame_index - recording_frame_index_base;
+        video_encoder.write(pixels, samples_to_encode, recording_frame_index) catch |err| {
+            std.log.warn("Failed to write video frame. Error: {}", .{err});
         };
-        assert(samples_to_encode_count % sample_multiple == 0);
 
-        const next_sample_index = recording_sample_base_index + recording_sample_count;
-        const samples_in_buffer_count = model.input_audio_buffer.availableSamplesFrom(next_sample_index);
-        if (samples_in_buffer_count == 0) {
-            const sample_range = model.input_audio_buffer.sampleRange();
-            std.log.info(
-                "No samples in audio buffer for index {d}. Base index {d} count {d}",
-                .{ next_sample_index, sample_range.base_sample, sample_range.count },
-            );
-        }
-
-        if (samples_to_encode_count > 0 and samples_in_buffer_count >= samples_to_encode_count) {
-            const samples_for_frame = model.input_audio_buffer.samplesCopyIfRequired(
-                next_sample_index,
-                samples_to_encode_count,
-                sample_buffer[0..],
-            );
-            for (samples_for_frame) |sample| {
-                std.debug.assert(sample <= 1.0);
-                std.debug.assert(sample >= -1.0);
-            }
-            assert(samples_to_encode_count == 2048 or samples_to_encode_count == 4096);
-            // TODO: Handle error
-            video_encoder.write(pixels, samples_for_frame, frame_index) catch unreachable;
-            recording_sample_count += samples_to_encode_count;
-        } else {
-            video_encoder.write(pixels, &[0]f32{}, frame_index) catch unreachable;
-        }
-        recording_video_frame_count += 1;
+        recording_sample_count += samples_to_load;
     }
 
     last_screencapture_input_timestamp = std.time.nanoTimestamp();
