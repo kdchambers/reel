@@ -3,7 +3,6 @@
 
 const std = @import("std");
 const zmath = @import("zmath");
-const audio_input = @import("../../audio.zig");
 
 pub var unity_table: [256]zmath.F32x4 = undefined;
 const fft_bin_count = 256;
@@ -11,7 +10,7 @@ const fft_bin_count = 256;
 var mel_bin_buffer: [128]f32 = undefined;
 const sample_rate = 44100;
 const freq_resolution: f32 = sample_rate / fft_bin_count;
-const freq_to_mel_table = audio_input.calculateFreqToMelTable(fft_bin_count / 2, freq_resolution);
+const freq_to_mel_table = calculateFreqToMelTable(fft_bin_count / 2, freq_resolution);
 
 const FilterMap = struct {
     index: usize,
@@ -97,7 +96,7 @@ pub fn powerSpectrumToMelScale(power_spectrum: [fft_bin_count / 8]zmath.F32x4, o
     // decibel_accumulator /= @intToFloat(f32, output_bin_count);
 }
 
-const hamming_table = audio_input.calculateHammingWindowTable(fft_bin_count);
+const hamming_table = calculateHammingWindowTable(fft_bin_count);
 
 pub fn samplesToPowerSpectrum(pcm_buffer: []const f32) [fft_bin_count / 8]zmath.F32x4 {
     const fft_overlap_samples = @divExact(fft_bin_count, 2);
@@ -159,4 +158,77 @@ pub fn samplesToPowerSpectrum(pcm_buffer: []const f32) [fft_bin_count / 8]zmath.
     }
 
     return power_spectrum;
+}
+
+pub fn generateMelTable(
+    comptime bin_count: comptime_int,
+    comptime frequency_resolution: comptime_float,
+) [bin_count]f32 {
+    var result: [bin_count]f32 = undefined;
+    var i: usize = 0;
+    while (i < bin_count) : (i += 1) {
+        result[i] = melScale(frequency_resolution * (@intToFloat(f32, i) + 1));
+    }
+    return result;
+}
+
+pub fn calculateHammingWindowTable(comptime freq_bin_count: comptime_int) [freq_bin_count]f32 {
+    comptime {
+        var i: comptime_int = 0;
+        var result: [freq_bin_count]f32 = undefined;
+        while (i < freq_bin_count) : (i += 1) {
+            // 0.54 - 0.46cos(2pi*n/(N-1))
+            result[i] = 0.54 - (0.46 * @cos((2 * std.math.pi * i) / @as(f32, freq_bin_count - 1)));
+        }
+        return result;
+    }
+}
+
+pub fn calculateHanningWindowTable(comptime freq_bin_count: comptime_int) [freq_bin_count]f32 {
+    comptime {
+        var i: comptime_int = 0;
+        var result: [freq_bin_count]f32 = undefined;
+        while (i < freq_bin_count) : (i += 1) {
+            // 0.50 - 0.50cos(2pi*n/(N-1))
+            result[i] = 0.50 - (0.50 * @cos((2 * std.math.pi * i) / @as(f32, freq_bin_count - 1)));
+        }
+        return result;
+    }
+}
+
+pub fn melScale(freq_band: f32) f32 {
+    return 2595 * std.math.log10(1.0 + (freq_band / 700));
+}
+
+pub fn calculateFreqToMelTable(
+    comptime bin_count: comptime_int,
+    comptime frequency_resolution: comptime_float,
+) [bin_count]f32 {
+    return comptime blk: {
+        @setEvalBranchQuota(bin_count * bin_count);
+        const mel_upper: f32 = melScale(frequency_resolution * bin_count);
+        var result = [1]f32{0.0} ** bin_count;
+        const mel_increment = mel_upper / bin_count;
+        var freq_i: usize = 0;
+        outer: while (freq_i < bin_count) : (freq_i += 1) {
+            const freq = @intToFloat(f32, freq_i) * frequency_resolution;
+            const freq_in_mel: f32 = melScale(freq);
+            var lower_mel: f32 = 0;
+            var upper_mel: f32 = mel_increment;
+            var mel_bin_index: usize = 0;
+            while (mel_bin_index < bin_count) : (mel_bin_index += 1) {
+                if (freq_in_mel >= lower_mel and freq_in_mel < upper_mel) {
+                    const fraction: f32 = (freq_in_mel - lower_mel) / mel_increment;
+                    std.debug.assert(fraction >= 0.0);
+                    std.debug.assert(fraction <= 1.0);
+                    result[freq_i] = @intToFloat(f32, mel_bin_index) + fraction;
+                    continue :outer;
+                }
+                lower_mel += mel_increment;
+                upper_mel += mel_increment;
+            }
+            unreachable;
+        }
+        break :blk result;
+    };
 }
