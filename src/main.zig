@@ -15,7 +15,7 @@ pub fn main() !void {
 
     gpa = if (builtin.mode == .Debug) stdlib_gpa.allocator() else std.heap.c_allocator;
 
-    const app_options = app_core.InitOptions {
+    const app_options = app_core.InitOptions{
         .screencapture_order = &[_]app_core.ScreenCaptureBackend{ .pipewire, .wlroots },
         .frontend = .wayland,
     };
@@ -28,10 +28,10 @@ pub fn main() !void {
     app_core.deinit();
 
     const runtime_duration = runtime_timer.duration();
-    log.info("Runtime: {s}", .{std.fmt.fmtDuration(runtime_duration) });
+    log.info("Runtime: {s}", .{std.fmt.fmtDuration(runtime_duration)});
 }
 
 comptime {
-    if(builtin.os.tag != .linux)
+    if (builtin.os.tag != .linux)
         @panic("Linux is the only supported operating system");
 }
