@@ -223,7 +223,11 @@ pub fn draw(
         preview_region.margin.top -= 1 * screen_scale.vertical;
         preview_region.height.? += 2 * screen_scale.vertical;
 
-        const background_color = RGB.fromInt(150, 150, 150);
+        const background_color = if (model.recording_context.state == .recording)
+            RGB.fromInt(150, 20, 20)
+        else
+            RGB.fromInt(150, 150, 150);
+
         (try face_writer.create(QuadFace)).* = graphics.quadColored(
             preview_region.toExtent(),
             background_color.toRGBA(),
@@ -402,7 +406,9 @@ fn drawSectionRecord(
         record_button_region.height = 31 * screen_scale.vertical;
 
         const label = switch (model.recording_context.state) {
-            .idle => "Record",
+            .idle,
+            .sync,
+            => "Record",
             .recording => "Stop",
             .paused => "Resume",
         };
