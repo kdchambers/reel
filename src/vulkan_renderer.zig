@@ -130,6 +130,7 @@ pub const VideoFrameBuffer = struct {
 };
 
 pub var video_stream_dimensions: geometry.Dimensions2D(f32) = .{ .width = 1920.0, .height = 1080 };
+pub var video_stream_scaled_dimensions: geometry.Dimensions2D(f32) = .{ .width = 1920.0, .height = 1080 };
 pub var video_stream_placement: geometry.Coordinates2D(f32) = .{ .x = -0.8, .y = -0.8 };
 pub var video_stream_output_dimensions: geometry.Dimensions2D(f32) = .{ .width = 0.2, .height = 0.2 };
 pub var video_stream_enabled: bool = false;
@@ -419,8 +420,7 @@ pub fn faceWriter() graphics.FaceWriter {
 }
 
 pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
-
-    if(swapchain_extent.width == screen_dimensions.width and swapchain_extent.height == screen_dimensions.height)
+    if (swapchain_extent.width == screen_dimensions.width and swapchain_extent.height == screen_dimensions.height)
         return;
 
     const device_dispatch = vulkan_core.device_dispatch;
@@ -527,7 +527,7 @@ pub fn recordRenderPass(
     std.debug.assert(command_buffers.len > 0);
     std.debug.assert(swapchain_images.len == command_buffers.len);
 
-    if(screen_dimensions.width != swapchain_extent.width or screen_dimensions.height != swapchain_extent.height) {
+    if (screen_dimensions.width != swapchain_extent.width or screen_dimensions.height != swapchain_extent.height) {
         try recreateSwapchain(screen_dimensions);
         return;
     }
@@ -589,8 +589,8 @@ pub fn recordRenderPass(
         //
         const texture_x: f32 = 0;
         const texture_y: f32 = 0;
-        const texture_width: f32 = video_stream_dimensions.width / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.width);
-        const texture_height: f32 = video_stream_dimensions.height / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.height);
+        const texture_width: f32 = video_stream_scaled_dimensions.width / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.width);
+        const texture_height: f32 = video_stream_scaled_dimensions.height / @as(f32, defines.memory.pipeline_video.framebuffer_dimensions.height);
         std.debug.assert(texture_width <= 1.0);
         std.debug.assert(texture_width >= 0.0);
         vertex_top_left.u = texture_x;
@@ -631,13 +631,17 @@ pub fn recordRenderPass(
 
             var src_region_offsets = [2]vk.Offset3D{
                 .{ .x = 0, .y = 0, .z = 0 },
-                .{ .x = 1920, .y = 1080, .z = 1 },
+                .{
+                    .x = @floatToInt(i32, video_stream_dimensions.width),
+                    .y = @floatToInt(i32, video_stream_dimensions.height),
+                    .z = 1,
+                },
             };
             const dst_region_offsets = [2]vk.Offset3D{
                 .{ .x = 0, .y = 0, .z = 0 },
                 .{
-                    .x = @floatToInt(i32, @floor(video_stream_dimensions.width)),
-                    .y = @floatToInt(i32, @floor(video_stream_dimensions.height)),
+                    .x = @floatToInt(i32, @floor(video_stream_scaled_dimensions.width)),
+                    .y = @floatToInt(i32, @floor(video_stream_scaled_dimensions.height)),
                     .z = 1,
                 },
             };

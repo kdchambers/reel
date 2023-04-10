@@ -240,6 +240,16 @@ pub fn draw(
             renderer.video_stream_placement.y = preview_extent.y;
             renderer.video_stream_output_dimensions.width = preview_extent.width;
             renderer.video_stream_output_dimensions.height = preview_extent.height;
+
+            const dimensions_pixels = geometry.Dimensions2D(f32){
+                .width = @floor(preview_extent.width / screen_scale.horizontal),
+                .height = @floor(preview_extent.height / screen_scale.vertical),
+            };
+            std.log.info("Preview scaled to: {d} x {d}", .{
+                dimensions_pixels.width,
+                dimensions_pixels.height,
+            });
+            renderer.video_stream_scaled_dimensions = dimensions_pixels;
         }
     }
 
