@@ -213,12 +213,8 @@ pub const Selector = struct {
             .height = 40.0 * screen_scale.vertical,
         };
 
-        const points_per_curve = @floatToInt(u16, @floor(radius));
-        const rotation_per_point = std.math.degreesToRadians(f64, 90 / @intToFloat(f64, points_per_curve - 1));
         const seperator_width_pixels: f32 = 1.0;
         const seperator_width: f32 = seperator_width_pixels * screen_scale.horizontal;
-
-        const GenericVertex = graphics.GenericVertex;
 
         {
             vertices_ref[0] = face_writer_ref.vertices_used;
@@ -253,90 +249,33 @@ pub const Selector = struct {
             const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
             event_system.bindStateToMouseEvent(states_ref[0], hover_extent, &extents_ref[0], bind_options);
 
-            {
-                //
-                // Top Left
-                //
-                const vertices_index: u16 = face_writer_ref.vertices_used;
-                const start_indices_index: u16 = face_writer_ref.indices_used;
-                const corner_x = extent.x + radius_h;
-                const corner_y = extent.y - (extent.height - radius_v);
-                //
-                // Draw corner point
-                //
-                face_writer_ref.vertices[vertices_index] = GenericVertex{
-                    .x = corner_x,
-                    .y = corner_y,
-                    .color = background_color,
-                };
-                //
-                // Draw first on-curve point
-                //
-                var angle_radians = std.math.degreesToRadians(f64, 0);
-                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
-                    .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
-                    .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                    .color = background_color,
-                };
-                var i: u16 = 1;
-                while (i < points_per_curve) : (i += 1) {
-                    angle_radians += rotation_per_point;
-                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
-                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
-                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = background_color,
-                    };
-                    const indices_index = start_indices_index + ((i - 1) * 3);
-                    face_writer_ref.indices[indices_index + 0] = vertices_index; // Corner
-                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
-                    face_writer_ref.indices[indices_index + 2] = vertices_index + i + 1; // Current
-                }
-                face_writer_ref.vertices_used += points_per_curve + 2;
-                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
-            }
+            const top_left_arc_placement = Coordinates2D(f32){
+                .x = extent.x + radius_h,
+                .y = extent.y - (extent.height - radius_v),
+            };
 
-            {
-                //
-                // Bottom Left
-                //
-                const vertices_index: u16 = face_writer_ref.vertices_used;
-                const start_indices_index: u16 = face_writer_ref.indices_used;
-                const corner_x = extent.x + radius_h;
-                const corner_y = extent.y - radius_v;
-                //
-                // Draw corner point
-                //
-                face_writer_ref.vertices[vertices_index] = GenericVertex{
-                    .x = corner_x,
-                    .y = corner_y,
-                    .color = background_color,
-                };
-                //
-                // Draw first on-curve point
-                //
-                var start_angle_radians = std.math.degreesToRadians(f64, 270);
+            try graphics.drawRoundedCorner(
+                .top_left,
+                top_left_arc_placement,
+                background_color,
+                radius,
+                screen_scale,
+                face_writer_ref,
+            );
 
-                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
-                    .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
-                    .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
-                    .color = background_color,
-                };
-                var i: u16 = 1;
-                while (i < points_per_curve) : (i += 1) {
-                    const angle_radians: f64 = start_angle_radians + (rotation_per_point * @intToFloat(f64, i));
-                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
-                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
-                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = background_color,
-                    };
-                    const indices_index = start_indices_index + ((i - 1) * 3);
-                    face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
-                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
-                    face_writer_ref.indices[indices_index + 2] = vertices_index; // Corner
-                }
-                face_writer_ref.vertices_used += points_per_curve + 2;
-                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
-            }
+            const bottom_left_arc_placement = Coordinates2D(f32){
+                .x = extent.x + radius_h,
+                .y = extent.y - radius_v,
+            };
+
+            try graphics.drawRoundedCorner(
+                .bottom_left,
+                bottom_left_arc_placement,
+                background_color,
+                radius,
+                screen_scale,
+                face_writer_ref,
+            );
 
             const seperator_extent = Extent2D(f32){
                 .x = placement.x + radius_h + box_width,
@@ -389,91 +328,33 @@ pub const Selector = struct {
             const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
             event_system.bindStateToMouseEvent(states_ref[last_index], hover_extent, &extents_ref[last_index], bind_options);
 
-            {
-                //
-                // Top Right
-                //
-                const vertices_index: u16 = face_writer_ref.vertices_used;
-                const start_indices_index: u16 = face_writer_ref.indices_used;
-                const corner_x = middle_section_extent.x + middle_section_extent.width;
-                const corner_y = extent.y - (extent.height - radius_v);
-                //
-                // Draw corner point
-                //
-                face_writer_ref.vertices[vertices_index] = GenericVertex{
-                    .x = corner_x,
-                    .y = corner_y,
-                    .color = background_color,
-                };
-                //
-                // Draw first on-curve point
-                //
-                var start_angle_radians = std.math.degreesToRadians(f64, 180);
+            const top_right_arc_placement = Coordinates2D(f32){
+                .x = middle_section_extent.x + middle_section_extent.width,
+                .y = extent.y - (extent.height - radius_v),
+            };
 
-                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
-                    .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
-                    .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
-                    .color = background_color,
-                };
-                var i: u16 = 1;
-                while (i < points_per_curve) : (i += 1) {
-                    const angle_radians: f64 = start_angle_radians - (rotation_per_point * @intToFloat(f64, i));
-                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
-                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
-                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = background_color,
-                    };
-                    const indices_index = start_indices_index + ((i - 1) * 3);
-                    face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
-                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
-                    face_writer_ref.indices[indices_index + 2] = vertices_index; // Corner
-                }
-                face_writer_ref.vertices_used += points_per_curve + 2;
-                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
-            }
+            try graphics.drawRoundedCorner(
+                .top_right,
+                top_right_arc_placement,
+                background_color,
+                radius,
+                screen_scale,
+                face_writer_ref,
+            );
 
-            {
-                //
-                // Bottom Right
-                //
-                const vertices_index: u16 = face_writer_ref.vertices_used;
-                const start_indices_index: u16 = face_writer_ref.indices_used;
-                const corner_x = middle_section_extent.x + middle_section_extent.width;
-                const corner_y = extent.y - radius_v;
-                //
-                // Draw corner point
-                //
-                face_writer_ref.vertices[vertices_index] = GenericVertex{
-                    .x = corner_x,
-                    .y = corner_y,
-                    .color = background_color,
-                };
-                //
-                // Draw first on-curve point
-                //
-                var start_angle_radians = std.math.degreesToRadians(f64, 180);
+            const bottom_right_arc_placement = Coordinates2D(f32){
+                .x = middle_section_extent.x + middle_section_extent.width,
+                .y = extent.y - radius_v,
+            };
 
-                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
-                    .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
-                    .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
-                    .color = background_color,
-                };
-                var i: u16 = 1;
-                while (i < points_per_curve) : (i += 1) {
-                    const angle_radians: f64 = start_angle_radians + (rotation_per_point * @intToFloat(f64, i));
-                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
-                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
-                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = background_color,
-                    };
-                    const indices_index = start_indices_index + ((i - 1) * 3);
-                    face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
-                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
-                    face_writer_ref.indices[indices_index + 2] = vertices_index; // Corner
-                }
-                face_writer_ref.vertices_used += points_per_curve + 2;
-                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
-            }
+            try graphics.drawRoundedCorner(
+                .bottom_right,
+                bottom_right_arc_placement,
+                background_color,
+                radius,
+                screen_scale,
+                face_writer_ref,
+            );
 
             var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
             pen.writeCentered(self.labels[last_index], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
