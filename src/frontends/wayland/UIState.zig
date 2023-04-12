@@ -24,9 +24,9 @@ pub const image_format_labels = [_][]const u8{
 };
 
 pub const tab_headings = [_][]const u8{
-    "Record",
-    "Screenshot",
-    "Stream",
+    "RECORD",
+    "SCREENSHOT",
+    "STREAM",
 };
 
 pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
@@ -39,6 +39,8 @@ record_quality: widgets.Dropdown,
 
 screenshot_button: widgets.Button,
 screenshot_format: widgets.Dropdown,
+
+preview_display_selector: widgets.Selector,
 
 enable_preview_checkbox: widgets.Checkbox,
 audio_input_spectogram: widgets.AudioSpectogram,

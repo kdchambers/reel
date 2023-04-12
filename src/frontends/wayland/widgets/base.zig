@@ -63,6 +63,11 @@ pub const Selector = struct {
     vertex_indices: mini_heap.SliceIndex(u16),
     extent_indices: mini_heap.SliceIndex(Index(geometry.Extent2D(f32))),
 
+    background_color: graphics.RGBA(f32),
+    border_color: graphics.RGBA(f32),
+    active_background_color: graphics.RGBA(f32),
+    hovered_background_color: graphics.RGBA(f32),
+
     pub fn create(labels: []const []const u8) @This() {
         var state_buffer: [16]Index(HoverZoneState) = undefined;
         for (0..labels.len) |heading_i| {
@@ -97,7 +102,85 @@ pub const Selector = struct {
             .state_indices = state_indices,
             .vertex_indices = vertex_indices,
             .extent_indices = extent_indices,
+            .border_color = .{
+                .r = 0.6,
+                .g = 0.6,
+                .b = 0.6,
+                .a = 1.0,
+            },
+            .background_color = .{
+                .r = 0.3,
+                .g = 0.25,
+                .b = 0.3,
+                .a = 1.0,
+            },
+            .active_background_color = .{
+                .r = 0.22,
+                .g = 0.18,
+                .b = 0.22,
+                .a = 1.0,
+            },
+            .hovered_background_color = .{
+                .r = 0.25,
+                .g = 0.21,
+                .b = 0.23,
+                .a = 1.0,
+            },
         };
+    }
+
+    const Update = struct {
+        color_changed: bool = false,
+        index_changed: bool = false,
+    };
+
+    pub fn update(self: *@This()) Update {
+        var result: Update = .{};
+        const last_index = self.labels.len - 1;
+        for (self.state_indices.get(), 0..) |*state, i| {
+            if (i == self.active_index)
+                continue;
+            const ptr = state.getPtr();
+            if (ptr.hover_enter) {
+                const vertex_count: u16 = if (i == 0 or i == last_index) 22 else 4;
+                var vertex_index = self.vertex_indices.get()[i];
+                const end_index = vertex_index + vertex_count;
+                while (vertex_index < end_index) : (vertex_index += 1) {
+                    vertices_buffer_ref[vertex_index].color = self.hovered_background_color;
+                }
+            }
+            if (ptr.hover_exit) {
+                const vertex_count: u16 = if (i == 0 or i == last_index) 22 else 4;
+                var vertex_index = self.vertex_indices.get()[i];
+                const end_index = vertex_index + vertex_count;
+                while (vertex_index < end_index) : (vertex_index += 1) {
+                    vertices_buffer_ref[vertex_index].color = self.background_color;
+                }
+            }
+            if (ptr.left_click_press) {
+                {
+                    //
+                    // Reset color of currently active tab
+                    //
+                    const vertex_count: u16 = if (self.active_index == 0 or self.active_index == last_index) 22 else 4;
+                    var vertex_index = self.vertex_indices.get()[self.active_index];
+                    const end_index = vertex_index + vertex_count;
+                    while (vertex_index < end_index) : (vertex_index += 1) {
+                        vertices_buffer_ref[vertex_index].color = self.background_color;
+                    }
+                }
+                const vertex_count: u16 = if (i == 0 or i == last_index) 22 else 4;
+                var vertex_index = self.vertex_indices.get()[i];
+                const end_index = vertex_index + vertex_count;
+                while (vertex_index < end_index) : (vertex_index += 1) {
+                    vertices_buffer_ref[vertex_index].color = self.active_background_color;
+                }
+                self.active_index = @intCast(u16, i);
+                result.index_changed = true;
+            }
+            ptr.reset();
+        }
+        return result;
     }
 
     pub fn draw(
@@ -106,9 +189,9 @@ pub const Selector = struct {
         screen_scale: ScaleFactor2D(f32),
         pen: anytype,
     ) !void {
-        const radius: f32 = 8.0;
-        const radius_h: f32 = 8.0 * screen_scale.horizontal;
-        const radius_v: f32 = 8.0 * screen_scale.vertical;
+        const radius: f32 = 5.0;
+        const radius_h: f32 = radius * screen_scale.horizontal;
+        const radius_v: f32 = radius * screen_scale.vertical;
 
         var width_max: f32 = 0.0;
         var widths_buffer: [8]f32 = undefined;
@@ -117,6 +200,10 @@ pub const Selector = struct {
             width_max = @max(widths_buffer[i], width_max);
         }
 
+        var vertices_ref = self.vertex_indices.get();
+        var states_ref = self.state_indices.get();
+        var extents_ref = self.extent_indices.get();
+
         const box_width: f32 = width_max + (20.0 * screen_scale.horizontal);
 
         const extent = Extent2D(f32){
@@ -124,18 +211,6 @@ pub const Selector = struct {
             .y = placement.y,
             .width = 100 * screen_scale.horizontal,
             .height = 40.0 * screen_scale.vertical,
-        };
-        const border_color = graphics.RGBA(f32){
-            .r = 0.3,
-            .g = 0.2,
-            .b = 0.3,
-            .a = 1.0,
-        };
-        const seperator_color = graphics.RGBA(f32){
-            .r = 0.8,
-            .g = 0.8,
-            .b = 0.8,
-            .a = 1.0,
         };
 
         const points_per_curve = @floatToInt(u16, @floor(radius));
@@ -146,6 +221,9 @@ pub const Selector = struct {
         const GenericVertex = graphics.GenericVertex;
 
         {
+            vertices_ref[0] = face_writer_ref.vertices_used;
+
+            const background_color = if (self.active_index == 0) self.active_background_color else self.background_color;
             const left_side_extent = Extent2D(f32){
                 .x = placement.x,
                 .y = placement.y - radius_v,
@@ -153,7 +231,7 @@ pub const Selector = struct {
                 .height = extent.height - (radius_v * 2.0),
             };
 
-            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(left_side_extent, border_color, .bottom_left);
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(left_side_extent, background_color, .bottom_left);
 
             const middle_section_extent = Extent2D(f32){
                 .x = placement.x + radius_h,
@@ -161,19 +239,19 @@ pub const Selector = struct {
                 .width = box_width,
                 .height = extent.height,
             };
-            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(middle_section_extent, border_color, .bottom_left);
-            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
-            pen.writeCentered(self.labels[0], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
-                std.log.err("Failed to draw {}. Lack of space", .{err});
-            };
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(middle_section_extent, background_color, .bottom_left);
 
-            const seperator_extent = Extent2D(f32){
-                .x = placement.x + radius_h + box_width,
+            //
+            // Register hover zone with event system
+            //
+            const hover_extent = Extent2D(f32){
+                .x = placement.x,
                 .y = placement.y,
-                .width = 1.0 * screen_scale.horizontal,
+                .width = box_width + radius_h,
                 .height = extent.height,
             };
-            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(seperator_extent, seperator_color, .bottom_left);
+            const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+            event_system.bindStateToMouseEvent(states_ref[0], hover_extent, &extents_ref[0], bind_options);
 
             {
                 //
@@ -189,7 +267,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index] = GenericVertex{
                     .x = corner_x,
                     .y = corner_y,
-                    .color = border_color,
+                    .color = background_color,
                 };
                 //
                 // Draw first on-curve point
@@ -198,7 +276,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
                     .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
                     .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                    .color = border_color,
+                    .color = background_color,
                 };
                 var i: u16 = 1;
                 while (i < points_per_curve) : (i += 1) {
@@ -206,7 +284,7 @@ pub const Selector = struct {
                     face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
                         .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
                         .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = border_color,
+                        .color = background_color,
                     };
                     const indices_index = start_indices_index + ((i - 1) * 3);
                     face_writer_ref.indices[indices_index + 0] = vertices_index; // Corner
@@ -231,7 +309,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index] = GenericVertex{
                     .x = corner_x,
                     .y = corner_y,
-                    .color = border_color,
+                    .color = background_color,
                 };
                 //
                 // Draw first on-curve point
@@ -241,7 +319,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
                     .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
                     .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
-                    .color = border_color,
+                    .color = background_color,
                 };
                 var i: u16 = 1;
                 while (i < points_per_curve) : (i += 1) {
@@ -249,7 +327,7 @@ pub const Selector = struct {
                     face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
                         .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
                         .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = border_color,
+                        .color = background_color,
                     };
                     const indices_index = start_indices_index + ((i - 1) * 3);
                     face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
@@ -259,6 +337,19 @@ pub const Selector = struct {
                 face_writer_ref.vertices_used += points_per_curve + 2;
                 face_writer_ref.indices_used += (points_per_curve - 1) * 3;
             }
+
+            const seperator_extent = Extent2D(f32){
+                .x = placement.x + radius_h + box_width,
+                .y = placement.y,
+                .width = 1.0 * screen_scale.horizontal,
+                .height = extent.height,
+            };
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(seperator_extent, self.border_color, .bottom_left);
+
+            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+            pen.writeCentered(self.labels[0], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
+                std.log.err("Failed to draw {}. Lack of space", .{err});
+            };
         }
 
         //
@@ -266,17 +357,17 @@ pub const Selector = struct {
         //
 
         {
+            const last_index = self.labels.len - 1;
+            vertices_ref[last_index] = face_writer_ref.vertices_used;
+
+            const background_color = if (self.active_index == last_index) self.active_background_color else self.background_color;
             const middle_section_extent = Extent2D(f32){
-                .x = placement.x + radius_h + ((box_width + seperator_width) * @intToFloat(f32, self.labels.len - 1)),
+                .x = placement.x + radius_h + ((box_width + seperator_width) * @intToFloat(f32, last_index)),
                 .y = placement.y,
                 .width = box_width,
                 .height = extent.height,
             };
-            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(middle_section_extent, border_color, .bottom_left);
-            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
-            pen.writeCentered(self.labels[self.labels.len - 1], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
-                std.log.err("Failed to draw {}. Lack of space", .{err});
-            };
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(middle_section_extent, background_color, .bottom_left);
 
             const right_middle_extent = Extent2D(f32){
                 .x = middle_section_extent.x + middle_section_extent.width,
@@ -284,7 +375,19 @@ pub const Selector = struct {
                 .width = radius_h,
                 .height = extent.height - (radius_v * 2.0),
             };
-            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(right_middle_extent, border_color, .bottom_left);
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(right_middle_extent, background_color, .bottom_left);
+
+            //
+            // Register hover zone with event system
+            //
+            const hover_extent = Extent2D(f32){
+                .x = middle_section_extent.x,
+                .y = placement.y,
+                .width = box_width + radius_h,
+                .height = extent.height,
+            };
+            const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+            event_system.bindStateToMouseEvent(states_ref[last_index], hover_extent, &extents_ref[last_index], bind_options);
 
             {
                 //
@@ -300,7 +403,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index] = GenericVertex{
                     .x = corner_x,
                     .y = corner_y,
-                    .color = border_color,
+                    .color = background_color,
                 };
                 //
                 // Draw first on-curve point
@@ -310,7 +413,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
                     .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
                     .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
-                    .color = border_color,
+                    .color = background_color,
                 };
                 var i: u16 = 1;
                 while (i < points_per_curve) : (i += 1) {
@@ -318,7 +421,7 @@ pub const Selector = struct {
                     face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
                         .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
                         .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = border_color,
+                        .color = background_color,
                     };
                     const indices_index = start_indices_index + ((i - 1) * 3);
                     face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
@@ -343,7 +446,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index] = GenericVertex{
                     .x = corner_x,
                     .y = corner_y,
-                    .color = border_color,
+                    .color = background_color,
                 };
                 //
                 // Draw first on-curve point
@@ -353,7 +456,7 @@ pub const Selector = struct {
                 face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
                     .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
                     .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
-                    .color = border_color,
+                    .color = background_color,
                 };
                 var i: u16 = 1;
                 while (i < points_per_curve) : (i += 1) {
@@ -361,7 +464,7 @@ pub const Selector = struct {
                     face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
                         .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
                         .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
-                        .color = border_color,
+                        .color = background_color,
                     };
                     const indices_index = start_indices_index + ((i - 1) * 3);
                     face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
@@ -371,6 +474,11 @@ pub const Selector = struct {
                 face_writer_ref.vertices_used += points_per_curve + 2;
                 face_writer_ref.indices_used += (points_per_curve - 1) * 3;
             }
+
+            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+            pen.writeCentered(self.labels[last_index], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
+                std.log.err("Failed to draw {}. Lack of space", .{err});
+            };
         }
     }
 };

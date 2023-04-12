@@ -68,6 +68,7 @@ const widgets = @import("wayland/widgets.zig");
 const Button = widgets.Button;
 const Checkbox = widgets.Checkbox;
 const Dropdown = widgets.Dropdown;
+const Selector = widgets.Selector;
 const TabbedSection = widgets.TabbedSection;
 
 const app_core = @import("../app_core.zig");
@@ -271,6 +272,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.enable_preview_checkbox = try Checkbox.create();
 
+    const display_label_list = wayland_core.display_list.items;
+    ui_state.preview_display_selector = Selector.create(display_label_list);
+
     ui_state.action_tab = TabbedSection.create(
         &UIState.tab_headings,
         graphics.RGB(f32).fromInt(150, 35, 57),
@@ -329,6 +333,13 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                 is_draw_required = true;
             }
             last_preview_frame = captured_frame.index;
+            is_render_requested = true;
+        }
+    }
+
+    {
+        const widget_update = ui_state.preview_display_selector.update();
+        if (widget_update.color_changed or widget_update.index_changed) {
             is_render_requested = true;
         }
     }

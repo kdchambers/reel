@@ -251,6 +251,18 @@ pub fn draw(
             });
             renderer.video_stream_scaled_dimensions = dimensions_pixels;
         }
+
+        {
+            const placement = geometry.Coordinates2D(f32){
+                .x = preview_extent.x,
+                .y = preview_extent.y + (60.0 * screen_scale.vertical),
+            };
+            try ui_state.preview_display_selector.draw(
+                placement,
+                screen_scale,
+                pen,
+            );
+        }
     }
 
     var action_tab_region: Region = .{};
