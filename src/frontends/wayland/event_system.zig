@@ -146,6 +146,7 @@ pub fn reset() void {
     mini_heap.reset();
     event_cluster_buffer.init();
     state_cluster_buffer.init();
+    blocking_events_count = 0;
 }
 
 /// Clears all globally stored State entries so that no values are set
@@ -219,6 +220,33 @@ pub fn bindStateToMouseEvent(
     unreachable;
 }
 
+var blocking_events_count: usize = 0;
+var blocking_events_buffer: [16]MouseEventEntry = undefined;
+
+pub fn clearBlockingEvents() void {
+    blocking_events_count = 0;
+}
+
+pub fn addBlockingMouseEvents(
+    extent_indices: []Index(geometry.Extent2D(f32)),
+    enable_hover: bool,
+    start_active: bool,
+    out_indices: []Index(HoverZoneState),
+) void {
+    std.debug.assert(blocking_events_count == 0);
+    std.debug.assert(extent_indices.len <= 16);
+    std.debug.assert(out_indices.len == extent_indices.len);
+    for (0..extent_indices.len) |i| {
+        blocking_events_buffer[i] = .{
+            .extent = extent_indices[i].toIndexAligned(),
+            .state = out_indices[i],
+            .hover_active = start_active,
+            .hover_enabled = enable_hover,
+        };
+    }
+    blocking_events_count = extent_indices.len;
+}
+
 pub fn addMouseEvent(
     extent: geometry.Extent2D(f32),
     enable_hover: bool,
@@ -237,6 +265,30 @@ pub fn addMouseEvent(
 }
 
 pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
+    if (blocking_events_count > 0) {
+        for (blocking_events_buffer[0..blocking_events_count]) |*entry| {
+            if (!entry.hover_enabled)
+                return;
+            const extent: geometry.Extent2D(f32) = entry.extent.get();
+            const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
+                position.y <= extent.y and position.y >= (extent.y - extent.height));
+            if (is_within_extent and !entry.hover_active) {
+                //
+                // We're entering a new hover zone
+                //
+                entry.hover_active = true;
+                entry.state.getPtr().hover_enter = true;
+            } else if (!is_within_extent and entry.hover_active) {
+                //
+                // We're leaving an active hover zone
+                //
+                entry.hover_active = false;
+                entry.state.getPtr().hover_exit = true;
+            }
+        }
+        return;
+    }
+
     var buffer_i: usize = 0;
     while (buffer_i < event_cluster_buffer.len) : (buffer_i += 1) {
         const cluster = &event_cluster_buffer.buffers[buffer_i];
@@ -266,6 +318,42 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
 }
 
 pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: MouseButton, button_action: wl.Pointer.ButtonState) void {
+    if (blocking_events_count > 0) {
+        for (blocking_events_buffer[0..blocking_events_count]) |entry| {
+            const extent: geometry.Extent2D(f32) = entry.extent.get();
+            const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
+                position.y <= extent.y and position.y >= (extent.y - extent.height));
+
+            if (!is_within_extent)
+                continue;
+
+            var state = entry.state.getPtr();
+
+            if (button_action == .pressed and button == .left) {
+                std.log.info("Blocking extent clicked", .{});
+                state.left_click_press = true;
+                state.pending_left_click_release = true;
+            }
+
+            if (button_action == .pressed and button == .right) {
+                state.right_click_press = true;
+                state.pending_right_click_release = true;
+            }
+
+            if (button_action == .released) {
+                if (button == .left and state.pending_left_click_release) {
+                    state.left_click_release = true;
+                    state.pending_left_click_release = false;
+                }
+                if (button == .right and state.pending_right_click_release) {
+                    state.right_click_release = true;
+                    state.pending_right_click_release = false;
+                }
+            }
+        }
+        return;
+    }
+
     var buffer_i: usize = 0;
     while (buffer_i < event_cluster_buffer.len) : (buffer_i += 1) {
         const cluster = &event_cluster_buffer.buffers[buffer_i];

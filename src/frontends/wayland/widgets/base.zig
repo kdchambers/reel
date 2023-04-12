@@ -84,7 +84,7 @@ pub const TabbedSection = struct {
             @intCast(u16, headings.len),
             .{ .check_alignment = true },
         );
-        for(extent_indices.get()) |*extent_index| {
+        for (extent_indices.get()) |*extent_index| {
             extent_index.index = std.math.maxInt(u16);
         }
         const state_indices = mini_heap.writeSlice(
@@ -316,11 +316,18 @@ pub const Dropdown = struct {
             .item_states = undefined,
             .item_extents = undefined,
         };
+
+        const initial_extent = geometry.Extent2D(f32){
+            .x = -1.0,
+            .y = -1.0,
+            .width = 0.0,
+            .height = 0.0,
+        };
         var i: usize = 0;
         while (i < item_count) : (i += 1) {
             result.item_states[i] = event_system.reserveState();
             result.item_states[i].getPtr().reset();
-            result.item_extents[i] = .{ .index = std.math.maxInt(u16) };
+            result.item_extents[i] = mini_heap.write(geometry.Extent2D(f32), &initial_extent);
         }
         return result;
     }
@@ -403,16 +410,25 @@ pub const Dropdown = struct {
         event_system.bindStateToMouseEvent(self.state_index, extent, &self.extent_index, bind_options);
 
         if (self.is_open) {
-            for (self.labels, 0..) |label, i| {
-                const item_extent = Extent2D(f32){
+            var extent_buffer: [8]Extent2D(f32) = undefined;
+            for (0..self.labels.len) |i| {
+                extent_buffer[i] = .{
                     .x = extent.x,
                     .y = extent.y + (extent.height * @intToFloat(f32, i + 1)),
                     .width = extent.width,
                     .height = extent.height,
                 };
-                (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(item_extent, color, .bottom_left);
-                try pen.writeCentered(label, item_extent, screen_scale, &text_writer_interface);
-                event_system.bindStateToMouseEvent(self.item_states[i], item_extent, &self.item_extents[i], bind_options);
+                self.item_extents[i].getPtr().* = extent_buffer[i];
+            }
+            event_system.addBlockingMouseEvents(
+                self.item_extents[0..self.labels.len],
+                true,
+                true,
+                self.item_states[0..self.labels.len],
+            );
+            for (self.labels, 0..) |label, i| {
+                (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent_buffer[i], color, .bottom_left);
+                try pen.writeCentered(label, extent_buffer[i], screen_scale, &text_writer_interface);
             }
         }
     }

@@ -368,6 +368,7 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                     }
                     ui_state.record_format.selected_index = @intCast(u16, i);
                     ui_state.record_format.is_open = false;
+                    event_system.clearBlockingEvents();
                     is_draw_required = true;
                 }
             }
