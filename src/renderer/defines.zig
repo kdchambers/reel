@@ -15,7 +15,7 @@ pub const TextureNormalizedBaseType = f32;
 pub const memory = struct {
     pub const device_local = struct {
         // 0. Texture Image
-        const size_bytes = pipeline_generic.texture_image_size;
+        const size_bytes = pipeline_generic.texture_image_size * 2;
         // 1. Anit Aliasing Resolve (dynamically sized)
     };
 
@@ -98,7 +98,7 @@ pub const initial_screen_dimensions = geometry.Dimensions2D(u16){
 pub const max_frames_in_flight: u32 = 2;
 
 /// Enables transparency on the selected surface
-pub const transparancy_enabled = true;
+pub const transparancy_enabled = false;
 
 /// The transparency of the selected surface
 /// Valid values between 0.0 (no transparency) and 1.0 (full)

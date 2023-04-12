@@ -182,6 +182,8 @@ pub const UpdateError = error{ VulkanRendererRenderFrameFail, UserInterfaceDrawF
 var last_recording_state: Model.RecordingContext.State = .idle;
 var last_preview_frame: u64 = 0;
 
+var font_texture: renderer.Texture = undefined;
+
 pub fn init(allocator: std.mem.Allocator) !void {
     allocator_ref = allocator;
 
@@ -199,6 +201,36 @@ pub fn init(allocator: std.mem.Allocator) !void {
     texture_atlas = Atlas.init(allocator, 512) catch return error.TextureAtlasInitFail;
     errdefer texture_atlas.deinit(allocator);
 
+    font_texture.width = 512;
+    font_texture.height = 512;
+    const pixels = try allocator.alloc(graphics.RGBA(f32), font_texture.width * font_texture.height);
+    const clear_pixel = graphics.RGBA(f32){
+        .r = 0.0,
+        .g = 0.0,
+        .b = 0.0,
+        .a = 0.0,
+    };
+    std.mem.set(graphics.RGBA(f32), pixels, clear_pixel);
+    pixels[(512 * 512) - 1] = .{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 };
+
+    font_texture.pixels = pixels.ptr;
+
+    {
+        const points_per_pixel = 100;
+        const font_point_size: f64 = 12.0;
+        pen = font.createPen(
+            pen_options,
+            allocator,
+            font_point_size,
+            points_per_pixel,
+            atlas_codepoints,
+            font_texture.width,
+            font_texture.pixels,
+            &texture_atlas,
+        ) catch return error.FontPenInitFail;
+    }
+    errdefer pen.deinit(allocator);
+
     event_system.init() catch |err| {
         std.log.err("Failed to initialize the event system. Error: {}", .{err});
         return error.InitializeEventSystemFail;
@@ -208,29 +240,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
         allocator,
         @ptrCast(*renderer.Display, wayland_core.display),
         @ptrCast(*renderer.Surface, surface),
-        &texture_atlas,
+        font_texture,
         screen_dimensions,
     ) catch return error.VulkanRendererInitFail;
     errdefer renderer.deinit(allocator);
-
-    {
-        const points_per_pixel = 100;
-        const font_point_size: f64 = 12.0;
-        var loaded_texture = renderer.textureGet() catch return error.VulkanRendererCommitTextureFail;
-        std.debug.assert(loaded_texture.width == loaded_texture.height);
-        pen = font.createPen(
-            pen_options,
-            allocator,
-            font_point_size,
-            points_per_pixel,
-            atlas_codepoints,
-            loaded_texture.width,
-            loaded_texture.pixels,
-            &texture_atlas,
-        ) catch return error.FontPenInitFail;
-        renderer.textureCommit() catch return error.VulkanRendererCommitTextureFail;
-    }
-    errdefer pen.deinit(allocator);
 
     face_writer = renderer.faceWriter();
 

@@ -24,9 +24,6 @@ const memory_size = defines.memory.host_local.size_bytes + 256;
 const ScreenNormalizedBaseType = defines.ScreenNormalizedBaseType;
 const TextureNormalizedBaseType = defines.TextureNormalizedBaseType;
 
-// TODO: Fontana shouldn't be referenced here
-const Atlas = @import("fontana").Atlas;
-
 /// Defines the entire surface area of a screen in vulkans coordinate system
 /// I.e normalized device coordinates right (ndc right)
 const full_screen_extent = geometry.Extent2D(ScreenNormalizedBaseType){
@@ -48,10 +45,8 @@ var mapped_device_memory: [*]u8 = undefined;
 var quad_buffer: []graphics.QuadFace = undefined;
 var current_frame: u32 = 0;
 var previous_frame: u32 = 0;
-pub var texture_atlas: *Atlas = undefined;
 
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
-var jobs_command_buffer: vk.CommandBuffer = undefined;
 
 //
 // Graphics context
@@ -151,11 +146,9 @@ pub fn init(
     allocator: std.mem.Allocator,
     wayland_display: *Display,
     wayland_surface: *Surface,
-    atlas: *Atlas,
+    static_texture: Texture,
     swapchain_dimensions: geometry.Dimensions2D(u16),
 ) !void {
-    texture_atlas = atlas;
-
     try vulkan_core.init(
         @ptrCast(*vk.wl_display, wayland_display),
         @ptrCast(*vk.wl_surface, wayland_surface),
@@ -324,19 +317,6 @@ pub fn init(
     try render_pass.init(swapchain_extent, swapchain_surface_format.format, selected_memory_index);
 
     {
-        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-            .command_pool = vulkan_core.command_pool,
-            .level = .primary,
-            .command_buffer_count = 1,
-        };
-        try v_device.allocateCommandBuffers(
-            vulkan_core.logical_device,
-            &command_buffer_allocate_info,
-            @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-        );
-    }
-
-    {
         command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain_images.len);
         const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
             .command_pool = vulkan_core.command_pool,
@@ -392,10 +372,10 @@ pub fn init(
 
     try generic_pipeline.init(
         allocator,
-        jobs_command_buffer,
         vulkan_core.graphics_present_queue,
         @intCast(u32, swapchain_images.len),
         &host_local_allocator,
+        static_texture,
     );
 }
 
@@ -807,245 +787,11 @@ pub const Texture = struct {
     pixels: [*]graphics.RGBA(f32),
     width: u32,
     height: u32,
+
+    pub fn pixelCount(self: @This()) u32 {
+        return self.width * self.height;
+    }
 };
-
-pub fn textureGet() !Texture {
-    try transitionTextureToGeneral();
-    const pixel_count = @intCast(u32, texture_layer_dimensions.width) * texture_layer_dimensions.height;
-    return Texture{
-        .pixels = generic_pipeline.texture_memory_map[0..pixel_count],
-        .width = texture_layer_dimensions.width,
-        .height = texture_layer_dimensions.height,
-    };
-}
-
-pub fn textureCommit() !void {
-    try transitionTextureToOptimal();
-}
-
-fn transitionTextureToGeneral() !void {
-    const device_dispatch = vulkan_core.device_dispatch;
-    const logical_device = vulkan_core.logical_device;
-
-    const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-        .command_pool = vulkan_core.command_pool,
-        .level = .primary,
-        .command_buffer_count = 1,
-    };
-
-    try device_dispatch.allocateCommandBuffers(
-        logical_device,
-        &command_buffer_allocate_info,
-        @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-    );
-
-    try device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
-        .flags = .{ .one_time_submit_bit = true },
-        .p_inheritance_info = null,
-    });
-
-    const barrier = [_]vk.ImageMemoryBarrier{
-        .{
-            .src_access_mask = .{ .shader_read_bit = true },
-            .dst_access_mask = .{},
-            .old_layout = .shader_read_only_optimal,
-            .new_layout = .general,
-            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .image = generic_pipeline.texture_image,
-            .subresource_range = .{
-                .aspect_mask = .{ .color_bit = true },
-                .base_mip_level = 0,
-                .level_count = 1,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
-        },
-    };
-    const src_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
-    const dst_stage = vk.PipelineStageFlags{ .bottom_of_pipe_bit = true };
-    const dependency_flags = vk.DependencyFlags{};
-    device_dispatch.cmdPipelineBarrier(
-        jobs_command_buffer,
-        src_stage,
-        dst_stage,
-        dependency_flags,
-        0,
-        undefined,
-        0,
-        undefined,
-        1,
-        &barrier,
-    );
-
-    try device_dispatch.endCommandBuffer(jobs_command_buffer);
-
-    const submit_command_infos = [_]vk.SubmitInfo{.{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-        .signal_semaphore_count = 0,
-        .p_signal_semaphores = undefined,
-    }};
-
-    const job_fence = try device_dispatch.createFence(
-        logical_device,
-        &.{ .flags = .{ .signaled_bit = false } },
-        null,
-    );
-
-    try device_dispatch.queueSubmit(vulkan_core.graphics_present_queue, 1, &submit_command_infos, job_fence);
-    _ = try device_dispatch.waitForFences(
-        logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &job_fence),
-        vk.TRUE,
-        std.time.ns_per_s * 2,
-    );
-    device_dispatch.destroyFence(logical_device, job_fence, null);
-    device_dispatch.freeCommandBuffers(
-        logical_device,
-        vulkan_core.command_pool,
-        1,
-        @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-    );
-}
-
-fn transitionTextureToOptimal() !void {
-    const device_dispatch = vulkan_core.device_dispatch;
-    const logical_device = vulkan_core.logical_device;
-
-    const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-        .command_pool = vulkan_core.command_pool,
-        .level = .primary,
-        .command_buffer_count = 1,
-    };
-    try device_dispatch.allocateCommandBuffers(
-        logical_device,
-        &command_buffer_allocate_info,
-        @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-    );
-    try device_dispatch.beginCommandBuffer(jobs_command_buffer, &vk.CommandBufferBeginInfo{
-        .flags = .{ .one_time_submit_bit = true },
-        .p_inheritance_info = null,
-    });
-
-    const barrier = [_]vk.ImageMemoryBarrier{
-        .{
-            .src_access_mask = .{},
-            .dst_access_mask = .{ .shader_read_bit = true },
-            .old_layout = .general,
-            .new_layout = .shader_read_only_optimal,
-            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .image = generic_pipeline.texture_image,
-            .subresource_range = .{
-                .aspect_mask = .{ .color_bit = true },
-                .base_mip_level = 0,
-                .level_count = 1,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
-        },
-    };
-
-    {
-        const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
-        const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
-        const dependency_flags = vk.DependencyFlags{};
-        device_dispatch.cmdPipelineBarrier(
-            jobs_command_buffer,
-            src_stage,
-            dst_stage,
-            dependency_flags,
-            0,
-            undefined,
-            0,
-            undefined,
-            1,
-            &barrier,
-        );
-    }
-
-    try device_dispatch.endCommandBuffer(jobs_command_buffer);
-
-    const submit_command_infos = [_]vk.SubmitInfo{.{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-        .signal_semaphore_count = 0,
-        .p_signal_semaphores = undefined,
-    }};
-
-    const job_fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{} }, null);
-    try device_dispatch.queueSubmit(vulkan_core.graphics_present_queue, 1, &submit_command_infos, job_fence);
-    _ = try device_dispatch.waitForFences(
-        logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &job_fence),
-        vk.TRUE,
-        std.time.ns_per_s * 4,
-    );
-    device_dispatch.destroyFence(logical_device, job_fence, null);
-    device_dispatch.freeCommandBuffers(
-        logical_device,
-        vulkan_core.command_pool,
-        1,
-        @ptrCast([*]vk.CommandBuffer, &jobs_command_buffer),
-    );
-}
-
-pub fn addTexture(
-    allocator: std.mem.Allocator,
-    width: u32,
-    height: u32,
-    pixels: [*]const graphics.RGBA(u8),
-) !ImageHandle {
-    _ = try vulkan_core.device_dispatch.waitForFences(
-        vulkan_core.logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
-        vk.TRUE,
-        std.math.maxInt(u64),
-    );
-    try transitionTextureToGeneral();
-
-    const dst_extent = try texture_atlas.reserve(geometry.Extent2D(u32), allocator, width, height);
-    var src_y: u32 = 0;
-    while (src_y < height) : (src_y += 1) {
-        var src_x: u32 = 0;
-        while (src_x < width) : (src_x += 1) {
-            const src_index = src_x + (src_y * width);
-            const dst_index = dst_extent.x + src_x + ((dst_extent.y + src_y) * texture_layer_dimensions.width);
-            // const pixel = pixels[src_index];
-            // _ = pixel;
-            // const value: f32 = @intToFloat(f32, @intCast(u16, pixel.r) + @intCast(u16, pixel.g) + @intCast(u16, pixel.b)) / @as(f32, 255.0 * 3.0);
-            // std.debug.assert(value <= 1.0);
-            // std.debug.assert(value >= 0.0);
-            generic_pipeline.texture_memory_map[dst_index].r = 1.0; // @intToFloat(f32, pixels[src_index].r) / 255;
-            generic_pipeline.texture_memory_map[dst_index].g = 1.0; // @intToFloat(f32, pixels[src_index].g) / 255;
-            generic_pipeline.texture_memory_map[dst_index].b = 1.0; // @intToFloat(f32, pixels[src_index].b) / 255;
-            generic_pipeline.texture_memory_map[dst_index].a = @intToFloat(f32, pixels[src_index].a) / 255;
-        }
-    }
-    std.debug.assert(dst_extent.width == width);
-    std.debug.assert(dst_extent.height == height);
-
-    try transitionTextureToOptimal();
-
-    return ImageHandle{
-        .texture_array_index = 0,
-        .x = @intCast(u12, dst_extent.x),
-        .y = @intCast(u12, dst_extent.y),
-        ._width = @intCast(u12, dst_extent.width),
-        ._height = @intCast(u12, dst_extent.height),
-        .reserved = 0,
-    };
-}
 
 pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
     const device_dispatch = vulkan_core.device_dispatch;

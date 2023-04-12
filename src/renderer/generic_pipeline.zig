@@ -7,6 +7,8 @@ const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
 const shaders = @import("shaders");
 
+const root = @import("../vulkan_renderer.zig");
+
 const vulkan_core = @import("vulkan_core.zig");
 const render_pass = @import("render_pass.zig");
 const defines = @import("defines.zig");
@@ -22,7 +24,6 @@ pub const PushConstant = packed struct {
 };
 
 pub var texture_image: vk.Image = undefined;
-pub var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
 pub var descriptor_sets: []vk.DescriptorSet = undefined;
 pub var descriptor_set_layouts: []vk.DescriptorSetLayout = undefined;
 pub var pipeline_layout: vk.PipelineLayout = undefined;
@@ -41,33 +42,61 @@ var sampler: vk.Sampler = undefined;
 
 pub fn init(
     allocator: std.mem.Allocator,
-    command_buffer: vk.CommandBuffer,
     graphics_present_queue: vk.Queue,
     swapchain_image_count: u32,
     vulkan_allocator: *VulkanAllocator,
+    static_texture: root.Texture,
 ) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
     const command_pool = vulkan_core.command_pool;
-    const texture_dimensions = defines.texture_layer_dimensions;
 
     const initial_viewport_dimensions = defines.initial_screen_dimensions;
+
+    //
+    // Create staging buffer for static texture
+    //
+
+    const staging_buffer_size = static_texture.pixelCount() * @sizeOf(graphics.RGBA(f32));
+    const staging_buffer_create_info = vk.BufferCreateInfo{
+        .size = staging_buffer_size,
+        .usage = .{ .transfer_src_bit = true },
+        .sharing_mode = .exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .flags = .{},
+    };
+    const staging_buffer = try device_dispatch.createBuffer(logical_device, &staging_buffer_create_info, null);
+    const staging_memory_requirements = device_dispatch.getBufferMemoryRequirements(logical_device, staging_buffer);
+    const staging_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
+        .allocation_size = staging_memory_requirements.size,
+        .memory_type_index = vulkan_allocator.memory_index,
+    }, null);
+    try device_dispatch.bindBufferMemory(
+        logical_device,
+        staging_buffer,
+        staging_memory,
+        0,
+    );
+
+    var staging_buffer_memory_map = @ptrCast([*]u8, (try device_dispatch.mapMemory(logical_device, staging_memory, 0, staging_memory_requirements.size, .{})).?);
+    @memcpy(staging_buffer_memory_map, @ptrCast([*]u8, static_texture.pixels), staging_buffer_size);
 
     {
         const image_create_info = vk.ImageCreateInfo{
             .flags = .{},
             .image_type = .@"2d",
             .format = .r32g32b32a32_sfloat,
-            .tiling = .linear,
+            .tiling = .optimal,
             .extent = vk.Extent3D{
-                .width = texture_dimensions.width,
-                .height = texture_dimensions.height,
+                .width = static_texture.width,
+                .height = static_texture.height,
                 .depth = 1,
             },
             .mip_levels = 1,
             .array_layers = 1,
             .initial_layout = .undefined,
-            .usage = .{ .sampled_bit = true },
+            .usage = .{ .sampled_bit = true, .transfer_dst_bit = true },
             .samples = .{ .@"1_bit" = true },
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
@@ -83,105 +112,285 @@ pub fn init(
     );
     try device_dispatch.bindImageMemory(logical_device, texture_image, vulkan_allocator.memory, texture_memory_offset);
 
-    const texture_layer_size = defines.texture_layer_size;
-    std.debug.assert(texture_layer_size <= texture_memory_requirements.size);
-    const last_index: usize = (@intCast(usize, texture_dimensions.width) * texture_dimensions.height) - 1;
     {
-        texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(16, &vulkan_allocator.mapped_memory[texture_memory_offset]));
-        std.mem.set(graphics.RGBA(f32), texture_memory_map[0..last_index], .{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 0.0 });
+        //
+        // Transition from undefined to transfer_dst
+        //
+
+        var command_buffer: vk.CommandBuffer = undefined;
+        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+            .command_pool = command_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        try device_dispatch.allocateCommandBuffers(
+            logical_device,
+            &command_buffer_allocate_info,
+            @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        );
+
+        try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+            .flags = .{ .one_time_submit_bit = true },
+            .p_inheritance_info = null,
+        });
+
+        const barrier = [_]vk.ImageMemoryBarrier{
+            .{
+                .src_access_mask = .{},
+                .dst_access_mask = .{ .transfer_write_bit = true },
+                .old_layout = .undefined,
+                .new_layout = .transfer_dst_optimal,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = texture_image,
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            },
+        };
+
+        {
+            const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
+            const dst_stage = vk.PipelineStageFlags{ .transfer_bit = true };
+            const dependency_flags = vk.DependencyFlags{};
+            device_dispatch.cmdPipelineBarrier(
+                command_buffer,
+                src_stage,
+                dst_stage,
+                dependency_flags,
+                0,
+                undefined,
+                0,
+                undefined,
+                1,
+                &barrier,
+            );
+        }
+
+        try device_dispatch.endCommandBuffer(command_buffer);
+
+        const submit_command_infos = [_]vk.SubmitInfo{.{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+            .p_wait_dst_stage_mask = undefined,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+        }};
+
+        {
+            const fence_create_info = vk.FenceCreateInfo{
+                .flags = .{},
+            };
+            const fence = try device_dispatch.createFence(logical_device, &fence_create_info, null);
+
+            try device_dispatch.queueSubmit(
+                graphics_present_queue,
+                1,
+                &submit_command_infos,
+                fence,
+            );
+
+            _ = try device_dispatch.waitForFences(
+                logical_device,
+                1,
+                @ptrCast([*]const vk.Fence, &fence),
+                vk.TRUE,
+                std.time.ns_per_s * 3,
+            );
+            device_dispatch.destroyFence(logical_device, fence, null);
+            device_dispatch.freeCommandBuffers(
+                logical_device,
+                command_pool,
+                1,
+                @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            );
+        }
     }
 
-    // Not sure if this is a hack, but because we multiply the texture sample by the
-    // color in the fragment shader, we need pixel in the texture that we known will return 1.0
-    // Here we're setting the last pixel to 1.0, which corresponds to a texture mapping of 1.0, 1.0
-    texture_memory_map[last_index].r = 1.0;
-    texture_memory_map[last_index].g = 1.0;
-    texture_memory_map[last_index].b = 1.0;
-    texture_memory_map[last_index].a = 1.0;
+    {
+        //
+        // Copy buffer to image
+        //
 
-    try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
-        .flags = .{ .one_time_submit_bit = true },
-        .p_inheritance_info = null,
-    });
+        var command_buffer: vk.CommandBuffer = undefined;
+        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+            .command_pool = command_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        try device_dispatch.allocateCommandBuffers(
+            logical_device,
+            &command_buffer_allocate_info,
+            @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        );
 
-    // Regardless of whether a staging buffer was used, and the type of memory that backs the texture
-    // It is neccessary to transition to image layout to SHADER_OPTIMAL
-    const barrier = [_]vk.ImageMemoryBarrier{
-        .{
-            .src_access_mask = .{},
-            .dst_access_mask = .{ .shader_read_bit = true },
-            .old_layout = .undefined,
-            .new_layout = .shader_read_only_optimal,
-            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .image = texture_image,
-            .subresource_range = .{
+        try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+            .flags = .{ .one_time_submit_bit = true },
+            .p_inheritance_info = null,
+        });
+
+        const region = [_]vk.BufferImageCopy{.{
+            .buffer_offset = 0,
+            .buffer_row_length = 0,
+            .buffer_image_height = 0,
+            .image_subresource = .{
                 .aspect_mask = .{ .color_bit = true },
-                .base_mip_level = 0,
-                .level_count = 1,
+                .mip_level = 0,
                 .base_array_layer = 0,
                 .layer_count = 1,
             },
-        },
-    };
+            .image_offset = .{ .x = 0, .y = 0, .z = 0 },
+            .image_extent = .{
+                .width = static_texture.width,
+                .height = static_texture.height,
+                .depth = 1,
+            },
+        }};
 
-    {
-        const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
-        const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
-        const dependency_flags = vk.DependencyFlags{};
-        device_dispatch.cmdPipelineBarrier(
-            command_buffer,
-            src_stage,
-            dst_stage,
-            dependency_flags,
-            0,
-            undefined,
-            0,
-            undefined,
-            1,
-            &barrier,
-        );
+        device_dispatch.cmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, .transfer_dst_optimal, 1, &region);
+        try device_dispatch.endCommandBuffer(command_buffer);
+
+        const submit_command_infos = [_]vk.SubmitInfo{.{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+            .p_wait_dst_stage_mask = undefined,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+        }};
+
+        {
+            const fence_create_info = vk.FenceCreateInfo{ .flags = .{} };
+            const fence = try device_dispatch.createFence(logical_device, &fence_create_info, null);
+
+            try device_dispatch.queueSubmit(
+                graphics_present_queue,
+                1,
+                &submit_command_infos,
+                fence,
+            );
+
+            _ = try device_dispatch.waitForFences(
+                logical_device,
+                1,
+                @ptrCast([*]const vk.Fence, &fence),
+                vk.TRUE,
+                std.time.ns_per_s * 3,
+            );
+            device_dispatch.destroyFence(logical_device, fence, null);
+            device_dispatch.freeCommandBuffers(
+                logical_device,
+                command_pool,
+                1,
+                @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            );
+        }
     }
 
-    try device_dispatch.endCommandBuffer(command_buffer);
-
-    const submit_command_infos = [_]vk.SubmitInfo{.{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-        .signal_semaphore_count = 0,
-        .p_signal_semaphores = undefined,
-    }};
-
     {
-        const fence_create_info = vk.FenceCreateInfo{
-            .flags = .{},
+        //
+        // Transition Image from transfer_dst to shader_read_optimal
+        //
+
+        var command_buffer: vk.CommandBuffer = undefined;
+        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+            .command_pool = command_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
         };
-        const fence = try device_dispatch.createFence(logical_device, &fence_create_info, null);
-
-        try device_dispatch.queueSubmit(
-            graphics_present_queue,
-            1,
-            &submit_command_infos,
-            fence,
+        try device_dispatch.allocateCommandBuffers(
+            logical_device,
+            &command_buffer_allocate_info,
+            @ptrCast([*]vk.CommandBuffer, &command_buffer),
         );
 
-        _ = try device_dispatch.waitForFences(
-            logical_device,
-            1,
-            @ptrCast([*]const vk.Fence, &fence),
-            vk.TRUE,
-            std.time.ns_per_s * 3,
-        );
-        device_dispatch.destroyFence(logical_device, fence, null);
-        device_dispatch.freeCommandBuffers(
-            logical_device,
-            command_pool,
-            1,
-            @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-        );
+        try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+            .flags = .{ .one_time_submit_bit = true },
+            .p_inheritance_info = null,
+        });
+
+        const barrier = [_]vk.ImageMemoryBarrier{
+            .{
+                .src_access_mask = .{ .transfer_write_bit = true },
+                .dst_access_mask = .{ .shader_read_bit = true },
+                .old_layout = .transfer_dst_optimal,
+                .new_layout = .shader_read_only_optimal,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = texture_image,
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            },
+        };
+
+        {
+            const src_stage = vk.PipelineStageFlags{ .transfer_bit = true };
+            const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
+            const dependency_flags = vk.DependencyFlags{};
+            device_dispatch.cmdPipelineBarrier(
+                command_buffer,
+                src_stage,
+                dst_stage,
+                dependency_flags,
+                0,
+                undefined,
+                0,
+                undefined,
+                1,
+                &barrier,
+            );
+        }
+
+        try device_dispatch.endCommandBuffer(command_buffer);
+
+        const submit_command_infos = [_]vk.SubmitInfo{.{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+            .p_wait_dst_stage_mask = undefined,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+        }};
+
+        {
+            const fence_create_info = vk.FenceCreateInfo{ .flags = .{} };
+            const fence = try device_dispatch.createFence(logical_device, &fence_create_info, null);
+
+            try device_dispatch.queueSubmit(
+                graphics_present_queue,
+                1,
+                &submit_command_infos,
+                fence,
+            );
+
+            _ = try device_dispatch.waitForFences(
+                logical_device,
+                1,
+                @ptrCast([*]const vk.Fence, &fence),
+                vk.TRUE,
+                std.time.ns_per_s * 3,
+            );
+            device_dispatch.destroyFence(logical_device, fence, null);
+            device_dispatch.freeCommandBuffers(
+                logical_device,
+                command_pool,
+                1,
+                @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            );
+        }
     }
 
     texture_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
