@@ -25,7 +25,7 @@ This project is very new and can be considered a minimally viable product. The f
 
 | Feature | Status |
 | ---- | ----- |
-| Screenshot | ❌ |
+| Screenshot | ✅ |
 | Record Video | ✅ |
 | Stream Video | ❌ |
 | Webcam Input | ❌ |
