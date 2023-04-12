@@ -432,44 +432,12 @@ fn drawSectionRecord(
         );
     }
 
-    var record_format_region: Region = .{};
-    {
-        record_format_region.anchor.left = section_region.left();
-        record_format_region.margin.left = 10 * screen_scale.horizontal;
-        record_format_region.anchor.top = section_region.top();
-        record_format_region.margin.top = 80 * screen_scale.vertical;
-
-        const dropdown_label = "Format";
-        const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
-        record_format_region.width = (dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
-        record_format_region.height = 30 * screen_scale.vertical;
-
-        const label_extent = record_format_region.toExtent();
-
-        try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
-
-        var dropdown_region: Region = .{};
-        dropdown_region.anchor.left = record_format_region.right();
-        dropdown_region.margin.left = 10 * screen_scale.horizontal;
-        dropdown_region.anchor.top = section_region.top();
-        dropdown_region.margin.top = 80 * screen_scale.vertical;
-        dropdown_region.width = 100 * screen_scale.horizontal;
-        dropdown_region.height = record_format_region.height;
-
-        try ui_state.record_format.draw(
-            dropdown_region.toExtent(),
-            pen,
-            screen_scale,
-            record_button_color_normal,
-        );
-    }
-
     var record_quality_region: Region = .{};
     {
         record_quality_region.anchor.left = section_region.left();
-        record_quality_region.margin.left = 10 * screen_scale.horizontal;
-        record_quality_region.anchor.top = record_format_region.bottom();
-        record_quality_region.margin.top = 20 * screen_scale.vertical;
+        record_quality_region.margin.left = 20 * screen_scale.horizontal;
+        record_quality_region.anchor.bottom = section_region.bottom();
+        record_quality_region.margin.bottom = 60 * screen_scale.vertical;
 
         const dropdown_label = "Quality";
         const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
@@ -481,13 +449,45 @@ fn drawSectionRecord(
 
         var dropdown_region: Region = .{};
         dropdown_region.anchor.left = record_quality_region.right();
-        dropdown_region.margin.left = 10 * screen_scale.horizontal;
-        dropdown_region.anchor.top = record_format_region.bottom();
-        dropdown_region.margin.top = 20 * screen_scale.vertical;
+        dropdown_region.margin.left = 20 * screen_scale.horizontal;
+        dropdown_region.anchor.bottom = section_region.bottom();
+        dropdown_region.margin.bottom = 60 * screen_scale.vertical;
+        dropdown_region.width = 100 * screen_scale.horizontal;
+        dropdown_region.height = record_quality_region.height;
+
+        try ui_state.record_quality.draw(
+            dropdown_region.toExtent(),
+            pen,
+            screen_scale,
+            record_button_color_normal,
+        );
+    }
+
+    var record_format_region: Region = .{};
+    {
+        record_format_region.anchor.left = section_region.left();
+        record_format_region.margin.left = 20 * screen_scale.horizontal;
+        record_format_region.anchor.bottom = record_quality_region.top();
+        record_format_region.margin.bottom = 20 * screen_scale.vertical;
+
+        const dropdown_label = "Format";
+        const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
+        record_format_region.width = (dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
+        record_format_region.height = 30 * screen_scale.vertical;
+
+        const label_extent = record_format_region.toExtent();
+
+        try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
+
+        var dropdown_region: Region = .{};
+        dropdown_region.anchor.left = record_quality_region.right();
+        dropdown_region.margin.left = 20 * screen_scale.horizontal;
+        dropdown_region.anchor.bottom = record_quality_region.top();
+        dropdown_region.margin.bottom = 20 * screen_scale.vertical;
         dropdown_region.width = 100 * screen_scale.horizontal;
         dropdown_region.height = record_format_region.height;
 
-        try ui_state.record_quality.draw(
+        try ui_state.record_format.draw(
             dropdown_region.toExtent(),
             pen,
             screen_scale,

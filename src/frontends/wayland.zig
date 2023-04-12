@@ -411,6 +411,7 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                     }
                     ui_state.record_quality.selected_index = @intCast(u16, i);
                     ui_state.record_quality.is_open = false;
+                    event_system.clearBlockingEvents();
                     is_draw_required = true;
                 }
             }
