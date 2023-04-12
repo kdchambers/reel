@@ -5,6 +5,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
 
+const utils = @import("utils.zig");
+const FixedBuffer = utils.FixedBuffer;
+
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
@@ -16,7 +19,6 @@ const graphics = @import("graphics.zig");
 
 pub var display: *wl.Display = undefined;
 pub var screencopy_manager_opt: ?*wlr.ScreencopyManagerV1 = null;
-pub var output_opt: ?*wl.Output = null;
 pub var shared_memory: *wl.Shm = undefined;
 
 pub var registry: *wl.Registry = undefined;
@@ -29,6 +31,17 @@ pub var seat: *wl.Seat = undefined;
 pub var pointer: *wl.Pointer = undefined;
 
 pub var display_list: std.ArrayList([]const u8) = undefined;
+
+pub const OutputDisplay = struct {
+    handle: *wl.Output,
+    dimensions: geometry.Dimensions2D(i32) = .{ .width = 0, .height = 0 },
+    refresh_rate: i32 = 0,
+    index: u16,
+    scale_factor: i32 = 0.0,
+    name: []const u8 = undefined,
+};
+
+pub var outputs: FixedBuffer(OutputDisplay, 8) = .{};
 
 //
 // TODO: Get rid of this and bind the interface
@@ -68,11 +81,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
 }
 
 pub fn deinit() void {
-    // TODO: Call whatever wayland deinit fns
-
     display = undefined;
     screencopy_manager_opt = null;
-    output_opt = null;
     registry = undefined;
     compositor = undefined;
     xdg_wm_base = undefined;
@@ -80,7 +90,6 @@ pub fn deinit() void {
     shared_memory = undefined;
     seat = undefined;
     pointer = undefined;
-    output_opt = null;
 
     display_list.deinit();
 
@@ -149,34 +158,24 @@ fn shmListener(_: *wl.Shm, event: wl.Shm.Event, _: *const void) void {
     // }
 }
 
-fn outputListener(output: *wl.Output, event: wl.Output.Event, _: *const void) void {
+fn outputListener(output: *wl.Output, event: wl.Output.Event, index: *const u16) void {
     _ = output;
     switch (event) {
         .geometry => |data| {
-            // std.log.info("Output geometry: {s} :: {s}", .{
-            //     data.make, data.model,
-            // });
             const duped_make_string = allocator_ref.dupe(u8, std.mem.span(data.make)) catch return;
             display_list.append(duped_make_string) catch return;
+            outputs.buffer[index.*].name = duped_make_string;
         },
         .mode => |mode| {
-            _ = mode;
-            // std.log.info("Output mode: {d}x{d} refresh {d}", .{
-            //     mode.width, mode.height, mode.refresh,
-            // });
+            outputs.buffer[index.*].refresh_rate = mode.refresh;
+            outputs.buffer[index.*].dimensions.width = mode.width;
+            outputs.buffer[index.*].dimensions.height = mode.height;
         },
         .scale => |scale| {
-            _ = scale;
-            // std.log.info("Output scale: {d}", .{scale.factor});
+            outputs.buffer[index.*].scale_factor = scale.factor;
         },
-        .name => |name| {
-            _ = name;
-            // std.log.info("Output name: {s}", .{ name.name });
-        },
-        .description => |data| {
-            // std.log.info("Output description: {s}", .{ data.description });
-            _ = data;
-        },
+        .name => |name| std.log.info("Wayland output name: {s}", .{name.name}),
+        .description => |data| std.log.info("Wayland output description: {s}", .{data.description}),
         .done => {},
     }
 }
@@ -197,8 +196,15 @@ fn registryListener(registry_ref: *wl.Registry, event: wl.Registry.Event, _: *co
             } else if (std.cstr.cmp(global.interface, wlr.ScreencopyManagerV1.getInterface().name) == 0) {
                 screencopy_manager_opt = registry_ref.bind(global.name, wlr.ScreencopyManagerV1, 3) catch return;
             } else if (std.cstr.cmp(global.interface, wl.Output.getInterface().name) == 0) {
-                output_opt = registry_ref.bind(global.name, wl.Output, 2) catch return;
-                output_opt.?.setListener(*const void, outputListener, &{});
+                if (outputs.len < outputs.buffer.len) {
+                    const output_ptr = registry_ref.bind(global.name, wl.Output, 2) catch return;
+                    const output_index = @intCast(u16, outputs.len);
+                    outputs.append(.{
+                        .handle = output_ptr,
+                        .index = output_index,
+                    }) catch unreachable;
+                    output_ptr.setListener(*const u16, outputListener, &output_index);
+                }
             } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
                 //
                 // TODO: Negociate with compositor how the window decorations will be drawn
