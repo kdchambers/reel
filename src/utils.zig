@@ -5,6 +5,7 @@ pub const RingBuffer = @import("utils/RingBuffer.zig").RingBuffer;
 pub const Timer = @import("utils/Timer.zig");
 pub const FixedBuffer = @import("utils/FixedBuffer.zig").FixedBuffer;
 
+const std = @import("std");
 const c = @cImport({
     @cInclude("time.h");
 });
@@ -30,3 +31,30 @@ pub const DateTime = struct {
         };
     }
 };
+
+pub const Duration = struct {
+    hours: u8,
+    minutes: u8,
+    seconds: u8,
+    milliseconds: u16,
+
+    pub fn fromNanoseconds(ns: u64) @This() {
+        return .{
+            .hours = @intCast(u8, @divFloor(ns, std.time.ns_per_hour) % 24),
+            .minutes = @intCast(u8, @divFloor(ns, std.time.ns_per_min) % 60),
+            .seconds = @intCast(u8, @divFloor(ns, std.time.ns_per_s) % 60),
+            .milliseconds = @intCast(u16, @divFloor(ns, std.time.ns_per_ms) % 1000),
+        };
+    }
+};
+
+test "Duration" {
+    const expect = std.testing.expect;
+    const time = std.time;
+    const ts: u64 = (time.ns_per_hour * 2) + (time.ns_per_min * 25) + (time.ns_per_s * 33) + (time.ns_per_ms * 345);
+    const duration = Duration.fromNanoseconds(ts);
+    try expect(duration.hours == 2);
+    try expect(duration.minutes == 25);
+    try expect(duration.seconds == 33);
+    try expect(duration.milliseconds == 345);
+}
