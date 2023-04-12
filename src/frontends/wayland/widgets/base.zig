@@ -56,6 +56,325 @@ pub fn init(
     is_mouse_in_screen_ref = is_mouse_in_screen;
 }
 
+pub const Selector = struct {
+    active_index: u16,
+    labels: []const []const u8,
+    state_indices: mini_heap.SliceIndex(Index(HoverZoneState)),
+    vertex_indices: mini_heap.SliceIndex(u16),
+    extent_indices: mini_heap.SliceIndex(Index(geometry.Extent2D(f32))),
+
+    pub fn create(labels: []const []const u8) @This() {
+        var state_buffer: [16]Index(HoverZoneState) = undefined;
+        for (0..labels.len) |heading_i| {
+            state_buffer[heading_i] = event_system.reserveState();
+            state_buffer[heading_i].getPtr().clear();
+        }
+
+        const state_indices = mini_heap.writeSlice(
+            Index(HoverZoneState),
+            state_buffer[0..labels.len],
+            .{ .check_alignment = true },
+        );
+
+        const vertex_indices = mini_heap.reserve(
+            u16,
+            @intCast(u16, labels.len),
+            .{ .check_alignment = true },
+        );
+        const extent_indices = mini_heap.reserve(
+            Index(geometry.Extent2D(f32)),
+            @intCast(u16, labels.len),
+            .{ .check_alignment = true },
+        );
+
+        for (extent_indices.get()) |*extent_index| {
+            extent_index.index = std.math.maxInt(u16);
+        }
+
+        return .{
+            .active_index = 0,
+            .labels = labels,
+            .state_indices = state_indices,
+            .vertex_indices = vertex_indices,
+            .extent_indices = extent_indices,
+        };
+    }
+
+    pub fn draw(
+        self: *@This(),
+        placement: Coordinates2D(f32),
+        screen_scale: ScaleFactor2D(f32),
+        pen: anytype,
+    ) !void {
+        const radius: f32 = 8.0;
+        const radius_h: f32 = 8.0 * screen_scale.horizontal;
+        const radius_v: f32 = 8.0 * screen_scale.vertical;
+
+        var width_max: f32 = 0.0;
+        var widths_buffer: [8]f32 = undefined;
+        for (self.labels, 0..) |label, i| {
+            widths_buffer[i] = pen.calculateRenderDimensions(label).width * screen_scale.horizontal;
+            width_max = @max(widths_buffer[i], width_max);
+        }
+
+        const box_width: f32 = width_max + (20.0 * screen_scale.horizontal);
+
+        const extent = Extent2D(f32){
+            .x = placement.x,
+            .y = placement.y,
+            .width = 100 * screen_scale.horizontal,
+            .height = 40.0 * screen_scale.vertical,
+        };
+        const border_color = graphics.RGBA(f32){
+            .r = 0.3,
+            .g = 0.2,
+            .b = 0.3,
+            .a = 1.0,
+        };
+        const seperator_color = graphics.RGBA(f32){
+            .r = 0.8,
+            .g = 0.8,
+            .b = 0.8,
+            .a = 1.0,
+        };
+
+        const points_per_curve = @floatToInt(u16, @floor(radius));
+        const rotation_per_point = std.math.degreesToRadians(f64, 90 / @intToFloat(f64, points_per_curve - 1));
+        const seperator_width_pixels: f32 = 1.0;
+        const seperator_width: f32 = seperator_width_pixels * screen_scale.horizontal;
+
+        const GenericVertex = graphics.GenericVertex;
+
+        {
+            const left_side_extent = Extent2D(f32){
+                .x = placement.x,
+                .y = placement.y - radius_v,
+                .width = radius_h,
+                .height = extent.height - (radius_v * 2.0),
+            };
+
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(left_side_extent, border_color, .bottom_left);
+
+            const middle_section_extent = Extent2D(f32){
+                .x = placement.x + radius_h,
+                .y = placement.y,
+                .width = box_width,
+                .height = extent.height,
+            };
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(middle_section_extent, border_color, .bottom_left);
+            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+            pen.writeCentered(self.labels[0], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
+                std.log.err("Failed to draw {}. Lack of space", .{err});
+            };
+
+            const seperator_extent = Extent2D(f32){
+                .x = placement.x + radius_h + box_width,
+                .y = placement.y,
+                .width = 1.0 * screen_scale.horizontal,
+                .height = extent.height,
+            };
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(seperator_extent, seperator_color, .bottom_left);
+
+            {
+                //
+                // Top Left
+                //
+                const vertices_index: u16 = face_writer_ref.vertices_used;
+                const start_indices_index: u16 = face_writer_ref.indices_used;
+                const corner_x = extent.x + radius_h;
+                const corner_y = extent.y - (extent.height - radius_v);
+                //
+                // Draw corner point
+                //
+                face_writer_ref.vertices[vertices_index] = GenericVertex{
+                    .x = corner_x,
+                    .y = corner_y,
+                    .color = border_color,
+                };
+                //
+                // Draw first on-curve point
+                //
+                var angle_radians = std.math.degreesToRadians(f64, 0);
+                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
+                    .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                    .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                    .color = border_color,
+                };
+                var i: u16 = 1;
+                while (i < points_per_curve) : (i += 1) {
+                    angle_radians += rotation_per_point;
+                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
+                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                        .color = border_color,
+                    };
+                    const indices_index = start_indices_index + ((i - 1) * 3);
+                    face_writer_ref.indices[indices_index + 0] = vertices_index; // Corner
+                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+                    face_writer_ref.indices[indices_index + 2] = vertices_index + i + 1; // Current
+                }
+                face_writer_ref.vertices_used += points_per_curve + 2;
+                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
+            }
+
+            {
+                //
+                // Bottom Left
+                //
+                const vertices_index: u16 = face_writer_ref.vertices_used;
+                const start_indices_index: u16 = face_writer_ref.indices_used;
+                const corner_x = extent.x + radius_h;
+                const corner_y = extent.y - radius_v;
+                //
+                // Draw corner point
+                //
+                face_writer_ref.vertices[vertices_index] = GenericVertex{
+                    .x = corner_x,
+                    .y = corner_y,
+                    .color = border_color,
+                };
+                //
+                // Draw first on-curve point
+                //
+                var start_angle_radians = std.math.degreesToRadians(f64, 270);
+
+                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
+                    .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
+                    .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
+                    .color = border_color,
+                };
+                var i: u16 = 1;
+                while (i < points_per_curve) : (i += 1) {
+                    const angle_radians: f64 = start_angle_radians + (rotation_per_point * @intToFloat(f64, i));
+                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
+                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                        .color = border_color,
+                    };
+                    const indices_index = start_indices_index + ((i - 1) * 3);
+                    face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
+                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+                    face_writer_ref.indices[indices_index + 2] = vertices_index; // Corner
+                }
+                face_writer_ref.vertices_used += points_per_curve + 2;
+                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
+            }
+        }
+
+        //
+        // Draw final section
+        //
+
+        {
+            const middle_section_extent = Extent2D(f32){
+                .x = placement.x + radius_h + ((box_width + seperator_width) * @intToFloat(f32, self.labels.len - 1)),
+                .y = placement.y,
+                .width = box_width,
+                .height = extent.height,
+            };
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(middle_section_extent, border_color, .bottom_left);
+            var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+            pen.writeCentered(self.labels[self.labels.len - 1], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
+                std.log.err("Failed to draw {}. Lack of space", .{err});
+            };
+
+            const right_middle_extent = Extent2D(f32){
+                .x = middle_section_extent.x + middle_section_extent.width,
+                .y = placement.y - radius_v,
+                .width = radius_h,
+                .height = extent.height - (radius_v * 2.0),
+            };
+            (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(right_middle_extent, border_color, .bottom_left);
+
+            {
+                //
+                // Top Right
+                //
+                const vertices_index: u16 = face_writer_ref.vertices_used;
+                const start_indices_index: u16 = face_writer_ref.indices_used;
+                const corner_x = middle_section_extent.x + middle_section_extent.width;
+                const corner_y = extent.y - (extent.height - radius_v);
+                //
+                // Draw corner point
+                //
+                face_writer_ref.vertices[vertices_index] = GenericVertex{
+                    .x = corner_x,
+                    .y = corner_y,
+                    .color = border_color,
+                };
+                //
+                // Draw first on-curve point
+                //
+                var start_angle_radians = std.math.degreesToRadians(f64, 180);
+
+                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
+                    .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
+                    .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
+                    .color = border_color,
+                };
+                var i: u16 = 1;
+                while (i < points_per_curve) : (i += 1) {
+                    const angle_radians: f64 = start_angle_radians - (rotation_per_point * @intToFloat(f64, i));
+                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
+                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                        .color = border_color,
+                    };
+                    const indices_index = start_indices_index + ((i - 1) * 3);
+                    face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
+                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+                    face_writer_ref.indices[indices_index + 2] = vertices_index; // Corner
+                }
+                face_writer_ref.vertices_used += points_per_curve + 2;
+                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
+            }
+
+            {
+                //
+                // Bottom Right
+                //
+                const vertices_index: u16 = face_writer_ref.vertices_used;
+                const start_indices_index: u16 = face_writer_ref.indices_used;
+                const corner_x = middle_section_extent.x + middle_section_extent.width;
+                const corner_y = extent.y - radius_v;
+                //
+                // Draw corner point
+                //
+                face_writer_ref.vertices[vertices_index] = GenericVertex{
+                    .x = corner_x,
+                    .y = corner_y,
+                    .color = border_color,
+                };
+                //
+                // Draw first on-curve point
+                //
+                var start_angle_radians = std.math.degreesToRadians(f64, 180);
+
+                face_writer_ref.vertices[vertices_index + 1] = GenericVertex{
+                    .x = @floatCast(f32, corner_x - (radius_h * @cos(start_angle_radians))),
+                    .y = @floatCast(f32, corner_y - (radius_v * @sin(start_angle_radians))),
+                    .color = border_color,
+                };
+                var i: u16 = 1;
+                while (i < points_per_curve) : (i += 1) {
+                    const angle_radians: f64 = start_angle_radians + (rotation_per_point * @intToFloat(f64, i));
+                    face_writer_ref.vertices[vertices_index + i + 1] = GenericVertex{
+                        .x = @floatCast(f32, corner_x - (radius_h * @cos(angle_radians))),
+                        .y = @floatCast(f32, corner_y - (radius_v * @sin(angle_radians))),
+                        .color = border_color,
+                    };
+                    const indices_index = start_indices_index + ((i - 1) * 3);
+                    face_writer_ref.indices[indices_index + 0] = vertices_index + i + 1; // Current
+                    face_writer_ref.indices[indices_index + 1] = vertices_index + i + 0; // Previous
+                    face_writer_ref.indices[indices_index + 2] = vertices_index; // Corner
+                }
+                face_writer_ref.vertices_used += points_per_curve + 2;
+                face_writer_ref.indices_used += (points_per_curve - 1) * 3;
+            }
+        }
+    }
+};
+
 pub const TabbedSection = struct {
     headings: []const []const u8,
     active_index: u16,
