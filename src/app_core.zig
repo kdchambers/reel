@@ -10,7 +10,9 @@ const screencapture = @import("screencapture.zig");
 const build_options = @import("build_options");
 const frontend = @import("frontend.zig");
 const Model = @import("Model.zig");
-const Timer = @import("utils.zig").Timer;
+const utils = @import("utils.zig");
+const DateTime = utils.DateTime;
+const Timer = utils.Timer;
 const zmath = @import("zmath");
 const video_encoder = @import("video_record.zig");
 const RequestBuffer = @import("RequestBuffer.zig");
@@ -30,7 +32,7 @@ pub const Request = enum(u8) {
     record_quality_set,
     record_format_set,
 
-    screenshot_output_set,
+    screenshot_format_set,
     screenshot_region_set,
     screenshot_display_set,
     screenshot_do,
@@ -76,6 +78,7 @@ var model: Model = .{
         .audio_streams = undefined,
         .state = .idle,
     },
+    .screenshot_format = .png,
 };
 
 var model_mutex: std.Thread.Mutex = .{};
@@ -177,9 +180,12 @@ pub fn run() !void {
                     std.log.info("core: shutdown request", .{});
                     break :app_loop;
                 },
-                .screenshot_do => {
-                    std.log.info("Taking screenshot!", .{});
-                    screencapture_interface.screenshot(&onScreenshotReady);
+                .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady),
+                .screenshot_format_set => {
+                    const format_index = request_buffer.readInt(u16) catch 0;
+                    assert(format_index < @typeInfo(Model.ImageFormat).Enum.fields.len);
+                    model.screenshot_format = @intToEnum(Model.ImageFormat, format_index);
+                    std.log.info("Screenshot output format set to: {s}", .{@tagName(model.screenshot_format)});
                 },
                 .screenshot_display_set => {
                     const display_index = request_buffer.readInt(u16) catch 0;
@@ -384,7 +390,11 @@ fn screenCaptureInitFail(errcode: screencapture.InitErrorSet) void {
 }
 
 fn onScreenshotReady(width: u32, height: u32, pixels: [*]const graphics.RGBA(u8)) void {
-    const save_image_thread = std.Thread.spawn(.{}, saveImageToFile, .{ width, height, pixels, "screenshot.png" }) catch |err| {
+    model_mutex.lock();
+    const format = model.screenshot_format;
+    model_mutex.unlock();
+
+    const save_image_thread = std.Thread.spawn(.{}, saveImageToFile, .{ width, height, pixels, format }) catch |err| {
         std.log.err("Failed to create thread to open pipewire screencast. Error: {}", .{
             err,
         });
@@ -397,8 +407,22 @@ fn saveImageToFile(
     width: u32,
     height: u32,
     pixels: [*]const graphics.RGBA(u8),
-    file_path: []const u8,
+    file_format: Model.ImageFormat,
 ) void {
+    var file_name_buffer: [256]u8 = undefined;
+    const date_time = DateTime.now();
+    const file_name = std.fmt.bufPrint(&file_name_buffer, "screenshot_{d}_{d}_{d}{d}{d}.{s}", .{
+        date_time.year,
+        date_time.month,
+        date_time.hour,
+        date_time.minute,
+        date_time.second,
+        @tagName(file_format),
+    }) catch blk: {
+        std.log.err("Failed to generate name for screenshot image. Saving to screenshot.png", .{});
+        break :blk "screenshot.png";
+    };
+
     const pixel_count: usize = @intCast(usize, width) * height;
     var pixels_copy = gpa.dupe(graphics.RGBA(u8), pixels[0..pixel_count]) catch unreachable;
     var image = zigimg.Image.create(gpa, width, height, .rgba32) catch {
@@ -407,9 +431,16 @@ fn saveImageToFile(
     };
     const converted_pixels = @ptrCast([*]zigimg.color.Rgba32, pixels_copy.ptr)[0..pixel_count];
     image.pixels = .{ .rgba32 = converted_pixels };
-    image.writeToFilePath(file_path, .{ .png = .{} }) catch {
-        std.log.err("Failed to write screenshot to path", .{});
+
+    const write_options: zigimg.Image.EncoderOptions = switch (file_format) {
+        .png => .{ .png = .{} },
+        .qoi => .{ .qoi = .{} },
+    };
+
+    image.writeToFilePath(file_name, write_options) catch |err| {
+        std.log.err("Failed to write screenshot to {s}. Error: {}", .{ file_name, err });
         return;
     };
-    std.log.info("Screenshot saved!", .{});
+
+    std.log.info("Screenshot saved to {s}", .{file_name});
 }

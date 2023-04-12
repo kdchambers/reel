@@ -371,8 +371,8 @@ fn drawSectionScreenshot(
     face_writer: *FaceWriter,
     section_region: Region,
 ) !void {
+    var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer };
     _ = model;
-    _ = face_writer;
     var screenshot_button_region: Region = .{};
     {
         screenshot_button_region.anchor.right = section_region.right();
@@ -389,6 +389,37 @@ fn drawSectionScreenshot(
             pen,
             screen_scale,
             .{ .rounding_radius = null },
+        );
+    }
+
+    var format_region: Region = .{};
+    {
+        format_region.anchor.left = section_region.left();
+        format_region.margin.left = 20 * screen_scale.horizontal;
+        format_region.anchor.top = section_region.top();
+        format_region.margin.top = 60 * screen_scale.vertical;
+
+        const dropdown_label = "Format";
+        const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
+        format_region.width = (dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
+        format_region.height = 30 * screen_scale.vertical;
+
+        const label_extent = format_region.toExtent();
+        try pen.writeCentered(dropdown_label, label_extent, screen_scale, &text_writer_interface);
+
+        var dropdown_region: Region = .{};
+        dropdown_region.anchor.left = format_region.right();
+        dropdown_region.margin.left = 20 * screen_scale.horizontal;
+        dropdown_region.anchor.top = section_region.top();
+        dropdown_region.margin.top = 60 * screen_scale.vertical;
+        dropdown_region.width = 100 * screen_scale.horizontal;
+        dropdown_region.height = format_region.height;
+
+        try ui_state.screenshot_format.draw(
+            dropdown_region.toExtent(),
+            pen,
+            screen_scale,
+            record_button_color_normal,
         );
     }
 }

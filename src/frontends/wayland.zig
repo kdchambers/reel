@@ -261,6 +261,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_format.selected_index = 0;
 
     ui_state.screenshot_button = Button.create();
+    ui_state.screenshot_format = try Dropdown.create(4);
+    ui_state.screenshot_format.labels = &UIState.image_format_labels;
+    ui_state.screenshot_format.selected_index = 0;
 
     ui_state.record_quality = try Dropdown.create(3);
     ui_state.record_quality.labels = &UIState.quality_labels;
@@ -437,15 +440,57 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                 is_draw_required = true;
             }
         }
-    } else {
-        _ = ui_state.record_button.state();
-        _ = ui_state.record_quality.state();
-        _ = ui_state.record_format.state();
+    } else if (ui_state.action_tab.active_index == 1) {
+        //
+        // Recording format selection dropdown
+        //
+        if (!ui_state.screenshot_format.is_open) {
+            const state = ui_state.screenshot_format.state();
+            if (state.hover_enter) {
+                ui_state.screenshot_format.setColor(record_button_color_hover);
+                is_render_requested = true;
+            }
+            if (state.hover_exit) {
+                ui_state.screenshot_format.setColor(record_button_color_normal);
+                is_render_requested = true;
+            }
+            if (state.left_click_release) {
+                ui_state.screenshot_format.is_open = true;
+                is_draw_required = true;
+            }
+        } else {
+            const item_count = ui_state.screenshot_format.item_count;
+            for (ui_state.screenshot_format.item_states[0..item_count], 0..) |item_state, i| {
+                const state_copy = item_state.get();
+                item_state.getPtr().clear();
+                if (state_copy.hover_enter) {
+                    ui_state.screenshot_format.setItemColor(i, record_button_color_hover);
+                    is_render_requested = true;
+                }
+                if (state_copy.hover_exit) {
+                    ui_state.screenshot_format.setItemColor(i, record_button_color_normal);
+                    is_render_requested = true;
+                }
+                if (state_copy.left_click_release) {
+                    if (i != ui_state.screenshot_format.selected_index) {
+                        std.log.info("Image format set! {d}", .{i});
+                        request_encoder.write(.screenshot_format_set) catch unreachable;
+                        request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
+                    }
+                    ui_state.screenshot_format.selected_index = @intCast(u16, i);
+                    ui_state.screenshot_format.is_open = false;
+                    event_system.clearBlockingEvents();
+                    is_draw_required = true;
+                }
+            }
+        }
     }
 
     const action_tab_update = ui_state.action_tab.update();
     if (action_tab_update.tab_changed) {
-        std.log.info("Tab changed", .{});
+        _ = ui_state.record_button.state();
+        _ = ui_state.record_quality.state();
+        _ = ui_state.record_format.state();
         is_draw_required = true;
     }
 

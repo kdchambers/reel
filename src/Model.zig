@@ -11,6 +11,13 @@ const RGBA = graphics.RGBA;
 
 const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 
+pub const ImageFormat = enum {
+    // bmp,
+    // jpg,
+    png,
+    qoi,
+};
+
 pub const VideoSource = enum(u8) {
     desktop,
     webcam,
@@ -67,3 +74,4 @@ input_audio_buffer: AudioSampleRingBuffer,
 audio_input_volume_db: f32,
 desktop_capture_frame: ?VideoFrame,
 recording_context: RecordingContext,
+screenshot_format: ImageFormat,
