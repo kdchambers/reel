@@ -11,7 +11,7 @@ pub const format_labels = [_][]const u8{
     //
     @tagName(VideoFormat.mp4),
     @tagName(VideoFormat.avi),
-    @tagName(VideoFormat.mkv),
+    // @tagName(VideoFormat.mkv),
 };
 
 pub const tab_headings = [_][]const u8{

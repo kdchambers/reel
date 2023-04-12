@@ -24,9 +24,22 @@ pub const State = enum {
 };
 
 pub const RecordOptions = struct {
+    pub const Quality = enum {
+        low,
+        medium,
+        high,
+    };
+    pub const Format = enum {
+        mp4,
+        avi,
+        // mkv,
+    };
+
     fps: u32,
     dimensions: geometry.Dimensions2D(u32),
-    output_path: [*:0]const u8,
+    quality: Quality,
+    format: Format,
+    output_name: []const u8,
 };
 
 pub var state: State = .uninitialized;
@@ -123,12 +136,30 @@ pub fn open(options: RecordOptions) !void {
     if (builtin.mode == .Debug)
         libav.av_log_set_level(libav.LOG_DEBUG);
 
-    output_format = libav.guessFormat(null, options.output_path, null) orelse {
+    if (options.output_name.len > 32)
+        return error.OutputNameTooLong;
+
+    const extension_name = switch (options.format) {
+        .mp4 => ".mp4",
+        .avi => ".avi",
+        // .mkv => ".mkv",
+    };
+
+    var output_name_full_buffer: [128]u8 = undefined;
+    std.mem.copy(u8, &output_name_full_buffer, options.output_name);
+    std.mem.copy(u8, output_name_full_buffer[options.output_name.len..], extension_name);
+
+    const output_length: usize = options.output_name.len + extension_name.len;
+    output_name_full_buffer[output_length] = 0;
+    const output_path: [:0]const u8 = output_name_full_buffer[0..output_length :0];
+
+    //
+    // TODO: We already know the extension, just convert to Libav format type
+    //
+    output_format = libav.guessFormat(null, output_path, null) orelse {
         std.log.err("Failed to determine output format", .{});
         return;
     };
-
-    std.log.info("Video output format: {s}", .{output_format.name});
 
     var ret_code: i32 = 0;
     var format_context_opt: ?*libav.FormatContext = null;
@@ -136,7 +167,7 @@ pub fn open(options: RecordOptions) !void {
         &format_context_opt,
         null,
         output_format.name,
-        options.output_path,
+        output_path,
     );
     std.debug.assert(ret_code == 0);
 
@@ -182,13 +213,23 @@ pub fn open(options: RecordOptions) !void {
 
     var ffmpeg_options: ?*libav.Dictionary = null;
 
-    _ = libav.dictSet(&ffmpeg_options, "preset", "ultrafast", 0);
-    _ = libav.dictSet(&ffmpeg_options, "crf", "35", 0);
-    _ = libav.dictSet(&ffmpeg_options, "tune", "zerolatency", 0);
-
-    // _ = libav.dictSet(&ffmpeg_options, "preset", "slow", 0);
-    // _ = libav.dictSet(&ffmpeg_options, "crf", "20", 0);
-    // _ = libav.dictSet(&ffmpeg_options, "tune", "animation", 0);
+    switch (options.quality) {
+        .low => {
+            _ = libav.dictSet(&ffmpeg_options, "preset", "ultrafast", 0);
+            _ = libav.dictSet(&ffmpeg_options, "crf", "30", 0);
+            _ = libav.dictSet(&ffmpeg_options, "tune", "zerolatency", 0);
+        },
+        .medium => {
+            _ = libav.dictSet(&ffmpeg_options, "preset", "medium", 0);
+            _ = libav.dictSet(&ffmpeg_options, "crf", "23", 0);
+            _ = libav.dictSet(&ffmpeg_options, "tune", "animation", 0);
+        },
+        .high => {
+            _ = libav.dictSet(&ffmpeg_options, "preset", "slow", 0);
+            _ = libav.dictSet(&ffmpeg_options, "crf", "18", 0);
+            _ = libav.dictSet(&ffmpeg_options, "tune", "film", 0);
+        },
+    }
 
     if (libav.codecOpen2(video_codec_context, video_codec, &ffmpeg_options) < 0) {
         std.log.err("Failed to open codec", .{});
@@ -255,11 +296,11 @@ pub fn open(options: RecordOptions) !void {
         return error.AllocateAudioFrameBufferFailed;
     }
 
-    libav.dumpFormat(format_context, 0, options.output_path, 1);
+    libav.dumpFormat(format_context, 0, output_path, 1);
 
     ret_code = libav.ioOpen(
         &format_context.pb,
-        options.output_path,
+        output_path,
         libav.AVIO_FLAG_WRITE,
     );
     if (ret_code < 0) {
@@ -272,7 +313,9 @@ pub fn open(options: RecordOptions) !void {
         null,
     );
     if (ret_code < 0) {
-        std.log.err("Failed to write screen recording header", .{});
+        var error_message_buffer: [512]u8 = undefined;
+        _ = libav.strError(ret_code, &error_message_buffer, 512);
+        std.log.err("Failed to write format header to file. Error ({d}): {s}", .{ ret_code, error_message_buffer });
         return error.WriteFormatHeaderFailed;
     }
 

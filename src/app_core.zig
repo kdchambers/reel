@@ -96,6 +96,14 @@ var recording_frame_index_base: u64 = 0;
 
 var gpa: std.mem.Allocator = undefined;
 
+//
+// TODO: This should probably be heap allocated
+//
+const sample_multiple = 2048;
+var sample_buffer: [sample_multiple * 3]f32 = undefined;
+
+var screencapture_start: ?i128 = null;
+
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
         return error.IncorrectState;
@@ -163,7 +171,7 @@ pub fn run() !void {
         };
         model_mutex.unlock();
 
-        while (request_buffer.next()) |request| {
+        request_loop: while (request_buffer.next()) |request| {
             switch (request) {
                 .core_shutdown => {
                     std.log.info("core: shutdown request", .{});
@@ -179,25 +187,33 @@ pub fn run() !void {
                     std.log.info("Screenshot display set to: {s}", .{display_list[display_index]});
                 },
                 .record_start => {
-                    const options = video_encoder.RecordOptions{
-                        .output_path = "reel_test.mp4",
+                    const RecordOptions = video_encoder.RecordOptions;
+                    const quality: RecordOptions.Quality = switch (model.recording_context.quality) {
+                        .low => .low,
+                        .medium => .medium,
+                        .high => .high,
+                    };
+                    const extension: RecordOptions.Format = switch (model.recording_context.format) {
+                        .mp4 => .mp4,
+                        .avi => .avi,
+                        // .mkv => .mkv,
+                    };
+                    const options = RecordOptions{
+                        .output_name = "reel_test",
                         .dimensions = .{
                             .width = 1920,
                             .height = 1080,
                         },
+                        .format = extension,
+                        .quality = quality,
                         .fps = 60,
                     };
                     video_encoder.open(options) catch |err| {
                         std.log.err("app: Failed to start video encoder. Error: {}", .{err});
+                        continue :request_loop;
                     };
-                    model.recording_context = .{
-                        .format = .mp4,
-                        .quality = .low,
-                        .start = std.time.nanoTimestamp(),
-                        .video_streams = undefined,
-                        .audio_streams = undefined,
-                        .state = .sync,
-                    };
+                    model.recording_context.start = std.time.nanoTimestamp();
+                    model.recording_context.state = .sync;
                 },
                 .record_stop => {
                     video_encoder.close();
@@ -248,11 +264,6 @@ pub fn displayList() [][]const u8 {
     }
     unreachable;
 }
-
-const sample_multiple = 2048;
-var sample_buffer: [sample_multiple * 3]f32 = undefined;
-
-var screencapture_start: ?i128 = null;
 
 fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
     model_mutex.lock();
