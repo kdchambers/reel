@@ -291,12 +291,48 @@ pub const Selector = struct {
             };
         }
 
+        const last_index = self.labels.len - 1;
+
+        //
+        // Draw middle sections
+        //
+        {
+            const index_start: usize = 1;
+            const index_end: usize = last_index;
+            for (index_start..index_end) |i| {
+                vertices_ref[i] = face_writer_ref.vertices_used;
+                const background_color = if (self.active_index == i) self.active_background_color else self.background_color;
+                const middle_section_extent = Extent2D(f32){
+                    .x = placement.x + radius_h + ((box_width + seperator_width) * @intToFloat(f32, i)),
+                    .y = placement.y,
+                    .width = box_width,
+                    .height = extent.height,
+                };
+
+                (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(middle_section_extent, background_color, .bottom_left);
+
+                const seperator_extent = Extent2D(f32){
+                    .x = middle_section_extent.x + box_width,
+                    .y = placement.y,
+                    .width = 1.0 * screen_scale.horizontal,
+                    .height = extent.height,
+                };
+                (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(seperator_extent, self.border_color, .bottom_left);
+
+                var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer_ref };
+                pen.writeCentered(self.labels[i], middle_section_extent, screen_scale, &text_writer_interface) catch |err| {
+                    std.log.err("Failed to draw {}. Lack of space", .{err});
+                };
+
+                const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+                event_system.bindStateToMouseEvent(states_ref[i], middle_section_extent, &extents_ref[i], bind_options);
+            }
+        }
+
         //
         // Draw final section
         //
-
         {
-            const last_index = self.labels.len - 1;
             vertices_ref[last_index] = face_writer_ref.vertices_used;
 
             const background_color = if (self.active_index == last_index) self.active_background_color else self.background_color;
