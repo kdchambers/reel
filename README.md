@@ -1,27 +1,21 @@
 # reel
 
 *Screen capture software for Linux / Wayland*
-
 ___
 
-**TLDR:**
-
-- Record and stream desktop (E.g OBS-Studio)
-- Linux Wayland only
-- Custom GUI, Vulkan rendering backend 
+⚠️ **Reel is still in early development but can be used for some simple use-cases** ⚠️
 
 ## Goals
 
-- Visually beautiful
-- Performant and dependency light
-- Simple to compile and modify source code
-- Support all relevant Wayland and Vulkan extensions / protocols
+- Visually beautiful, responsive and efficient
+- Easy to build and package. Reduced number of build and runtime dependencies
+- Support and keep up to date with all relevant Wayland and Vulkan extensions / protocols
 - Support Wayland compositor specific extensions
-- Expose core funcionality via IPC
+- GUI is optional, should work via an IPC interface
 
 ## Progress
 
-This project is very new and can be considered a minimally viable product. The following is a course-grained summary of what features / backends have been implemented. In reality there are far far many more features to implement, especially in regards to the GUI which is often a limiting factor.
+The following is a course-grained summary of what features / backends have been implemented. For a more complete list of features, check out the issue tracker.
 
 | Feature | Status |
 | ---- | ----- |
@@ -36,8 +30,6 @@ This project is very new and can be considered a minimally viable product. The f
 | Screencapture Backend Pipewire | ✅ |
 | Screencapture Backend Wlroots | ✅ |
 | Screencapture Backend KDE | ❌ |
-| IPC interface | ❌ |
-| Custom font rendering | ❌ |
 
 **NOTE**: KDE and Wlroots screencapture backends refer to compositor specific extensions [kde screencast](https://wayland.app/protocols/kde-zkde-screencast-unstable-v1) and [wlr screencopy](https://wayland.app/protocols/wlr-screencopy-unstable-v1).
 
@@ -78,7 +70,14 @@ cd reel
 zig build run -Doptimize=ReleaseSafe
 ```
 
-If you've attempted to build / run this project and ran into any sort of problem. Please submit an issue so that I can fix it. There are many areas that could cause errors and I don't have a lot of hardware to test various systems. Thank you!
+**NOTE**: If you build in Debug mode, you may run into dropped frames while recording.
+
+If you've attempted to build this project and ran into any sort of problem, please submit a bug report so that I can fix it! 
+
+Although I've done my best to test across Linux distrobutions, there are areas where different hardware configurations (Screens dimension / resolution, refresh rates, graphics card, etc) need to be taken into account and handled properly.
+
+Thank you!
+
 
 ## License
 
