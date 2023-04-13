@@ -3,8 +3,7 @@
 
 const std = @import("std");
 
-const Builder = std.build.Builder;
-const Build = std.build;
+const Build = std.Build;
 const Pkg = Build.Pkg;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
@@ -16,7 +15,7 @@ const Options = struct {
 };
 var options: Options = undefined;
 
-pub fn build(b: *Builder) void {
+pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -118,9 +117,9 @@ pub fn build(b: *Builder) void {
     exe.linkSystemLibrary("avfilter");
     exe.linkSystemLibrary("swscale");
 
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
     run_cmd.step.dependOn(b.getInstallStep());
 
