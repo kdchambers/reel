@@ -14,6 +14,9 @@ const widgets = @import("../widgets.zig");
 const Section = widgets.Section;
 const TabbedSection = widgets.TabbedSection;
 
+const utils = @import("../../../utils.zig");
+const Duration = utils.Duration;
+
 const geometry = @import("../../../geometry.zig");
 const Extent2D = geometry.Extent2D;
 const Coordinates2D = geometry.Coordinates2D;
@@ -166,6 +169,42 @@ const window = struct {
     }
 };
 
+// Buffer size (in characters) of record duration label
+// Format: {hour}:{minute}:{second}:{millisecond} where each placeholder is 2 digits wide
+const record_duration_label_buffer_size = 11;
+const record_duration_label_format = "{d:0>2}:{d:0>2}:{d:0>2}:{d:0>2}";
+
+var record_duration_label_arena: FaceWriter = undefined;
+var record_duration_label_extent: Extent2D(f32) = undefined;
+const record_icon_color = graphics.RGB(f32).fromInt(240, 20, 20);
+
+pub fn update(
+    model: *const Model,
+    ui_state: *UIState,
+    screen_scale: ScaleFactor2D(f32),
+    pen: *Pen,
+    face_writer: *FaceWriter,
+) !void {
+    _ = face_writer;
+    _ = ui_state;
+    if (model.recording_context.state == .recording) {
+        record_duration_label_arena.reset();
+        var text_writer_interface = TextWriterInterface{ .quad_writer = &record_duration_label_arena };
+        const record_duration = @intCast(u64, std.time.nanoTimestamp() - model.recording_context.start);
+        const duration = Duration.fromNanoseconds(record_duration);
+        var string_buffer: [64]u8 = undefined;
+        const duration_string = std.fmt.bufPrint(&string_buffer, record_duration_label_format, .{
+            duration.hours,
+            duration.minutes,
+            duration.seconds,
+            duration.milliseconds / 10,
+        }) catch "00:00:00:00";
+        pen.writeCentered(duration_string, record_duration_label_extent, screen_scale, &text_writer_interface) catch |err| {
+            std.log.err("user_interface: Failed to update record duration label. Error: {}", .{err});
+        };
+    }
+}
+
 pub fn draw(
     model: *const Model,
     ui_state: *UIState,
@@ -185,6 +224,46 @@ pub fn draw(
             background_color.toRGBA(),
             .bottom_left,
         );
+
+        if (model.recording_context.state == .recording) {
+            const record_icon_center = Coordinates2D(f32){
+                .x = information_bar_region.anchor.left.? + (20.0 * screen_scale.horizontal),
+                .y = information_bar_region.anchor.bottom.? - (information_bar_region.height.? / 2.0),
+            };
+            const radius_pixels: f32 = 4.0;
+            try graphics.drawCircle(
+                record_icon_center,
+                radius_pixels,
+                record_icon_color.toRGBA(),
+                screen_scale,
+                face_writer,
+            );
+            const record_duration = @intCast(u64, std.time.nanoTimestamp() - model.recording_context.start);
+            const duration = Duration.fromNanoseconds(record_duration);
+            var string_buffer: [64]u8 = undefined;
+            const duration_string = std.fmt.bufPrint(&string_buffer, record_duration_label_format, .{
+                duration.hours,
+                duration.minutes,
+                duration.seconds,
+                @divFloor(duration.minutes, 100),
+            }) catch "00:00:00:00";
+            assert(duration_string.len == record_duration_label_buffer_size);
+
+            record_duration_label_arena = face_writer.createArena(record_duration_label_buffer_size * 4);
+            var text_writer_interface = TextWriterInterface{ .quad_writer = &record_duration_label_arena };
+
+            const duration_string_width = pen.calculateRenderDimensions(duration_string).width * screen_scale.horizontal;
+            record_duration_label_extent = Extent2D(f32){
+                .x = information_bar_region.anchor.left.? + (30.0 * screen_scale.horizontal),
+                .y = information_bar_region.anchor.bottom.?,
+                .width = duration_string_width + (20.0 * screen_scale.horizontal),
+                .height = information_bar_region.height.?,
+            };
+            try pen.writeCentered(duration_string, record_duration_label_extent, screen_scale, &text_writer_interface);
+
+            assert(record_duration_label_arena.vertices_used == record_duration_label_arena.vertices.len);
+            assert(record_duration_label_arena.indices_used == record_duration_label_arena.indices.len);
+        }
     }
 
     var preview_region: Region = .{};

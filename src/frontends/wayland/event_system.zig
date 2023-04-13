@@ -13,27 +13,6 @@ const geometry = @import("../../geometry.zig");
 const Index = mini_heap.Index;
 const IndexAligned = mini_heap.IndexAligned;
 
-// const ActionTag = struct {
-//     vertex_color_set,
-//     vertex_position_move,
-//     vertex_position_set,
-// };
-
-// const EventTag = struct {
-//     hover_enter,
-//     hover_exit,
-//     mouse_left_click,
-//     mouse_right_click,
-// };
-
-// fn blah() void {
-//     var event_encoder: EventEncoder = .{};
-
-//     event_encoder.write(.hover_enter, .vertex_color_set);
-//     event_encoder.writeParam(HoverEventParams, .{});
-//     event_encoder.writeParam(VertexColorSetParams, .{});
-// }
-
 const MouseEventEntry = packed struct(u32) {
     hover_enabled: bool,
     hover_active: bool,

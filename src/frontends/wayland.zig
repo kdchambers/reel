@@ -556,6 +556,14 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
         is_record_requested = true;
     } else {
+        layout_medium.update(
+            model,
+            &ui_state,
+            screen_scale,
+            &pen,
+            &face_writer,
+        ) catch return error.UserInterfaceDrawFail;
+
         //
         // Redraw not required, but update widgets
         //
@@ -576,9 +584,9 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
             const volume_dbs = audio_utils.powerSpectrumToVolumeDb(audio_power_spectrum);
             ui_state.audio_volume_level.setDecibelLevel(volume_dbs);
-
-            is_render_requested = true;
         }
+
+        is_render_requested = true;
     }
 
     if (is_record_requested) {
