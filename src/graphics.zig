@@ -21,12 +21,17 @@ pub const FaceWriter = struct {
     vertices_used: u16,
     indices_used: u16,
 
+    // This allows the creation of arenas where vertices_used doesn't
+    // correspond the to next vertex index
+    vertex_offset: u16,
+
     pub fn init(vertex_buffer: []GenericVertex, index_buffer: []u16) FaceWriter {
         return .{
             .vertices = vertex_buffer,
             .indices = index_buffer,
             .vertices_used = 0,
             .indices_used = 0,
+            .vertex_offset = 0,
         };
     }
 
@@ -38,6 +43,25 @@ pub const FaceWriter = struct {
             return self.createTriangleFace();
 
         @compileError("No other types supported");
+    }
+
+    pub fn createArena(self: *@This(), vertex_count: usize) @This() {
+        const vertex_start = self.vertices_used;
+        const vertex_end = vertex_start + vertex_count;
+
+        const index_count = vertex_count + @divExact(vertex_count, 2);
+        const index_start = self.indices_used;
+        const index_end = index_start + index_count;
+
+        self.vertices_used += @intCast(u16, vertex_count);
+        self.indices_used += @intCast(u16, index_count);
+        return .{
+            .vertices = self.vertices[vertex_start..vertex_end],
+            .indices = self.indices[index_start..index_end],
+            .vertices_used = 0,
+            .indices_used = 0,
+            .vertex_offset = vertex_start,
+        };
     }
 
     pub fn allocate(self: *@This(), comptime Type: type, amount: u32) ![]Type {
@@ -65,12 +89,14 @@ pub const FaceWriter = struct {
         if (indices_used + 6 > self.indices.len)
             return error.OutOfMemory;
 
-        self.indices[indices_used + 0] = vertices_used + 0; // Top left
-        self.indices[indices_used + 1] = vertices_used + 1; // Top right
-        self.indices[indices_used + 2] = vertices_used + 2; // Bottom right
-        self.indices[indices_used + 3] = vertices_used + 0; // Top left
-        self.indices[indices_used + 4] = vertices_used + 2; // Bottom right
-        self.indices[indices_used + 5] = vertices_used + 3; // Bottom left
+        const vertex_index_base = vertices_used + self.vertex_offset;
+
+        self.indices[indices_used + 0] = vertex_index_base + 0; // Top left
+        self.indices[indices_used + 1] = vertex_index_base + 1; // Top right
+        self.indices[indices_used + 2] = vertex_index_base + 2; // Bottom right
+        self.indices[indices_used + 3] = vertex_index_base + 0; // Top left
+        self.indices[indices_used + 4] = vertex_index_base + 2; // Bottom right
+        self.indices[indices_used + 5] = vertex_index_base + 3; // Bottom left
 
         self.vertices_used += 4;
         self.indices_used += 6;
@@ -92,15 +118,16 @@ pub const FaceWriter = struct {
             return error.OutOfMemory;
 
         var j: usize = 0;
+        var vertex_index = vertices_used + self.vertex_offset;
         while (j < amount) : (j += 1) {
             const i = indices_used + (j * 6);
-            const v = @intCast(u16, vertices_used + (j * 4));
-            self.indices[i + 0] = v + 0; // Top left
-            self.indices[i + 1] = v + 1; // Top right
-            self.indices[i + 2] = v + 2; // Bottom right
-            self.indices[i + 3] = v + 0; // Top left
-            self.indices[i + 4] = v + 2; // Bottom right
-            self.indices[i + 5] = v + 3; // Bottom left
+            self.indices[i + 0] = vertex_index + 0; // Top left
+            self.indices[i + 1] = vertex_index + 1; // Top right
+            self.indices[i + 2] = vertex_index + 2; // Bottom right
+            self.indices[i + 3] = vertex_index + 0; // Top left
+            self.indices[i + 4] = vertex_index + 2; // Bottom right
+            self.indices[i + 5] = vertex_index + 3; // Bottom left
+            vertex_index += 4;
         }
 
         self.vertices_used += @intCast(u16, 4 * amount);
@@ -123,12 +150,13 @@ pub const FaceWriter = struct {
             return error.OutOfMemory;
 
         var j: usize = 0;
+        var vertex_index = vertices_used + self.vertex_offset;
         while (j < amount) : (j += 1) {
             const i = indices_used + (j * 3);
-            const v = vertices_used + (j * 3);
-            self.indices[i + 0] = v + 0;
-            self.indices[i + 1] = v + 1;
-            self.indices[i + 2] = v + 2;
+            self.indices[i + 0] = vertex_index + 0;
+            self.indices[i + 1] = vertex_index + 1;
+            self.indices[i + 2] = vertex_index + 2;
+            vertex_index += 3;
         }
 
         self.vertex_used += 3 * amount;
@@ -147,9 +175,10 @@ pub const FaceWriter = struct {
         if (indices_used + 3 > self.indices.len)
             return error.OutOfMemory;
 
-        self.indices[indices_used + 0] = vertices_used + 0;
-        self.indices[indices_used + 1] = vertices_used + 1;
-        self.indices[indices_used + 2] = vertices_used + 2;
+        const vertex_index: u16 = vertices_used + self.vertex_offset;
+        self.indices[indices_used + 0] = vertex_index + 0;
+        self.indices[indices_used + 1] = vertex_index + 1;
+        self.indices[indices_used + 2] = vertex_index + 2;
 
         self.vertices_used += 3;
         self.indices_used += 3;
@@ -350,8 +379,8 @@ pub fn RGBA(comptime BaseType: type) type {
 }
 
 pub fn drawCircle(
-    center: geometry.Coordinates2D(f64),
-    radius_pixels: f64,
+    center: geometry.Coordinates2D(f32),
+    radius_pixels: f32,
     color: RGBA(f32),
     screen_scale: geometry.ScaleFactor2D(f32),
     face_writer: *FaceWriter,
