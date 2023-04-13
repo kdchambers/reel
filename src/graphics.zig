@@ -84,10 +84,10 @@ pub const FaceWriter = struct {
         const indices_used = self.indices_used;
 
         if (vertices_used + 4 > self.vertices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         if (indices_used + 6 > self.indices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         const vertex_index_base = vertices_used + self.vertex_offset;
 
@@ -112,10 +112,10 @@ pub const FaceWriter = struct {
         const indices_required = 6 * amount;
 
         if (vertices_used + vertices_required > self.vertices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         if (indices_used + indices_required > self.indices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         var j: usize = 0;
         var vertex_index = vertices_used + self.vertex_offset;
@@ -144,10 +144,10 @@ pub const FaceWriter = struct {
         const indices_required = 3 * amount;
 
         if (vertices_used + vertices_required > self.vertices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         if (indices_used + indices_required > self.indices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         var j: usize = 0;
         var vertex_index = vertices_used + self.vertex_offset;
@@ -170,10 +170,10 @@ pub const FaceWriter = struct {
         const indices_used = self.indices_used;
 
         if (vertices_used + 3 > self.vertices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         if (indices_used + 3 > self.indices.len)
-            return error.OutOfMemory;
+            return error.OutOfSpace;
 
         const vertex_index: u16 = vertices_used + self.vertex_offset;
         self.indices[indices_used + 0] = vertex_index + 0;
