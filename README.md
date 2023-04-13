@@ -1,5 +1,3 @@
-# reel
-
 *Screen capture software for Linux / Wayland*
 ___
 
@@ -74,7 +72,7 @@ zig build run -Doptimize=ReleaseSafe
 
 If you've attempted to build this project and ran into any sort of problem, please submit a bug report so that I can fix it! 
 
-Although I've done my best to test across Linux distrobutions, there are areas where different hardware configurations (Screens dimension / resolution, refresh rates, graphics card, etc) need to be taken into account and handled properly.
+Although I've done my best to test across Linux distributions, there are areas where different hardware configurations (Screens dimension / resolution, refresh rates, graphics card, etc) need to be taken into account and handled properly.
 
 Thank you!
 
