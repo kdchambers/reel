@@ -3,7 +3,8 @@
 
 const std = @import("std");
 
-pub const pulse = @import("audio/pulse.zig");
+pub const backend_pulse = @import("audio/pulse.zig");
+pub const backend_pipewire = @import("audio/pipewire.zig");
 
 const Backend = enum {
     alsa,
@@ -12,8 +13,8 @@ const Backend = enum {
     pipewire,
 };
 
-pub const OpenError = pulse.OpenErrors || error{Unknown};
-pub const InitError = pulse.InitErrors || error{Unknown};
+pub const OpenError = backend_pulse.OpenErrors || backend_pipewire.OpenErrors || error{Unknown};
+pub const InitError = backend_pulse.InitErrors || backend_pipewire.InitErrors || error{Unknown};
 
 pub const InitFn = fn (
     successCallback: *const InitSuccessCallbackFn,
@@ -60,10 +61,25 @@ pub const Interface = struct {
 
 // TODO: Support more backends
 pub fn createBestInterface(on_read_sample_callback: *const OnReadSamplesFn) Interface {
-    return pulse.createInterface(on_read_sample_callback);
+    if (backend_pipewire.isSupported())
+        return backend_pipewire.createInterface(on_read_sample_callback);
+    if (backend_pulse.isSupported())
+        return backend_pulse.createInterface(on_read_sample_callback);
+    //
+    // TODO: Return an error
+    //
+    unreachable;
 }
 
 pub fn availableBackends(backend_buffer: *[4]Backend) []Backend {
-    backend_buffer[0] = .pulseaudio;
-    return backend_buffer[0..1];
+    var backend_count: u32 = 0;
+    if (backend_pipewire.isSupported()) {
+        backend_buffer[backend_count] = .pipewire;
+        backend_count += 1;
+    }
+    if (backend_pulse.isSupported()) {
+        backend_buffer[backend_count] = .pulseaudio;
+        backend_count += 1;
+    }
+    return backend_buffer[0..backend_count];
 }
