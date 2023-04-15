@@ -19,12 +19,43 @@ const libav = @cImport({
 pub const EAGAIN: i32 = -11;
 pub const EINVAL: i32 = -22;
 
-pub const LOG_DEBUG = libav.AV_LOG_DEBUG;
-pub const AV_OPT_SEARCH_CHILDREN = libav.AV_OPT_SEARCH_CHILDREN;
-pub const AVIO_FLAG_WRITE = libav.AVIO_FLAG_WRITE;
-pub const ERROR_EOF = libav.AVERROR_EOF;
-pub const AV_PICTURE_TYPE_NONE = libav.AV_PICTURE_TYPE_NONE;
-pub const PIXEL_FORMAT_RGB0 = libav.AV_PIX_FMT_RGB0;
+pub const log_level = struct {
+    pub const panic = 0;
+    pub const fatal = 8;
+    pub const @"error" = 16;
+    pub const warning = 24;
+    pub const info = 32;
+    pub const debug = 48;
+};
+
+pub const avio_flag_read: i32 = libav.AVIO_FLAG_READ;
+pub const avio_flag_write: i32 = libav.AVIO_FLAG_WRITE;
+
+pub const PictureType = enum(u32) {
+    none,
+    i,
+    p,
+    b,
+    s,
+    si,
+    sp,
+    bi,
+};
+
+fn makeErrorTag(comptime a: u8, comptime b: u8, comptime c: u8, comptime d: u8) i32 {
+    return (-@intCast(i32, makeTag(a, b, c, d)));
+}
+
+fn makeTag(comptime a: u8, comptime b: u8, comptime c: u8, comptime d: u8) u32 {
+    return (a | (@intCast(u32, b) << 8) | (@intCast(u32, c) << 16) | (@intCast(u32, d) << 24));
+}
+
+pub const error_eof: i32 = makeErrorTag('E', 'O', 'F', ' ');
+
+comptime {
+    std.debug.assert(error_eof == libav.AVERROR_EOF);
+    std.debug.assert(avio_flag_write == libav.AVIO_FLAG_WRITE);
+}
 
 pub const CodecContext = libav.AVCodecContext;
 pub const CodecParameters = libav.AVCodecParameters;
@@ -46,6 +77,7 @@ pub const FilterInOut = libav.AVFilterInOut;
 pub const FilterLink = libav.AVFilterLink;
 pub const Rational = libav.AVRational;
 
+pub extern fn avutil_version() u32;
 pub extern fn avio_open(
     context: *?*IOContext,
     url: [*:0]const u8,
@@ -201,6 +233,8 @@ pub extern fn av_samples_get_buffer_size(
 
 extern fn av_strerror(err_num: i32, err_buffer: [*]u8, err_buffer_size: u64) callconv(.C) i32;
 
+pub const utilVersion = avutil_version;
+
 pub const strError = av_strerror;
 
 pub const samplesGetBufferSize = av_samples_get_buffer_size;
@@ -344,6 +378,8 @@ comptime {
     assert(@enumToInt(SampleFormat.dblp) == libav.AV_SAMPLE_FMT_DBLP);
     assert(@enumToInt(SampleFormat.s64) == libav.AV_SAMPLE_FMT_S64);
     assert(@enumToInt(SampleFormat.s64p) == libav.AV_SAMPLE_FMT_S64P);
+
+    assert(@enumToInt(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
 }
 
 pub const CodecID = enum(i32) {
@@ -919,6 +955,10 @@ pub const PixelFormat = enum(i32) {
     RGB565LE,
     RGB555BE,
     RGB555LE,
+    BGR565BE,
+    BGR565LE,
+    BGR555BE,
+    BGR555LE,
     VAAPI,
     YUV420P16LE,
     YUV420P16BE,
