@@ -134,7 +134,7 @@ pub fn close() void {
 pub fn open(options: RecordOptions) !void {
     context.dimensions = options.dimensions;
     if (builtin.mode == .Debug)
-        libav.av_log_set_level(libav.LOG_DEBUG);
+        libav.av_log_set_level(libav.log_level.debug);
 
     if (options.output_name.len > 32)
         return error.OutputNameTooLong;
@@ -301,7 +301,7 @@ pub fn open(options: RecordOptions) !void {
     ret_code = libav.ioOpen(
         &format_context.pb,
         output_path,
-        libav.AVIO_FLAG_WRITE,
+        libav.avio_flag_write,
     );
     if (ret_code < 0) {
         std.log.err("Failed to open AVIO context", .{});
@@ -370,7 +370,7 @@ fn finishVideoStream() void {
         packet.size = 0;
 
         code = libav.codecReceivePacket(audio_codec_context, &packet);
-        if (code == libav.ERROR_EOF)
+        if (code == libav.error_eof)
             break;
 
         if (code == EAGAIN or code < 0) {
@@ -476,7 +476,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
                     continue :outer;
                 }
 
-                if (receive_packet_code == libav.ERROR_EOF) {
+                if (receive_packet_code == libav.error_eof) {
                     std.debug.assert(false);
                     return error.UnexpectedEOF;
                 }
@@ -530,7 +530,7 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index
     video_frames_written += 1;
     video_frame.pts = frame_index;
 
-    video_frame.pict_type = libav.AV_PICTURE_TYPE_NONE;
+    video_frame.pict_type = @enumToInt(libav.PictureType.none);
 
     try encodeFrame(video_frame);
 
@@ -555,7 +555,7 @@ fn encodeFrame(frame: ?*libav.Frame) !void {
         packet.size = 0;
 
         code = libav.codecReceivePacket(video_codec_context, &packet);
-        if (code == EAGAIN or code == libav.ERROR_EOF)
+        if (code == EAGAIN or code == libav.error_eof)
             return;
 
         if (code < 0) {
