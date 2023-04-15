@@ -32,7 +32,7 @@ pub const OpenErrors = error{
 
 pub fn isSupported() bool {
     if (library_handle_opt == null) {
-        library_handle_opt = DynLib.open("libpulse.so") catch return false;
+        library_handle_opt = DynLib.open("libpulse.so.0") catch return false;
     }
     return true;
 }
