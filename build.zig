@@ -86,8 +86,6 @@ pub fn build(b: *Build) void {
 
     exe.linkLibC();
 
-    exe.linkSystemLibrary("pulse");
-
     //
     // Pipewire Screencast
     //
@@ -104,12 +102,14 @@ pub fn build(b: *Build) void {
     //
     exe.addIncludePath("/usr/include/pipewire-0.3/");
     exe.addIncludePath("/usr/include/spa-0.2/");
+
     exe.linkSystemLibrary("dbus-1");
     exe.linkSystemLibrary("pipewire-0.3");
 
     //
     // FFMPEG
     //
+    exe.addIncludePath("/usr/include/ffmpeg");
     exe.linkSystemLibrary("avcodec");
     exe.linkSystemLibrary("avformat");
     exe.linkSystemLibrary("avutil");
