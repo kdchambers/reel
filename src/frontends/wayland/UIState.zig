@@ -29,7 +29,25 @@ pub const tab_headings = [_][]const u8{
     "STREAM",
 };
 
+pub const RegionAnchors = struct {
+    left: f32 = -1.0,
+    right: f32 = 1.0,
+    top: f32 = -1.0,
+    bottom: f32 = 1.0,
+
+    pub inline fn width(self: @This()) f32 {
+        return @fabs(self.left - self.right);
+    }
+
+    pub inline fn height(self: @This()) f32 {
+        return @fabs(self.top - self.bottom);
+    }
+};
+
 pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
+
+window_decoration_requested: bool,
+window_region: RegionAnchors,
 
 action_tab: widgets.TabbedSection,
 

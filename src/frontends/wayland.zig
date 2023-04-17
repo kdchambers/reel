@@ -113,6 +113,8 @@ pub const ButtonClicked = enum(u16) {
     left,
 };
 
+const decoration_height_pixels = 30.0;
+
 pub var face_writer: FaceWriter = undefined;
 
 var is_draw_required: bool = true;
@@ -124,8 +126,6 @@ var is_render_requested: bool = true;
 ///   3. Push constants need to be updated
 ///   4. Number of vertices to be drawn has changed
 var is_record_requested: bool = true;
-
-var draw_window_decorations: bool = true;
 
 var record_button_color_normal = RGBA{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1.0 };
 var record_button_color_hover = RGBA{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
@@ -200,6 +200,8 @@ var font_texture: renderer.Texture = undefined;
 pub fn init(allocator: std.mem.Allocator) !void {
     allocator_ref = allocator;
 
+    ui_state.window_decoration_requested = true;
+
     initWaylandClient() catch return error.WaylandClientInitFail;
 
     font = blk: {
@@ -270,6 +272,11 @@ pub fn init(allocator: std.mem.Allocator) !void {
         &screen_dimensions,
         &is_mouse_in_screen,
     );
+
+    ui_state.window_region.left = -1.0;
+    ui_state.window_region.right = 1.0;
+    ui_state.window_region.bottom = 1.0;
+    ui_state.window_region.top = -1.0;
 
     ui_state.record_button = Button.create();
     ui_state.record_format = try Dropdown.create(3);
@@ -557,6 +564,16 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         is_draw_required = false;
 
         face_writer.reset();
+
+        if (ui_state.window_decoration_requested) {
+            //
+            // We just reset the face_writer so a failure shouldn't really be possible
+            // NOTE: This will modify ui_state.window_region to make sure we don't
+            //       draw over the window decoration
+            //
+            drawWindowDecoration() catch unreachable;
+        }
+
         //
         // Switch here based on screen dimensions
         //
@@ -632,6 +649,23 @@ pub fn deinit() void {
     std.log.info("wayland deinit", .{});
 }
 
+fn drawWindowDecoration() !void {
+    const height: f32 = decoration_height_pixels * screen_scale.vertical;
+    const background_color = RGB.fromInt(200, 200, 200);
+    const extent = geometry.Extent2D(f32){
+        .x = -1.0,
+        .y = -1.0,
+        .width = 2.0,
+        .height = height,
+    };
+    (try face_writer.create(QuadFace)).* = graphics.quadColored(
+        extent,
+        background_color.toRGBA(),
+        .top_left,
+    );
+    ui_state.window_region.top = -1.0 + height;
+}
+
 fn initWaylandClient() !void {
     surface = try wayland_core.compositor.createSurface();
 
@@ -673,8 +707,8 @@ fn toplevelDecorationListener(_: *zxdg.ToplevelDecorationV1, event: zxdg.Topleve
     switch (event) {
         .configure => |configure| {
             switch (configure.mode) {
-                .server_side => draw_window_decorations = true,
-                else => draw_window_decorations = false,
+                .server_side => ui_state.window_decoration_requested = false,
+                else => ui_state.window_decoration_requested = true,
             }
         },
     }
@@ -869,6 +903,13 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
 
             if (@floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width)
                 return;
+
+            if (ui_state.window_decoration_requested and mouse_button == .left) {
+                // Start interactive window move if mouse coordinates are in window decorations bounds
+                if (@floatToInt(u32, mouse_coordinates.y) <= decoration_height_pixels) {
+                    xdg_toplevel.move(wayland_core.seat, button.serial);
+                }
+            }
         },
         .axis => |axis| std.log.info("Mouse: axis {} {}", .{ axis.axis, axis.value.toDouble() }),
         .frame => |frame| _ = frame,

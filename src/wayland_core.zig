@@ -43,10 +43,7 @@ pub const OutputDisplay = struct {
 
 pub var outputs: FixedBuffer(OutputDisplay, 8) = .{};
 
-//
-// TODO: Get rid of this and bind the interface
-//
-pub var draw_window_decorations_requested: bool = false;
+pub var window_decorations_opt: ?*zxdg.DecorationManagerV1 = null;
 
 var state: enum {
     uninitialized,
@@ -206,10 +203,10 @@ fn registryListener(registry_ref: *wl.Registry, event: wl.Registry.Event, _: *co
                     output_ptr.setListener(*const u16, outputListener, &output_index);
                 }
             } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
-                //
-                // TODO: Negociate with compositor how the window decorations will be drawn
-                //
-                draw_window_decorations_requested = false;
+                window_decorations_opt = registry_ref.bind(global.name, zxdg.DecorationManagerV1, 2) catch blk: {
+                    std.log.warn("Failed to bind to zxdg.DecorationManagerV1", .{});
+                    break :blk null;
+                };
             }
         },
         .global_remove => {},

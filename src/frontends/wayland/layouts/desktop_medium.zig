@@ -143,32 +143,6 @@ const Region = struct {
     }
 };
 
-const window = struct {
-    pub inline fn left() f32 {
-        return -1.0;
-    }
-
-    pub inline fn right() f32 {
-        return 1.0;
-    }
-
-    pub inline fn top() f32 {
-        return -1.0;
-    }
-
-    pub inline fn bottom() f32 {
-        return 1.0;
-    }
-
-    pub inline fn width() f32 {
-        return 2.0;
-    }
-
-    pub inline fn height() f32 {
-        return 2.0;
-    }
-};
-
 // Buffer size (in characters) of record duration label
 // Format: {hour}:{minute}:{second}:{millisecond} where each placeholder is 2 digits wide
 const record_duration_label_buffer_size = 11;
@@ -212,10 +186,11 @@ pub fn draw(
     pen: *Pen,
     face_writer: *FaceWriter,
 ) !void {
+    const window = ui_state.window_region;
     var information_bar_region: Region = .{};
     {
-        information_bar_region.anchor.left = window.left();
-        information_bar_region.anchor.bottom = window.bottom();
+        information_bar_region.anchor.left = window.left;
+        information_bar_region.anchor.bottom = window.bottom;
         information_bar_region.width = window.width();
         information_bar_region.height = 30 * screen_scale.vertical;
         const background_color = RGB.fromInt(50, 50, 50);
@@ -270,9 +245,9 @@ pub fn draw(
     {
         const max_height_pixels: f32 = 540;
 
-        preview_region.anchor.left = window.left();
-        preview_region.anchor.top = window.top();
-        preview_region.anchor.right = window.right();
+        preview_region.anchor.left = window.left;
+        preview_region.anchor.top = window.top;
+        preview_region.anchor.right = window.right;
         preview_region.height = @divExact(1080, 2) * screen_scale.vertical;
         preview_region.margin.left = 15 * screen_scale.horizontal;
         preview_region.margin.right = 15 * screen_scale.horizontal;
@@ -280,6 +255,9 @@ pub fn draw(
 
         var preview_extent = preview_region.toExtent();
 
+        //
+        // TODO: Don't hardcode screen dimensions
+        //
         const aspect_ratio: f32 = 1080.0 / 1920.0;
         const would_be_width_pixels = preview_extent.width / screen_scale.horizontal;
         const would_be_height_pixels = would_be_width_pixels * aspect_ratio;
@@ -346,8 +324,8 @@ pub fn draw(
 
     var action_tab_region: Region = .{};
     {
-        action_tab_region.anchor.left = window.left();
-        action_tab_region.anchor.right = window.right();
+        action_tab_region.anchor.left = window.left;
+        action_tab_region.anchor.right = window.right;
         action_tab_region.anchor.bottom = information_bar_region.top();
         action_tab_region.height = 200 * screen_scale.vertical;
 
@@ -370,7 +348,7 @@ pub fn draw(
 
     var audio_input_section_region: Region = .{};
     {
-        audio_input_section_region.anchor.left = window.left();
+        audio_input_section_region.anchor.left = window.left;
         audio_input_section_region.anchor.bottom = action_tab_region.top();
         audio_input_section_region.margin.bottom = 15 * screen_scale.vertical;
         audio_input_section_region.margin.left = 15 * screen_scale.horizontal;
