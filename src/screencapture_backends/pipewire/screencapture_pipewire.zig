@@ -90,11 +90,7 @@ var server_version_sync: i32 = undefined;
 var request_count: u32 = 0;
 var session_count: u32 = 0;
 
-var onOpenSuccessCallback: *const screencapture.OpenOnSuccessFn = undefined;
-var onOpenErrorCallback: *const screencapture.OpenOnErrorFn = undefined;
-
-var init_thread: std.Thread = undefined;
-var once: bool = true;
+var onStreamOpenSuccessCallback: *const screencapture.OpenStreamOnSuccessFn = undefined;
 
 pub fn createInterface(
     onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
@@ -104,22 +100,42 @@ pub fn createInterface(
         .init = _init,
         .deinit = deinit,
         .openStream = openStream,
-        // .requestOpen = open,
-        // .state = state,
-        // .pause = pause,
-        // .unpause = unpause,
-        // .close = close,
         .screenshot = screenshot,
     };
 }
 
-pub fn deinit() void {}
-pub fn _init(_: *const screencapture.InitOnSuccessFn, _: *const screencapture.InitOnErrorFn) void {}
+pub fn deinit() void {
+    teardownPipewire();
+    stream_state = .closed;
+}
+
+pub fn _init(successCallback: *const screencapture.InitOnSuccessFn, _: *const screencapture.InitOnErrorFn) void {
+    successCallback();
+}
+
+const StreamInterface = screencapture.StreamInterface;
+
+fn streamPause(self: StreamInterface, is_paused: bool) void {
+    _ = self;
+    _ = is_paused;
+}
+
+fn streamState(self: StreamInterface) StreamInterface.State {
+    _ = self;
+    return .running;
+}
+
+fn streamClose(self: StreamInterface) void {
+    _ = self;
+}
 
 pub fn openStream(
-    _: *const screencapture.OpenStreamOnSuccessFn,
-    _: *const screencapture.OpenStreamOnErrorFn,
-) void {}
+    successCallback: *const screencapture.OpenStreamOnSuccessFn,
+    failCallback: *const screencapture.OpenStreamOnErrorFn,
+) void {
+    onStreamOpenSuccessCallback = successCallback;
+    init() catch failCallback();
+}
 
 pub fn detectSupport() bool {
     var err: dbus.Error = undefined;
@@ -130,44 +146,6 @@ pub fn detectSupport() bool {
     }
     const source_mode_flags = getProperty(u32, connection, "AvailableSourceTypes") catch return false;
     return (@bitCast(SourceTypeFlags, source_mode_flags).monitor == true);
-}
-
-pub fn open(
-    on_success_cb: *const screencapture.OpenOnSuccessFn,
-    on_error_cb: *const screencapture.OpenOnErrorFn,
-) InitErrorSet!void {
-    onOpenSuccessCallback = on_success_cb;
-    onOpenErrorCallback = on_error_cb;
-
-    std.debug.assert(once);
-    once = false;
-
-    init_thread = std.Thread.spawn(.{}, init, .{}) catch |err| {
-        onOpenErrorCallback();
-        std.log.err("Failed to create thread to open pipewire screencapture. Error: {}", .{
-            err,
-        });
-        return error.CreateThreadFail;
-    };
-}
-
-pub fn close() void {
-    teardownPipewire();
-    stream_state = .closed;
-}
-
-pub fn pause() void {
-    std.debug.assert(stream_state == .open);
-    // TODO: Handle return
-    _ = pw.pw_stream_set_active(stream, false);
-    stream_state = .paused;
-}
-
-pub fn unpause() void {
-    std.debug.assert(stream_state == .paused);
-    // TODO: Handle return
-    _ = pw.pw_stream_set_active(stream, true);
-    stream_state = .open;
 }
 
 // TODO: Implement
@@ -1201,7 +1179,7 @@ pub fn init() !void {
     );
     stream = pw.pw_stream_new(
         core,
-        "Reel",
+        "reel-screencapture",
         stream_properties,
     ) orelse return error.CreateNewStreamFail;
 
@@ -1266,7 +1244,12 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod)
     if (id == pw.SPA_PARAM_Format) {
         stream_format = parseStreamFormat(params);
         stream_state = .open;
-        onOpenSuccessCallback(stream_format.width, stream_format.height);
+        onStreamOpenSuccessCallback(.{
+            .index = 0,
+            .pause = streamPause,
+            .close = streamClose,
+            .state = streamState,
+        });
     }
 }
 

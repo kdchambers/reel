@@ -22,14 +22,6 @@ pub const State = enum(u8) {
     paused,
 };
 
-pub const InitErrorSet = backend_wlroots.InitErrorSet;
-
-pub const InitOnSuccessFn = fn () void;
-pub const InitOnErrorFn = fn (errcode: InitErrorSet) void;
-
-pub const OpenOnSuccessFn = fn (width: u32, height: u32) void;
-pub const OpenOnErrorFn = fn () void;
-
 pub const PixelType = graphics.RGBA(u8);
 pub const FrameImage = graphics.Image(PixelType);
 
@@ -59,6 +51,8 @@ fn GenerateBackendEnum() type {
 // TODO: This is to merge the error sets of all backends
 //
 
+pub const InitErrorSet = backend_wlroots.InitErrorSet;
+
 pub const InitFn = fn (onSuccess: *const InitOnSuccessFn, onError: *const InitOnErrorFn) void;
 pub const OpenStreamFn = fn (on_success: *const OpenStreamOnSuccessFn, on_error: *const OpenStreamOnErrorFn) void;
 pub const DeinitFn = fn () void;
@@ -66,6 +60,9 @@ pub const ScreenshotFn = fn (callback: *const OnScreenshotReadyFn) void;
 
 pub const OnScreenshotReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
 pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
+
+pub const InitOnSuccessFn = fn () void;
+pub const InitOnErrorFn = fn (errcode: InitErrorSet) void;
 
 pub const OpenStreamOnSuccessFn = fn (stream_interface: StreamInterface) void;
 pub const OpenStreamOnErrorFn = fn () void;
