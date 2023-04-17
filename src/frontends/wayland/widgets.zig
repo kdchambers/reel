@@ -11,6 +11,7 @@ pub const Dropdown = base.Dropdown;
 pub const Checkbox = base.Checkbox;
 pub const ImageButton = base.ImageButton;
 pub const Button = base.Button;
+pub const CloseButton = base.CloseButton;
 pub const Selector = base.Selector;
 
 pub const AudioSpectogram = @import("widgets/AudioSpectrogram.zig");

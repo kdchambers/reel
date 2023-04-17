@@ -937,3 +937,87 @@ pub const Button = packed struct(u64) {
         }
     }
 };
+
+pub const CloseButton = struct {
+    const clear_color = graphics.RGBA(f32){ .r = 0.0, .g = 0.0, .b = 0.0, .a = 0.0 };
+
+    vertex_index: u16,
+    state_index: Index(HoverZoneState),
+    extent_index: Index(geometry.Extent2D(f32)),
+    on_hover_color: graphics.RGBA(f32),
+
+    pub fn create() CloseButton {
+        const state_index = event_system.reserveState();
+        state_index.getPtr().reset();
+        return .{
+            .vertex_index = std.math.maxInt(u16),
+            .state_index = state_index,
+            .extent_index = .{ .index = std.math.maxInt(u16) },
+            .on_hover_color = undefined,
+        };
+    }
+
+    const Update = struct {
+        left_clicked: bool = false,
+        color_changed: bool = false,
+    };
+
+    pub fn update(self: *@This()) Update {
+        const state_copy = self.state_index.get();
+        self.state_index.getPtr().clear();
+
+        var result: Update = .{};
+
+        if (state_copy.left_click_press) {
+            result.left_clicked = true;
+        }
+
+        if (state_copy.hover_enter) {
+            result.color_changed = true;
+            self.setColor(self.on_hover_color);
+        }
+
+        if (state_copy.hover_exit) {
+            result.color_changed = true;
+            self.setColor(clear_color);
+        }
+
+        return result;
+    }
+
+    pub fn draw(
+        self: *@This(),
+        extent: Extent2D(f32),
+        screen_scale: ScaleFactor2D(f32),
+    ) !void {
+        self.vertex_index = @intCast(u16, face_writer_ref.vertices_used);
+        (try face_writer_ref.create(QuadFace)).* = graphics.quadColored(extent, clear_color, .bottom_left);
+        const line_color = graphics.RGBA(f32).fromInt(20, 20, 20, 255);
+
+        const horizontal_margin: f32 = extent.width * 0.2;
+        const vertical_margin: f32 = extent.height * 0.2;
+        const cross_extent = geometry.Extent2D(f32){
+            .x = extent.x + horizontal_margin,
+            .y = extent.y - vertical_margin,
+            .width = extent.width - (horizontal_margin * 2.0),
+            .height = extent.height - (vertical_margin * 2.0),
+        };
+        try graphics.drawCross(
+            cross_extent,
+            2.5 * screen_scale.horizontal,
+            2.5 * screen_scale.vertical,
+            line_color,
+            face_writer_ref,
+        );
+        const bind_options = event_system.MouseEventOptions{ .enable_hover = true, .start_active = false };
+        event_system.bindStateToMouseEvent(self.state_index, extent, &self.extent_index, bind_options);
+    }
+
+    fn setColor(self: @This(), color: graphics.RGBA(f32)) void {
+        var i = self.vertex_index;
+        const end_index = self.vertex_index + 4;
+        while (i < end_index) : (i += 1) {
+            vertices_buffer_ref[i].color = color;
+        }
+    }
+};

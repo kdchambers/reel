@@ -141,10 +141,7 @@ pub fn sync() bool {
 
 fn xdgWmBaseListener(xdg_wm_base_ref: *xdg.WmBase, event: xdg.WmBase.Event, _: *const void) void {
     switch (event) {
-        .ping => |ping| {
-            std.log.info("wayland_client: xdg_wmbase ping", .{});
-            xdg_wm_base_ref.pong(ping.serial);
-        },
+        .ping => |ping| xdg_wm_base_ref.pong(ping.serial),
     }
 }
 

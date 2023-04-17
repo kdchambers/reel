@@ -67,6 +67,7 @@ const renderer = @import("../vulkan_renderer.zig");
 
 const widgets = @import("wayland/widgets.zig");
 const Button = widgets.Button;
+const CloseButton = widgets.CloseButton;
 const Checkbox = widgets.Checkbox;
 const Dropdown = widgets.Dropdown;
 const Selector = widgets.Selector;
@@ -302,6 +303,11 @@ pub fn init(allocator: std.mem.Allocator) !void {
         graphics.RGB(f32).fromInt(150, 35, 57),
     );
 
+    if (ui_state.window_decoration_requested) {
+        ui_state.close_button = CloseButton.create();
+        ui_state.close_button.on_hover_color = graphics.RGBA(f32).fromInt(170, 170, 170, 255);
+    }
+
     //
     // TODO: Don't hardcode bin count
     //
@@ -315,6 +321,14 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
     if (model.recording_context.state != last_recording_state) {
         last_recording_state = model.recording_context.state;
         is_draw_required = true;
+    }
+
+    if (ui_state.window_decoration_requested) {
+        const widget_update = ui_state.close_button.update();
+        if (widget_update.left_clicked)
+            is_shutdown_requested = true;
+        if (widget_update.color_changed)
+            is_render_requested = true;
     }
 
     if (is_shutdown_requested) {
@@ -651,18 +665,37 @@ pub fn deinit() void {
 
 fn drawWindowDecoration() !void {
     const height: f32 = decoration_height_pixels * screen_scale.vertical;
-    const background_color = RGB.fromInt(200, 200, 200);
-    const extent = geometry.Extent2D(f32){
-        .x = -1.0,
-        .y = -1.0,
-        .width = 2.0,
-        .height = height,
-    };
-    (try face_writer.create(QuadFace)).* = graphics.quadColored(
-        extent,
-        background_color.toRGBA(),
-        .top_left,
-    );
+    {
+        const background_color = RGB.fromInt(200, 200, 200);
+        const extent = geometry.Extent2D(f32){
+            .x = -1.0,
+            .y = -1.0,
+            .width = 2.0,
+            .height = height,
+        };
+        (try face_writer.create(QuadFace)).* = graphics.quadColored(
+            extent,
+            background_color.toRGBA(),
+            .top_left,
+        );
+    }
+
+    {
+        const size_pixels: f32 = 28.0;
+        const offset_pixels: f32 = (decoration_height_pixels - size_pixels) / 2.0;
+        const h_offset: f32 = offset_pixels * screen_scale.horizontal;
+        const v_offset: f32 = offset_pixels * screen_scale.vertical;
+        const cross_width = (size_pixels * screen_scale.horizontal) - (h_offset * 2.0);
+        const cross_height = (size_pixels * screen_scale.vertical) - (v_offset * 2.0);
+        const extent = geometry.Extent2D(f32){
+            .x = 1.0 - (cross_width + (h_offset * 2.0)),
+            .y = -1.0 + (cross_height + v_offset),
+            .width = cross_width - h_offset,
+            .height = cross_height - v_offset,
+        };
+        try ui_state.close_button.draw(extent, screen_scale);
+    }
+
     ui_state.window_region.top = -1.0 + height;
 }
 

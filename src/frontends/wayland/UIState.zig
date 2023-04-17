@@ -49,6 +49,8 @@ pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
 window_decoration_requested: bool,
 window_region: RegionAnchors,
 
+close_button: widgets.CloseButton,
+
 action_tab: widgets.TabbedSection,
 
 record_button: widgets.Button,
