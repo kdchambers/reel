@@ -453,13 +453,6 @@ extern fn pw_properties_get(properties: *Properties, key: [*:0]const u8) callcon
 extern fn pw_properties_iterate(properties: *Properties, state_data: *?*anyopaque) callconv(.C) [*:0]const u8;
 
 //
-// Generic way to handle library bindings
-//
-// Define the handle struct, but pass in an option of which ones to actually use (Like zig-vulkan)
-// Two files, one for direct definitions, and another for zig-ified version
-//
-
-//
 // ThreadLoop bindings
 //
 
