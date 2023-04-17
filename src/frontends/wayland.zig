@@ -13,6 +13,7 @@ const wayland_core = @import("../wayland_core.zig");
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
+const zxdg = wayland.client.zxdg;
 
 var cursor_theme: *wl.CursorTheme = undefined;
 var cursor: *wl.Cursor = undefined;
@@ -124,6 +125,8 @@ var is_render_requested: bool = true;
 ///   4. Number of vertices to be drawn has changed
 var is_record_requested: bool = true;
 
+var draw_window_decorations: bool = true;
+
 var record_button_color_normal = RGBA{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1.0 };
 var record_button_color_hover = RGBA{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
 
@@ -144,18 +147,27 @@ var gpu_texture_mutex: std.Thread.Mutex = undefined;
 
 pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
 
-pub var screen_dimensions: geometry.Dimensions2D(u16) = .{
-    .width = 1040,
-    .height = 640,
+const initial_screen_dimensions = struct {
+    const width = 1280;
+    const height = 840;
 };
-pub var screen_scale: geometry.ScaleFactor2D(f32) = undefined;
 
-pub var pending_swapchain_images_count: u32 = 2;
+pub var screen_dimensions: geometry.Dimensions2D(u16) = .{
+    .width = initial_screen_dimensions.width,
+    .height = initial_screen_dimensions.height,
+};
+
+pub var screen_scale = geometry.ScaleFactor2D(f32){
+    .horizontal = 2.0 / @as(f32, initial_screen_dimensions.width),
+    .vertical = 2.0 / @as(f32, initial_screen_dimensions.height),
+};
+
+pub var pending_swapchain_images_count: u32 = 1;
 pub var frame_index: u32 = 0;
 
 pub var is_mouse_in_screen: bool = true;
 
-var framebuffer_resized: bool = false;
+var framebuffer_resized: bool = true;
 
 pub var button_clicked: ButtonClicked = .none;
 pub var button_state: wl.Pointer.ButtonState = undefined;
@@ -195,7 +207,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
         defer file_handle.close();
         const max_size_bytes = 10 * 1024 * 1024;
         const font_file_bytes = file_handle.readToEndAlloc(allocator, max_size_bytes) catch return error.FontInitFail;
-        break :blk Font.construct(font_file_bytes) catch return error.FontInitFail;
+        break :blk Font.construct(font_file_bytes) catch |err| {
+            std.log.err("Failed to initialize font. Error: {}", .{err});
+            return error.FontInitFail;
+        };
     };
     errdefer font.deinit(allocator);
 
@@ -301,7 +316,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
     }
 
     if (framebuffer_resized) {
-        std.log.info("Recreate swapchain", .{});
         framebuffer_resized = false;
         renderer.recreateSwapchain(screen_dimensions) catch |err| {
             std.log.err("Failed to recreate swapchain. Error: {}", .{err});
@@ -591,7 +605,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
     if (is_record_requested) {
         is_record_requested = false;
-        std.log.info("Record render pass", .{});
         std.debug.assert(face_writer.indices_used > 0);
         renderer.recordRenderPass(face_writer.indices_used, screen_dimensions) catch |err| {
             std.log.err("app: Failed to record renderpass command buffers: Error: {}", .{err});
@@ -606,7 +619,9 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
             gpu_texture_mutex.lock();
             defer gpu_texture_mutex.unlock();
-            renderer.renderFrame(screen_dimensions) catch return error.VulkanRendererRenderFrameFail;
+
+            renderer.renderFrame(screen_dimensions) catch
+                return error.VulkanRendererRenderFrameFail;
         }
     }
 
@@ -625,6 +640,12 @@ fn initWaylandClient() !void {
 
     xdg_toplevel = try xdg_surface.getToplevel();
     xdg_toplevel.setListener(*bool, xdgToplevelListener, &is_shutdown_requested);
+
+    var toplevel_decoration: *zxdg.ToplevelDecorationV1 = undefined;
+    if (wayland_core.window_decorations_opt) |window_decorations| {
+        toplevel_decoration = try window_decorations.getToplevelDecoration(xdg_toplevel);
+        toplevel_decoration.setListener(*const void, toplevelDecorationListener, &{});
+    }
 
     frame_callback = try surface.frame();
     frame_callback.setListener(*const void, frameListener, &{});
@@ -648,6 +669,17 @@ fn initWaylandClient() !void {
     xcursor = XCursor.left_ptr;
 }
 
+fn toplevelDecorationListener(_: *zxdg.ToplevelDecorationV1, event: zxdg.ToplevelDecorationV1.Event, _: *const void) void {
+    switch (event) {
+        .configure => |configure| {
+            switch (configure.mode) {
+                .server_side => draw_window_decorations = true,
+                else => draw_window_decorations = false,
+            }
+        },
+    }
+}
+
 fn xdgSurfaceListener(xdg_surface_ref: *xdg.Surface, event: xdg.Surface.Event, surface_ref: *wl.Surface) void {
     switch (event) {
         .configure => |configure| {
@@ -661,7 +693,6 @@ fn xdgSurfaceListener(xdg_surface_ref: *xdg.Surface, event: xdg.Surface.Event, s
 fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_requested: *bool) void {
     switch (event) {
         .configure => |configure| {
-            std.log.info("wayland_client: xdg_toplevel configure", .{});
             if (configure.width > 0 and configure.width != screen_dimensions.width) {
                 framebuffer_resized = true;
                 screen_dimensions.width = @intCast(u16, configure.width);
@@ -672,6 +703,10 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
                 screen_dimensions.height = @intCast(u16, configure.height);
                 screen_scale.vertical = 2.0 / @intToFloat(f32, screen_dimensions.height);
             }
+            std.log.info("xdg_toplevel configure. Dimensions {d} x {d}", .{
+                screen_dimensions.width,
+                screen_dimensions.height,
+            });
             frame_callback.destroy();
             frame_callback = surface.frame() catch |err| {
                 std.log.err("Failed to create new wayland frame -> {}", .{err});
@@ -785,26 +820,26 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 if (mouse_x > screen_dimensions.width or mouse_y > screen_dimensions.height)
                     return;
 
-                if (mouse_x < 3 and mouse_y < 3) {
-                    xdg_toplevel.resize(wayland_core.seat, button.serial, .bottom_left);
-                }
-
-                const edge_threshold = 3;
+                const edge_threshold = 6;
                 const max_width = screen_dimensions.width - edge_threshold;
                 const max_height = screen_dimensions.height - edge_threshold;
 
-                if (mouse_x < edge_threshold and mouse_y > max_height) {
+                if (mouse_x < edge_threshold and mouse_y < edge_threshold) {
                     xdg_toplevel.resize(wayland_core.seat, button.serial, .top_left);
+                }
+
+                if (mouse_x < edge_threshold and mouse_y > max_height) {
+                    xdg_toplevel.resize(wayland_core.seat, button.serial, .bottom_left);
                     return;
                 }
 
                 if (mouse_x > max_width and mouse_y < edge_threshold) {
-                    xdg_toplevel.resize(wayland_core.seat, button.serial, .bottom_right);
+                    xdg_toplevel.resize(wayland_core.seat, button.serial, .top_right);
                     return;
                 }
 
                 if (mouse_x > max_width and mouse_y > max_height) {
-                    xdg_toplevel.resize(wayland_core.seat, button.serial, .top_right);
+                    xdg_toplevel.resize(wayland_core.seat, button.serial, .bottom_right);
                     return;
                 }
 
@@ -823,7 +858,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                     return;
                 }
 
-                if (mouse_y == max_height) {
+                if (mouse_y >= max_height) {
                     xdg_toplevel.resize(wayland_core.seat, button.serial, .bottom);
                     return;
                 }
