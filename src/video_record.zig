@@ -92,10 +92,12 @@ fn eventLoop() void {
             writeFrame(entry.pixels, entry.audio_buffer, @intCast(u32, entry.frame_index)) catch |err| {
                 std.log.err("Failed to write frame. Error {}", .{err});
             };
+            if (request_close)
+                break :outer;
         }
+        std.time.sleep(std.time.ns_per_ms * 4);
         if (request_close)
             break :outer;
-        std.time.sleep(std.time.ns_per_ms * 4);
     }
     finishVideoStream();
 }
