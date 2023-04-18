@@ -568,6 +568,7 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         .middle => event_system.handleMouseClick(&mouse_position, .middle, button_state),
         else => {},
     }
+    button_clicked = .none;
 
     if (is_mouse_moved) {
         is_mouse_moved = false;
