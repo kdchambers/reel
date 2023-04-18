@@ -93,7 +93,7 @@ const Region = struct {
     }
 
     pub inline fn left(self: @This()) f32 {
-        const base = self.anchor.left orelse unreachable;
+        const base = self.anchor.left orelse self.anchor.right.? - self.width.? - self.margin.right;
         return base + self.margin.left;
     }
 
@@ -241,87 +241,6 @@ pub fn draw(
         }
     }
 
-    var preview_region: Region = .{};
-    {
-        const max_height_pixels: f32 = 540;
-
-        preview_region.anchor.left = window.left;
-        preview_region.anchor.top = window.top;
-        preview_region.anchor.right = window.right;
-        preview_region.height = @divExact(1080, 2) * screen_scale.vertical;
-        preview_region.margin.left = 15 * screen_scale.horizontal;
-        preview_region.margin.right = 15 * screen_scale.horizontal;
-        preview_region.margin.top = 15 * screen_scale.vertical;
-
-        var preview_extent = preview_region.toExtent();
-
-        //
-        // TODO: Don't hardcode screen dimensions
-        //
-        const aspect_ratio: f32 = 1080.0 / 1920.0;
-        const would_be_width_pixels = preview_extent.width / screen_scale.horizontal;
-        const would_be_height_pixels = would_be_width_pixels * aspect_ratio;
-
-        if (would_be_height_pixels > max_height_pixels) {
-            const max_height = max_height_pixels * screen_scale.vertical;
-            preview_region.height = max_height;
-            const actual_width = (max_height_pixels / aspect_ratio) * screen_scale.horizontal;
-            const margin = (2.0 - actual_width) / 2.0;
-            preview_region.margin.left = margin;
-            preview_region.margin.right = margin;
-        } else {
-            preview_region.height = would_be_height_pixels * screen_scale.vertical;
-        }
-
-        preview_extent = preview_region.toExtent();
-
-        preview_region.margin.left -= 1 * screen_scale.horizontal;
-        preview_region.margin.right -= 1 * screen_scale.horizontal;
-        preview_region.margin.top -= 1 * screen_scale.vertical;
-        preview_region.height.? += 2 * screen_scale.vertical;
-
-        const background_color = if (model.recording_context.state == .recording)
-            RGB.fromInt(150, 20, 20)
-        else
-            RGB.fromInt(150, 150, 150);
-
-        (try face_writer.create(QuadFace)).* = graphics.quadColored(
-            preview_region.toExtent(),
-            background_color.toRGBA(),
-            .bottom_left,
-        );
-
-        if (model.desktop_capture_frame != null) {
-            // TODO: This hurts my soul
-            renderer.video_stream_placement.x = preview_extent.x;
-            renderer.video_stream_placement.y = preview_extent.y;
-            renderer.video_stream_output_dimensions.width = preview_extent.width;
-            renderer.video_stream_output_dimensions.height = preview_extent.height;
-
-            const dimensions_pixels = geometry.Dimensions2D(f32){
-                .width = @floor(preview_extent.width / screen_scale.horizontal),
-                .height = @floor(preview_extent.height / screen_scale.vertical),
-            };
-            std.log.info("Preview scaled to: {d} x {d}", .{
-                dimensions_pixels.width,
-                dimensions_pixels.height,
-            });
-            renderer.video_stream_scaled_dimensions = dimensions_pixels;
-        }
-
-        {
-            const placement = geometry.Coordinates2D(f32){
-                .x = preview_extent.x,
-                .y = preview_extent.y + (60.0 * screen_scale.vertical),
-            };
-            try ui_state.preview_display_selector.draw(
-                placement,
-                screen_scale,
-                pen,
-            );
-        }
-    }
-
     var action_tab_region: Region = .{};
     {
         action_tab_region.anchor.left = window.left;
@@ -346,14 +265,121 @@ pub fn draw(
         );
     }
 
+    switch (ui_state.action_tab.active_index) {
+        0 => try drawSectionRecord(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
+        1 => try drawSectionScreenshot(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
+        2 => try drawSectionStream(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
+        else => unreachable,
+    }
+
+    //
+    // We need to define vertical dimensions here as preview will reference them
+    // After preview is rendered `audio_input_section_region` will calculate it's width
+    // based off of it.
+    //
     var audio_input_section_region: Region = .{};
+    audio_input_section_region.anchor.bottom = action_tab_region.top();
+    audio_input_section_region.margin.bottom = 10 * screen_scale.vertical;
+    audio_input_section_region.height = 180 * screen_scale.vertical;
+
+    var preview_region: Region = .{};
     {
-        audio_input_section_region.anchor.left = window.left;
-        audio_input_section_region.anchor.bottom = action_tab_region.top();
-        audio_input_section_region.margin.bottom = 15 * screen_scale.vertical;
-        audio_input_section_region.margin.left = 15 * screen_scale.horizontal;
-        audio_input_section_region.width = 400 * screen_scale.horizontal;
-        audio_input_section_region.height = 200 * screen_scale.vertical;
+        const frame_dimensions = model.desktop_capture_frame.?.dimensions;
+        const dimensions_pixels = geometry.Dimensions2D(f32){
+            .width = @intToFloat(f32, frame_dimensions.width),
+            .height = @intToFloat(f32, frame_dimensions.height),
+        };
+
+        const margin_pixels: f32 = 10.0;
+        const margin_horizontal: f32 = margin_pixels * screen_scale.horizontal;
+        const margin_vertical: f32 = margin_pixels * screen_scale.vertical;
+
+        const left_side = -1.0 + (300.0 * screen_scale.horizontal);
+
+        const horizontal_space = @fabs(left_side - window.right) - (margin_horizontal * 2.0);
+        const vertical_space = @fabs(audio_input_section_region.top() - window.top) - (margin_vertical * 2.0);
+
+        const dimensions = geometry.Dimensions2D(f32){
+            .width = dimensions_pixels.width * screen_scale.horizontal,
+            .height = dimensions_pixels.height * screen_scale.vertical,
+        };
+
+        //
+        // What we would have to scale the source image by so they would fit into
+        // the available horizontal and vertical space respectively.
+        //
+        const scale_horizontal: f32 = horizontal_space / dimensions.width;
+        const scale_vertical: f32 = vertical_space / dimensions.height;
+
+        assert(scale_horizontal < 1.0);
+        assert(scale_vertical < 1.0);
+
+        const scale = @min(scale_horizontal, scale_vertical);
+
+        preview_region.anchor.right = window.right;
+        preview_region.anchor.top = window.top;
+        preview_region.height = dimensions.height * scale;
+        preview_region.width = dimensions.width * scale;
+
+        preview_region.margin.right = margin_horizontal;
+        preview_region.margin.top = margin_vertical;
+
+        var preview_extent = preview_region.toExtent();
+
+        preview_region.anchor.right.? += 1 * screen_scale.horizontal;
+        preview_region.anchor.top.? -= 1 * screen_scale.vertical;
+
+        preview_region.width.? += 2 * screen_scale.horizontal;
+        preview_region.height.? += 2 * screen_scale.vertical;
+
+        const background_color = if (model.recording_context.state == .recording)
+            RGB.fromInt(150, 20, 20)
+        else
+            RGB.fromInt(150, 150, 150);
+
+        (try face_writer.create(QuadFace)).* = graphics.quadColored(
+            preview_region.toExtent(),
+            background_color.toRGBA(),
+            .bottom_left,
+        );
+
+        if (model.desktop_capture_frame != null) {
+            // TODO: This hurts my soul
+            renderer.video_stream_placement.x = preview_extent.x;
+            renderer.video_stream_placement.y = preview_extent.y;
+            renderer.video_stream_output_dimensions.width = preview_extent.width;
+            renderer.video_stream_output_dimensions.height = preview_extent.height;
+
+            renderer.video_stream_scaled_dimensions = .{
+                .width = dimensions_pixels.width * scale,
+                .height = dimensions_pixels.height * scale,
+            };
+            std.log.info("Preview scaled to: {d} x {d}", .{
+                renderer.video_stream_scaled_dimensions.width,
+                renderer.video_stream_scaled_dimensions.height,
+            });
+        }
+
+        {
+            const placement = geometry.Coordinates2D(f32){
+                .x = preview_extent.x,
+                .y = preview_extent.y + (60.0 * screen_scale.vertical),
+            };
+            try ui_state.preview_display_selector.draw(
+                placement,
+                screen_scale,
+                pen,
+            );
+        }
+    }
+
+    {
+        audio_input_section_region.anchor.right = window.right;
+        audio_input_section_region.anchor.left = preview_region.left();
+
+        audio_input_section_region.margin.right = 10 * screen_scale.horizontal;
+
+        const widget_width: f32 = @fabs(audio_input_section_region.anchor.right.? - audio_input_section_region.anchor.left.?);
 
         const section_title = "Audio Source";
         const section_border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
@@ -370,13 +396,20 @@ pub fn draw(
         {
             var spectrogram_region: Region = .{};
             spectrogram_region.anchor.left = audio_input_section_region.left();
+            spectrogram_region.anchor.right = audio_input_section_region.right();
+
+            const margin_horizontal: f32 = widget_width * 0.05;
+
+            spectrogram_region.margin.left = margin_horizontal;
+            spectrogram_region.margin.right = margin_horizontal;
 
             spectrogram_region.anchor.bottom = audio_input_section_region.bottom();
             spectrogram_region.margin.bottom = 40 * screen_scale.vertical;
+            spectrogram_region.height = 150.0 * screen_scale.vertical;
+            spectrogram_region.width = widget_width - (margin_horizontal * 2.0);
 
             ui_state.audio_input_spectogram.min_cutoff_db = -7.0;
             ui_state.audio_input_spectogram.max_cutoff_db = -2.0;
-            ui_state.audio_input_spectogram.height_pixels = 150;
 
             const sample_range = model.input_audio_buffer.sampleRange();
             const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
@@ -393,15 +426,15 @@ pub fn draw(
                 const audio_power_spectrum = audio.samplesToPowerSpectrum(samples);
                 const mel_scaled_bins = audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
                 try ui_state.audio_input_spectogram.draw(
-                    mel_scaled_bins,
-                    spectrogram_region.placement(),
+                    mel_scaled_bins[3..],
+                    spectrogram_region.toExtent(),
                     screen_scale,
                 );
             } else {
                 const mel_scaled_bins_buffer = [1]f32{-9.0} ** 64;
                 try ui_state.audio_input_spectogram.draw(
-                    mel_scaled_bins_buffer[0..],
-                    spectrogram_region.placement(),
+                    mel_scaled_bins_buffer[3..],
+                    spectrogram_region.toExtent(),
                     screen_scale,
                 );
             }
@@ -409,9 +442,10 @@ pub fn draw(
             {
                 var volume_bar_region: Region = .{};
                 volume_bar_region.anchor.left = audio_input_section_region.left();
-                volume_bar_region.margin.left = 10 * screen_scale.horizontal;
                 volume_bar_region.anchor.right = audio_input_section_region.right();
-                volume_bar_region.margin.right = 10 * screen_scale.horizontal;
+
+                volume_bar_region.margin.left = margin_horizontal;
+                volume_bar_region.margin.right = margin_horizontal;
 
                 volume_bar_region.anchor.bottom = audio_input_section_region.bottom();
                 volume_bar_region.margin.bottom = 20 * screen_scale.vertical;
@@ -422,13 +456,6 @@ pub fn draw(
                 };
             }
         }
-    }
-
-    switch (ui_state.action_tab.active_index) {
-        0 => try drawSectionRecord(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
-        1 => try drawSectionScreenshot(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
-        2 => try drawSectionStream(model, ui_state, screen_scale, pen, face_writer, action_tab_region),
-        else => unreachable,
     }
 }
 

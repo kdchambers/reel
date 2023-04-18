@@ -626,7 +626,7 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
             );
             const audio_power_spectrum = audio_utils.samplesToPowerSpectrum(samples);
             const mel_scaled_bins = audio_utils.powerSpectrumToMelScale(audio_power_spectrum, 64);
-            ui_state.audio_input_spectogram.update(mel_scaled_bins, screen_scale) catch unreachable;
+            ui_state.audio_input_spectogram.update(mel_scaled_bins[3..], screen_scale) catch unreachable;
 
             const volume_dbs = audio_utils.powerSpectrumToVolumeDb(audio_power_spectrum);
             ui_state.audio_volume_level.setDecibelLevel(volume_dbs);

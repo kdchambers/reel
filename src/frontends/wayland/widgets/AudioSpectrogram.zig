@@ -27,13 +27,15 @@ max_cutoff_db: f32,
 pub fn draw(
     self: *@This(),
     freq_bins: []const f32,
-    placement: geometry.Coordinates2D(f32),
+    extent: geometry.Extent2D(f32),
     screen_scale: ScaleFactor2D(f32),
 ) !void {
     self.bin_count = @intCast(u16, freq_bins.len);
-    const height = self.height_pixels * screen_scale.vertical;
-    const bar_width: f32 = 4 * screen_scale.horizontal;
-    const bar_spacing: f32 = 2 * screen_scale.horizontal;
+    self.height_pixels = extent.height / screen_scale.vertical;
+
+    const bar_width: f32 = extent.width / (@intToFloat(f32, self.bin_count) * 2.0);
+    const bar_spacing = (extent.width - (bar_width * @intToFloat(f32, self.bin_count))) / @intToFloat(f32, self.bin_count + 1);
+
     const bar_increment: f32 = bar_width + bar_spacing;
     const bar_color = graphics.RGBA(f32).fromInt(50, 100, 65, 255);
 
@@ -41,14 +43,14 @@ pub fn draw(
     var quads = try root.face_writer_ref.allocate(QuadFace, self.bin_count);
     for (freq_bins, quads, 0..) |freq_value, *quad, i| {
         const db_clamped = @min(self.max_cutoff_db, @max(self.min_cutoff_db, freq_value));
-        const bar_height = height - ((db_clamped / self.min_cutoff_db) * height);
-        const extent = Extent2D(f32){
-            .x = placement.x + (@intToFloat(f32, i) * bar_increment),
-            .y = placement.y,
+        const bar_height = extent.height - ((db_clamped / self.min_cutoff_db) * extent.height);
+        const bar_extent = Extent2D(f32){
+            .x = extent.x + (@intToFloat(f32, i) * bar_increment),
+            .y = extent.y,
             .width = bar_width,
             .height = bar_height,
         };
-        quad.* = graphics.quadColored(extent, bar_color, .bottom_left);
+        quad.* = graphics.quadColored(bar_extent, bar_color, .bottom_left);
         quad.*[0].color = graphics.RGBA(f32).fromInt(150, 50, 70, 255);
         quad.*[1].color = graphics.RGBA(f32).fromInt(150, 50, 70, 255);
     }
