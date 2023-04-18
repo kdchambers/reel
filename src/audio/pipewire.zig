@@ -66,6 +66,7 @@ pub const InitErrors = error{
 
 pub const OpenErrors = error{
     PipewireStreamCreateFail,
+    PipewireStreamStartFail,
 };
 
 var stream_state: audio.State = .closed;
@@ -477,9 +478,6 @@ extern fn pw_thread_loop_new_full(loop: *Loop, name: [*:0]const u8, properties: 
 extern fn pw_thread_loop_add_listener(loop: *ThreadLoop, listener: *spa.Hook, events: *const ThreadLoopEvents, data: ?*anyopaque) callconv(.C) void;
 extern fn pw_thread_loop_get_loop(loop: *ThreadLoop) callconv(.C) *Loop;
 
-// extern fn () callconv(.C) ;
-// extern fn () callconv(.C) ;
-
 //
 // Stream bindings
 //
@@ -608,13 +606,10 @@ fn setupStream() error{ PipewireConnectServerFail, CreateStreamFail, ConnectStre
 
     const stream_properties = symbols.pw_properties_new(
         keys.media_type,
-        // pw.PW_KEY_MEDIA_TYPE,
         "Audio",
         keys.media_category,
-        // pw.PW_KEY_MEDIA_CATEGORY,
         "Capture",
         keys.media_role,
-        // pw.PW_KEY_MEDIA_ROLE,
         "Music",
         // @as(usize, 0),
         c.NULL,
@@ -692,7 +687,7 @@ fn setupStream() error{ PipewireConnectServerFail, CreateStreamFail, ConnectStre
         .input,
         id_any,
         .{
-            // .autoconnect = true,
+            .autoconnect = true,
             .map_buffers = true,
             .rt_process = true,
         },
@@ -724,7 +719,6 @@ pub fn init(
 }
 
 pub fn close() void {
-    symbols.pw_thread_loop_lock(thread_loop);
     symbols.pw_thread_loop_stop(thread_loop);
     symbols.pw_stream_destroy(stream);
     symbols.pw_thread_loop_destroy(thread_loop);
