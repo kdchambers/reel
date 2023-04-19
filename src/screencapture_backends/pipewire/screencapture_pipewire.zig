@@ -55,8 +55,10 @@ const StartResponse = struct {
     source_type: u32,
 };
 
+const SupportedPixelFormat = screencapture.SupportedPixelFormat;
+
 const StreamFormat = extern struct {
-    format: pw.spa_video_format,
+    format: SupportedPixelFormat,
     width: u32,
     height: u32,
     padding: u32,
@@ -1229,6 +1231,7 @@ fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
     const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
     const alignment = @alignOf(screencapture.PixelType);
     const buffer_pixels = @ptrCast([*]const screencapture.PixelType, @alignCast(alignment, buffer_bytes));
+
     frameReadyCallback(
         stream_format.width,
         stream_format.height,
@@ -1243,12 +1246,20 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod)
 
     if (id == pw.SPA_PARAM_Format) {
         stream_format = parseStreamFormat(params);
+
+        std.log.info("Pipewire stream opened. {d} x {d} {s}", .{
+            stream_format.width,
+            stream_format.height,
+            @tagName(stream_format.format),
+        });
+
         stream_state = .open;
         onStreamOpenSuccessCallback(.{
             .index = 0,
             .pause = streamPause,
             .close = streamClose,
             .state = streamState,
+            .pixel_format = stream_format.format,
             .dimensions = .{
                 .width = stream_format.width,
                 .height = stream_format.height,

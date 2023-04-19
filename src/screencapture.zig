@@ -22,6 +22,15 @@ pub const State = enum(u8) {
     paused,
 };
 
+pub const SupportedPixelFormat = enum(u32) {
+    rgba,
+    rgbx,
+    rgb,
+    bgra,
+    bgrx,
+    bgr,
+};
+
 pub const PixelType = graphics.RGBA(u8);
 pub const FrameImage = graphics.Image(PixelType);
 
@@ -87,6 +96,7 @@ pub const StreamInterface = struct {
     state: *const StateFn,
 
     dimensions: geometry.Dimensions2D(u32),
+    pixel_format: SupportedPixelFormat,
 };
 
 pub const Interface = struct {

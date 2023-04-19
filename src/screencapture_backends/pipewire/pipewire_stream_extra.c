@@ -14,8 +14,17 @@
 #include <spa/debug/format.h>
 #include <pipewire/pipewire.h>
 
+typedef enum SupportedPixelFormat {
+    SUPPORTED_PIXEL_FORMAT_RGBA,
+    SUPPORTED_PIXEL_FORMAT_RGBX,
+    SUPPORTED_PIXEL_FORMAT_RGB,
+    SUPPORTED_PIXEL_FORMAT_BGRA,
+    SUPPORTED_PIXEL_FORMAT_BGRX,
+    SUPPORTED_PIXEL_FORMAT_BGR,
+} SupportedPixelFormat;
+
 typedef struct StreamFormat {
-    enum spa_video_format format;
+    SupportedPixelFormat format;
     uint32_t width;
     uint32_t height;
     uint32_t padding;
@@ -50,7 +59,19 @@ StreamFormat parseStreamFormat(const struct spa_pod *param) {
 
     result.width = info_raw.size.width;
     result.height = info_raw.size.height;
-    result.format = info_raw.format;    
+
+    if(info_raw.format == SPA_VIDEO_FORMAT_RGB)
+        result.format = SUPPORTED_PIXEL_FORMAT_RGB;
+    else if (info_raw.format == SPA_VIDEO_FORMAT_RGBA)
+        result.format = SUPPORTED_PIXEL_FORMAT_RGBA;
+    else if (info_raw.format == SPA_VIDEO_FORMAT_RGBx)
+        result.format = SUPPORTED_PIXEL_FORMAT_RGBX;
+    else if (info_raw.format == SPA_VIDEO_FORMAT_BGRA)
+        result.format = SUPPORTED_PIXEL_FORMAT_BGRA;
+    else if (info_raw.format == SPA_VIDEO_FORMAT_BGRx)
+        result.format = SUPPORTED_PIXEL_FORMAT_BGRX;
+    else if (info_raw.format == SPA_VIDEO_FORMAT_BGR)
+        result.format = SUPPORTED_PIXEL_FORMAT_BGR;
 
     return result;
 }
@@ -60,15 +81,14 @@ struct spa_pod* buildPipewireParams(struct spa_pod_builder *builder) {
         builder, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat, SPA_FORMAT_mediaType,
         SPA_POD_Id(SPA_MEDIA_TYPE_video), SPA_FORMAT_mediaSubtype,
         SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw), SPA_FORMAT_VIDEO_format,
-        SPA_POD_CHOICE_ENUM_Id(7, SPA_VIDEO_FORMAT_RGB, SPA_VIDEO_FORMAT_RGB,
+        SPA_POD_CHOICE_ENUM_Id(6, SPA_VIDEO_FORMAT_RGB, SPA_VIDEO_FORMAT_RGB,
                                SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_RGBx,
-                               SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_YUY2,
-                               SPA_VIDEO_FORMAT_I420),
+                               SPA_VIDEO_FORMAT_BGR, SPA_VIDEO_FORMAT_BGRx),
         SPA_FORMAT_VIDEO_size,
-        SPA_POD_CHOICE_RANGE_Rectangle(&SPA_RECTANGLE(320, 240),
+        SPA_POD_CHOICE_RANGE_Rectangle(&SPA_RECTANGLE(1080, 1920),
                                        &SPA_RECTANGLE(1, 1),
                                        &SPA_RECTANGLE(4096, 4096)),
         SPA_FORMAT_VIDEO_framerate,
-        SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(25, 1), &SPA_FRACTION(0, 1),
+        SPA_POD_CHOICE_RANGE_Fraction(&SPA_FRACTION(60, 1), &SPA_FRACTION(0, 1),
                                       &SPA_FRACTION(1000, 1)));
 }

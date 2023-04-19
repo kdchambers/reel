@@ -138,6 +138,7 @@ pub fn openStream(
         .pause = streamPause,
         .close = streamClose,
         .state = streamState,
+        .pixel_format = .rgba,
         .dimensions = .{
             .width = display_info.width,
             .height = display_info.height,
