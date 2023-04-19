@@ -67,7 +67,6 @@ pub const VideoFrame = struct {
 };
 
 pub const WebcamStream = struct {
-    fps: u32,
     dimensions: geometry.Dimensions2D(u32),
     last_frame_index: u64,
     last_frame: [*]graphics.RGBA(u8),

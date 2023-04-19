@@ -40,10 +40,8 @@ pub const WebcamStream = struct {
 
     pub fn create(
         input_name: [*:0]const u8,
-        dimensions: geometry.Dimensions2D(u32),
+        wanted_dimensions: geometry.Dimensions2D(u32),
     ) !@This() {
-        _ = dimensions;
-
         var webcam_stream: WebcamStream = undefined;
         webcam_stream.video_frame_count = 0;
 
@@ -60,8 +58,14 @@ pub const WebcamStream = struct {
         webcam_stream.format_context = av.formatAllocContext() orelse return error.AllocateFormatContextFail;
         webcam_stream.format_context.flags |= libav.AVFMT_FLAG_NONBLOCK;
 
-        _ = av.dictSet(&options, "framerate", "15", 0);
-        _ = av.dictSet(&options, "video_size", "640x480", 0);
+        _ = av.dictSet(&options, "framerate", "60", 0);
+
+        var dimensions_buffer: [64]u8 = undefined;
+        const dimensions_string = std.fmt.bufPrintZ(&dimensions_buffer, "{d}x{d}", .{
+            wanted_dimensions.width,
+            wanted_dimensions.height,
+        }) catch unreachable;
+        _ = av.dictSet(&options, "video_size", dimensions_string, 0);
 
         ret_code = av.formatOpenInput(
             &webcam_stream.format_context,
@@ -159,6 +163,13 @@ pub const WebcamStream = struct {
         );
 
         return webcam_stream;
+    }
+
+    pub fn dimensions(self: @This()) geometry.Dimensions2D(u32) {
+        return .{
+            .width = @intCast(u32, self.decoder_context.width),
+            .height = @intCast(u32, self.decoder_context.height),
+        };
     }
 
     pub fn flushFrameBuffer(self: *@This()) void {

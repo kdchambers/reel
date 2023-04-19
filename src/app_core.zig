@@ -81,7 +81,6 @@ var model: Model = .{
     },
     .screenshot_format = .png,
     .webcam_stream = .{
-        .fps = 15,
         .dimensions = .{
             .width = 640,
             .height = 480,
@@ -178,6 +177,10 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         std.log.warn("Failed to connect to a webcam stream. Error: {}", .{err});
         break :blk null;
     };
+
+    if (webcam_opt) |webcam| {
+        model.webcam_stream.dimensions = webcam.dimensions();
+    }
 }
 
 pub fn run() !void {
