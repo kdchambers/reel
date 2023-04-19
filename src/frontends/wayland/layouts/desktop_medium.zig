@@ -284,7 +284,14 @@ pub fn draw(
 
     var preview_region: Region = .{};
     {
-        const frame_dimensions = model.desktop_capture_frame.?.dimensions;
+        const frame_dimensions: geometry.Dimensions2D(u32) = blk: {
+            if (model.desktop_capture_frame) |frame|
+                break :blk frame.dimensions;
+            break :blk .{
+                .width = 1080,
+                .height = 1920,
+            };
+        };
         const dimensions_pixels = geometry.Dimensions2D(f32){
             .width = @intToFloat(f32, frame_dimensions.width),
             .height = @intToFloat(f32, frame_dimensions.height),

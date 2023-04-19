@@ -382,7 +382,7 @@ comptime {
     assert(@enumToInt(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
 }
 
-pub const CodecID = enum(i32) {
+pub const CodecID = enum(u32) {
     none = 0,
     MPEG1VIDEO,
     MPEG2VIDEO,

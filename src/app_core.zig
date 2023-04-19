@@ -17,6 +17,7 @@ const zmath = @import("zmath");
 const video_encoder = @import("video_record.zig");
 const RequestBuffer = @import("RequestBuffer.zig");
 const geometry = @import("geometry.zig");
+const WebcamStream = @import("WebcamStream.zig").WebcamStream;
 
 const audio_input = @import("audio.zig");
 var audio_input_interface: audio_input.Interface = undefined;
@@ -79,9 +80,20 @@ var model: Model = .{
         .state = .idle,
     },
     .screenshot_format = .png,
+    .webcam_stream = .{
+        .fps = 15,
+        .dimensions = .{
+            .width = 640,
+            .height = 480,
+        },
+        .last_frame = undefined,
+        .last_frame_index = 0,
+    },
 };
 
 var model_mutex: std.Thread.Mutex = .{};
+
+var webcam_opt: ?WebcamStream = null;
 
 var screencapture_open: bool = false;
 var screencapture_stream: ?screencapture.StreamInterface = null;
@@ -157,6 +169,14 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         &handleAudioInputInitSuccess,
         &handleAudioInputInitFail,
     ) catch return error.AudioInputInitFail;
+
+    const pixels_count: usize = model.webcam_stream.dimensions.width * model.webcam_stream.dimensions.height;
+    model.webcam_stream.last_frame = (try gpa.alloc(graphics.RGBA(u8), pixels_count)).ptr;
+
+    webcam_opt = WebcamStream.create("/dev/video0", model.webcam_stream.dimensions) catch |err| blk: {
+        std.log.warn("Failed to connect to a webcam stream. Error: {}", .{err});
+        break :blk null;
+    };
 }
 
 pub fn run() !void {
@@ -166,6 +186,12 @@ pub fn run() !void {
     app_loop: while (true) {
         const frame_timer = Timer.now();
         _ = wayland_core.sync();
+
+        if (webcam_opt) |*webcam| {
+            if (try webcam.getFrame(model.webcam_stream.last_frame, 0, 0, model.webcam_stream.dimensions.width)) {
+                model.webcam_stream.last_frame_index += 1;
+            }
+        }
 
         model_mutex.lock();
         var request_buffer = frontend_interface.update(&model) catch |err| {
@@ -257,6 +283,14 @@ pub fn deinit() void {
     audio_input_interface.close();
 
     model.input_audio_buffer.deinit(gpa);
+
+    //
+    // TODO:
+    //
+
+    if (webcam_opt) |*webcam| {
+        webcam.deinit() catch {};
+    }
 
     frontend_interface.deinit();
     if (comptime build_options.have_wayland) wayland_core.deinit();

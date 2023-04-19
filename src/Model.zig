@@ -66,6 +66,13 @@ pub const VideoFrame = struct {
     dimensions: Dimensions2D(u32),
 };
 
+pub const WebcamStream = struct {
+    fps: u32,
+    dimensions: geometry.Dimensions2D(u32),
+    last_frame_index: u64,
+    last_frame: [*]graphics.RGBA(u8),
+};
+
 //
 // This defines all state that is relevant to the user interface
 //
@@ -75,3 +82,4 @@ audio_input_volume_db: f32,
 desktop_capture_frame: ?VideoFrame,
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,
+webcam_stream: WebcamStream,

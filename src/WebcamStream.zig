@@ -40,12 +40,9 @@ pub const WebcamStream = struct {
 
     pub fn create(
         input_name: [*:0]const u8,
-        width: u32,
-        height: u32,
-        // desired_fps: u32,
+        dimensions: geometry.Dimensions2D(u32),
     ) !@This() {
-        _ = height;
-        _ = width;
+        _ = dimensions;
 
         var webcam_stream: WebcamStream = undefined;
         webcam_stream.video_frame_count = 0;
@@ -64,7 +61,7 @@ pub const WebcamStream = struct {
         webcam_stream.format_context.flags |= libav.AVFMT_FLAG_NONBLOCK;
 
         _ = av.dictSet(&options, "framerate", "15", 0);
-        _ = av.dictSet(&options, "video_size", "320x224", 0);
+        _ = av.dictSet(&options, "video_size", "640x480", 0);
 
         ret_code = av.formatOpenInput(
             &webcam_stream.format_context,
@@ -73,6 +70,9 @@ pub const WebcamStream = struct {
             &options,
         );
         if (ret_code < 0) {
+            var error_message_buffer: [512]u8 = undefined;
+            _ = av.strError(ret_code, &error_message_buffer, 512);
+            std.log.err("Failed to open webcam device. Error ({d}): {s}", .{ ret_code, error_message_buffer });
             return error.OpenInputFail;
         }
 
@@ -93,7 +93,8 @@ pub const WebcamStream = struct {
         webcam_stream.video_stream_index = ret_code;
         stream = webcam_stream.format_context.streams[@intCast(usize, webcam_stream.video_stream_index)];
 
-        decoder = av.codecFindDecoder(stream.codecpar[0].codec_id);
+        const codec_id = @intToEnum(av.CodecID, stream.codecpar[0].codec_id);
+        decoder = av.codecFindDecoder(codec_id);
         if (decoder == null)
             return error.FindDecoderFail;
 
@@ -169,17 +170,20 @@ pub const WebcamStream = struct {
 
     pub fn getFrame(
         self: *@This(),
-        output_buffer: [*]graphics.RGBA(f32),
-        dst_x: u32,
-        dst_y: u32,
+        output_buffer: [*]graphics.RGBA(u8),
+        dst_offset_x: u32,
+        dst_offset_y: u32,
         stride: u32,
-    ) !void {
+    ) !bool {
         var ret_code = libav.av_read_frame(self.format_context, self.packet);
 
         if (ret_code < 0) {
+            //
+            // There is no new output to read, return false to indicate that
+            // no new frame was copied into `output_buffer`
+            //
             if (ret_code == EAGAIN) {
-                std.log.warn("getFrame: EAGAIN", .{});
-                return;
+                return false;
             }
             return error.ReadFrameFail;
         }
@@ -238,20 +242,26 @@ pub const WebcamStream = struct {
         libav.av_packet_unref(self.packet);
 
         const pixel_count = width * height;
+
+        const src_stride = @intCast(usize, @divExact(self.converted_frame.?.linesize[0], @sizeOf(graphics.RGBA(u8))));
+
         const frame_pixels = @ptrCast([*]graphics.RGBA(u8), &self.converted_frame.?.data[0][0])[0..pixel_count];
-        var y: usize = 0;
-        while (y < height) : (y += 1) {
-            var x: usize = 0;
-            while (x < width) : (x += 1) {
-                const src_index = x + (y * width);
-                const dst_index = (x + dst_x) + ((y + dst_y) * stride);
-                output_buffer[dst_index].r = @intToFloat(f32, frame_pixels[src_index].r) / 255;
-                output_buffer[dst_index].g = @intToFloat(f32, frame_pixels[src_index].g) / 255;
-                output_buffer[dst_index].b = @intToFloat(f32, frame_pixels[src_index].b) / 255;
-                output_buffer[dst_index].a = 1.0;
-            }
+
+        var dst_x = dst_offset_x;
+        var dst_y = dst_offset_y;
+        var dst_index = (dst_y * stride) + dst_x;
+        var src_index: usize = 0;
+        for (0..height) |_| {
+            std.mem.copy(
+                graphics.RGBA(u8),
+                output_buffer[dst_index .. dst_index + width],
+                frame_pixels[src_index .. src_index + width],
+            );
+            src_index += src_stride;
+            dst_index += stride;
         }
         self.video_frame_count += 1;
+        return true;
     }
 
     pub fn deinit(self: *@This()) !void {
