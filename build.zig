@@ -94,7 +94,7 @@ pub fn build(b: *Build) void {
         "-I/usr/include/pipewire-0.3",
         "-I/usr/include/spa-0.2",
     };
-    exe.addCSourceFile("src/screencapture_backends/pipewire/pipewire_stream_extra.c", &flags);
+    exe.addCSourceFile("src/screencapture/pipewire/pipewire_stream_extra.c", &flags);
 
     //
     // TODO: Remove header dependencies

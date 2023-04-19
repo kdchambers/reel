@@ -6,9 +6,9 @@ const build_options = @import("build_options");
 const graphics = @import("graphics.zig");
 const geometry = @import("geometry.zig");
 
-const backend_pipewire = @import("screencapture_backends/pipewire/screencapture_pipewire.zig");
+const backend_pipewire = @import("screencapture/pipewire/screencapture_pipewire.zig");
 const backend_wlroots = if (build_options.have_wayland)
-    @import("screencapture_backends/wlroots/screencapture_wlroots.zig")
+    @import("screencapture/wlroots/screencapture_wlroots.zig")
 else
     void;
 
