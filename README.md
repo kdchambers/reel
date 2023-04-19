@@ -20,14 +20,17 @@ The following is a course-grained summary of what features / backends have been 
 | Screenshot | ✅ |
 | Record Video | ✅ |
 | Stream Video | ❌ |
-| Webcam Input | ❌ |
+| Webcam Backend video4linux2 | ⚠️ |
+| Webcam Backend Pipewire | ❌ |
 | Audio Input Backend ALSA | ❌ |
 | Audio Input Backend Pulse | ✅ |
-| Audio Input Backend Pipewire | ❌ |
+| Audio Input Backend Pipewire | ✅ |
 | Audio Input Backend Jack | ❌ |
 | Screencapture Backend Pipewire | ✅ |
 | Screencapture Backend Wlroots | ✅ |
 | Screencapture Backend KDE | ❌ |
+
+⚠️ = Partial implementation
 
 **NOTE**: KDE and Wlroots screencapture backends refer to compositor specific extensions [kde screencast](https://wayland.app/protocols/kde-zkde-screencast-unstable-v1) and [wlr screencopy](https://wayland.app/protocols/wlr-screencopy-unstable-v1).
 
