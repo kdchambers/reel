@@ -274,13 +274,13 @@ pub fn draw(
 
     //
     // We need to define vertical dimensions here as preview will reference them
-    // After preview is rendered `audio_input_section_region` will calculate it's width
+    // After preview is rendered `audio_source_section_region` will calculate it's width
     // based off of it.
     //
-    var audio_input_section_region: Region = .{};
-    audio_input_section_region.anchor.bottom = action_tab_region.top();
-    audio_input_section_region.margin.bottom = 10 * screen_scale.vertical;
-    audio_input_section_region.height = 180 * screen_scale.vertical;
+    var audio_source_section_region: Region = .{};
+    audio_source_section_region.anchor.bottom = action_tab_region.top();
+    audio_source_section_region.margin.bottom = 10 * screen_scale.vertical;
+    audio_source_section_region.height = 180 * screen_scale.vertical;
 
     var preview_region: Region = .{};
     {
@@ -304,7 +304,7 @@ pub fn draw(
         const left_side = -1.0 + (300.0 * screen_scale.horizontal);
 
         const horizontal_space = @fabs(left_side - window.right) - (margin_horizontal * 2.0);
-        const vertical_space = @fabs(audio_input_section_region.top() - window.top) - (margin_vertical * 2.0);
+        const vertical_space = @fabs(audio_source_section_region.top() - window.top) - (margin_vertical * 2.0);
 
         const dimensions = geometry.Dimensions2D(f32){
             .width = dimensions_pixels.width * screen_scale.horizontal,
@@ -381,18 +381,18 @@ pub fn draw(
     }
 
     {
-        audio_input_section_region.anchor.right = window.right;
-        audio_input_section_region.anchor.left = preview_region.left();
+        audio_source_section_region.anchor.right = window.right;
+        audio_source_section_region.anchor.left = preview_region.left();
 
-        audio_input_section_region.margin.right = 10 * screen_scale.horizontal;
+        audio_source_section_region.margin.right = 10 * screen_scale.horizontal;
 
-        const widget_width: f32 = @fabs(audio_input_section_region.anchor.right.? - audio_input_section_region.anchor.left.?);
+        const widget_width: f32 = @fabs(audio_source_section_region.anchor.right.? - audio_source_section_region.anchor.left.?);
 
         const section_title = "Audio Source";
         const section_border_color = graphics.RGBA(f32).fromInt(155, 155, 155, 255);
 
         try Section.draw(
-            audio_input_section_region.toExtent(),
+            audio_source_section_region.toExtent(),
             section_title,
             screen_scale,
             pen,
@@ -402,29 +402,29 @@ pub fn draw(
 
         {
             var spectrogram_region: Region = .{};
-            spectrogram_region.anchor.left = audio_input_section_region.left();
-            spectrogram_region.anchor.right = audio_input_section_region.right();
+            spectrogram_region.anchor.left = audio_source_section_region.left();
+            spectrogram_region.anchor.right = audio_source_section_region.right();
 
             const margin_horizontal: f32 = widget_width * 0.05;
 
             spectrogram_region.margin.left = margin_horizontal;
             spectrogram_region.margin.right = margin_horizontal;
 
-            spectrogram_region.anchor.bottom = audio_input_section_region.bottom();
+            spectrogram_region.anchor.bottom = audio_source_section_region.bottom();
             spectrogram_region.margin.bottom = 40 * screen_scale.vertical;
             spectrogram_region.height = 150.0 * screen_scale.vertical;
             spectrogram_region.width = widget_width - (margin_horizontal * 2.0);
 
-            ui_state.audio_input_spectogram.min_cutoff_db = -7.0;
-            ui_state.audio_input_spectogram.max_cutoff_db = -2.0;
+            ui_state.audio_source_spectogram.min_cutoff_db = -7.0;
+            ui_state.audio_source_spectogram.max_cutoff_db = -2.0;
 
-            const sample_range = model.input_audio_buffer.sampleRange();
+            const sample_range = model.source_audio_buffer.sampleRange();
             const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
             if (sample_range.count >= samples_per_frame) {
                 const sample_offset: usize = sample_range.count - samples_per_frame;
                 const sample_index = sample_range.base_sample + sample_offset;
                 var sample_buffer: [samples_per_frame]f32 = undefined;
-                const samples = model.input_audio_buffer.samplesCopyIfRequired(
+                const samples = model.source_audio_buffer.samplesCopyIfRequired(
                     sample_index,
                     samples_per_frame,
                     &sample_buffer,
@@ -432,14 +432,14 @@ pub fn draw(
 
                 const audio_power_spectrum = audio.samplesToPowerSpectrum(samples);
                 const mel_scaled_bins = audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
-                try ui_state.audio_input_spectogram.draw(
+                try ui_state.audio_source_spectogram.draw(
                     mel_scaled_bins[3..],
                     spectrogram_region.toExtent(),
                     screen_scale,
                 );
             } else {
                 const mel_scaled_bins_buffer = [1]f32{-9.0} ** 64;
-                try ui_state.audio_input_spectogram.draw(
+                try ui_state.audio_source_spectogram.draw(
                     mel_scaled_bins_buffer[3..],
                     spectrogram_region.toExtent(),
                     screen_scale,
@@ -448,13 +448,13 @@ pub fn draw(
 
             {
                 var volume_bar_region: Region = .{};
-                volume_bar_region.anchor.left = audio_input_section_region.left();
-                volume_bar_region.anchor.right = audio_input_section_region.right();
+                volume_bar_region.anchor.left = audio_source_section_region.left();
+                volume_bar_region.anchor.right = audio_source_section_region.right();
 
                 volume_bar_region.margin.left = margin_horizontal;
                 volume_bar_region.margin.right = margin_horizontal;
 
-                volume_bar_region.anchor.bottom = audio_input_section_region.bottom();
+                volume_bar_region.anchor.bottom = audio_source_section_region.bottom();
                 volume_bar_region.margin.bottom = 20 * screen_scale.vertical;
                 volume_bar_region.height = 5 * screen_scale.vertical;
 
@@ -627,6 +627,35 @@ fn drawSectionRecord(
             screen_scale,
             record_button_color_normal,
         );
+    }
+
+    {
+        const margin_top_pixels = 30;
+        const margin_left_pixels = 20;
+        const radius_pixels: f32 = 10;
+        const center_point = geometry.Coordinates2D(f32){
+            .x = -1.0 + ((margin_left_pixels + radius_pixels) * screen_scale.horizontal),
+            .y = -1.0 + ((margin_top_pixels + radius_pixels) * screen_scale.vertical),
+        };
+        const color = graphics.RGBA(f32).fromInt(50, 50, 50, 255);
+        try ui_state.enable_webcam_checkbox.draw(
+            center_point,
+            radius_pixels,
+            screen_scale,
+            color,
+            model.webcam_stream.enabled(),
+        );
+
+        const label_text = "Enable webcam";
+        const label_text_dimensions = pen.calculateRenderDimensions(label_text);
+        const label_margin_left = 10;
+        const label_extent = geometry.Extent2D(f32) {
+            .x = -1.0 + ((margin_left_pixels + (radius_pixels * 2.0) + label_margin_left) * screen_scale.horizontal),
+            .y = -1.0 + (((radius_pixels * 2.0) + margin_top_pixels) * screen_scale.vertical),
+            .width = (label_text_dimensions.width + 5.0) * screen_scale.horizontal,
+            .height = (radius_pixels * 2.0) * screen_scale.vertical,
+        };
+        try pen.writeCentered(label_text, label_extent, screen_scale, &text_writer_interface);
     }
 }
 

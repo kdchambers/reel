@@ -19,8 +19,8 @@ const RequestBuffer = @import("RequestBuffer.zig");
 const geometry = @import("geometry.zig");
 const WebcamStream = @import("WebcamStream.zig").WebcamStream;
 
-const audio_input = @import("audio.zig");
-var audio_input_interface: audio_input.Interface = undefined;
+const audio_source = @import("audio_source.zig");
+var audio_source_interface: audio_source.Interface = undefined;
 
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
@@ -71,8 +71,8 @@ var screencapture_interface: screencapture.Interface = undefined;
 var frontend_interface: frontend.Interface = undefined;
 
 var model: Model = .{
-    .input_audio_buffer = undefined,
-    .audio_input_volume_db = -9.0,
+    .source_audio_buffer = undefined,
+    .audio_source_volume_db = -9.0,
     .desktop_capture_frame = null,
     .recording_context = .{
         .format = .mp4,
@@ -99,7 +99,7 @@ var screencapture_open: bool = false;
 var screencapture_stream: ?screencapture.StreamInterface = null;
 var frame_index: u64 = 0;
 
-var last_audio_input_timestamp: i128 = 0;
+var last_audio_source_timestamp: i128 = 0;
 var last_screencapture_input_timestamp: i128 = 0;
 
 var recording_audio_sample_index: usize = 0;
@@ -161,13 +161,13 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     // Buffer size of ~100 milliseconds at a sample rate of 44100 and 2 channels
     //
     const buffer_capacity_samples: usize = @divExact(44100, 10) * 2;
-    try model.input_audio_buffer.init(gpa, buffer_capacity_samples);
+    try model.source_audio_buffer.init(gpa, buffer_capacity_samples);
 
-    audio_input_interface = audio_input.createBestInterface(&onAudioInputRead);
+    audio_source_interface = audio_source.createBestInterface(&onAudioSourceRead);
 
-    audio_input_interface.init(
-        &handleAudioInputInitSuccess,
-        &handleAudioInputInitFail,
+    audio_source_interface.init(
+        &handleAudioSourceInitSuccess,
+        &handleAudioSourceInitFail,
     ) catch return error.AudioInputInitFail;
 }
 
@@ -311,9 +311,9 @@ pub fn run() !void {
 }
 
 pub fn deinit() void {
-    audio_input_interface.close();
+    audio_source_interface.close();
 
-    model.input_audio_buffer.deinit(gpa);
+    model.source_audio_buffer.deinit(gpa);
 
     //
     // TODO:
@@ -398,8 +398,8 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
 
         recording_start_timestamp = std.time.nanoTimestamp();
 
-        const sample_index = model.input_audio_buffer.lastNSample(sample_multiple);
-        const samples_for_frame = model.input_audio_buffer.samplesCopyIfRequired(
+        const sample_index = model.source_audio_buffer.lastNSample(sample_multiple);
+        const samples_for_frame = model.source_audio_buffer.samplesCopyIfRequired(
             sample_index,
             sample_multiple,
             sample_buffer[0..sample_multiple],
@@ -412,12 +412,12 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
         recording_sample_base_index = sample_index;
     } else if (model.recording_context.state == .recording) {
         const sample_index: u64 = recording_sample_base_index + recording_sample_count;
-        const samples_in_buffer: u64 = model.input_audio_buffer.availableSamplesFrom(sample_index);
+        const samples_in_buffer: u64 = model.source_audio_buffer.availableSamplesFrom(sample_index);
         const overflow: u64 = samples_in_buffer % sample_multiple;
         const samples_to_load: u64 = @min(samples_in_buffer - overflow, sample_multiple * 3);
         assert(samples_to_load % sample_multiple == 0);
 
-        const samples_to_encode = if (samples_to_load > 0) model.input_audio_buffer.samplesCopyIfRequired(
+        const samples_to_encode = if (samples_to_load > 0) model.source_audio_buffer.samplesCopyIfRequired(
             sample_index,
             samples_to_load,
             sample_buffer[0..samples_to_load],
@@ -437,36 +437,36 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
 }
 
 // NOTE: This will be called on a separate thread
-pub fn onAudioInputRead(pcm_buffer: []i16) void {
-    // NOTE: model_mutex is also protecting `last_audio_input_timestamp` here
+pub fn onAudioSourceRead(pcm_buffer: []i16) void {
+    // NOTE: model_mutex is also protecting `last_audio_source_timestamp` here
     model_mutex.lock();
     defer model_mutex.unlock();
-    last_audio_input_timestamp = std.time.nanoTimestamp();
-    model.input_audio_buffer.appendOverwrite(pcm_buffer);
+    last_audio_source_timestamp = std.time.nanoTimestamp();
+    model.source_audio_buffer.appendOverwrite(pcm_buffer);
 }
 
-fn handleAudioInputInitSuccess() void {
+fn handleAudioSourceInitSuccess() void {
     std.log.info("audio input system initialized", .{});
-    audio_input_interface.open(
+    audio_source_interface.open(
         // devices[0].name,
         null,
-        &handleAudioInputOpenSuccess,
-        &handleAudioInputOpenFail,
+        &handleAudioSourceOpenSuccess,
+        &handleAudioSourceOpenFail,
     ) catch |err| {
-        std.log.err("audio_input: Failed to connect to device. Error: {}", .{err});
+        std.log.err("audio_source: Failed to connect to device. Error: {}", .{err});
     };
-    // audio_input_interface.inputList(general_allocator, handleAudioDeviceInputsList);
+    // audio_source_interface.inputList(general_allocator, handleAudioDeviceInputsList);
 }
 
-fn handleAudioInputInitFail(err: audio_input.InitError) void {
+fn handleAudioSourceInitFail(err: audio_source.InitError) void {
     std.log.err("Failed to initialize audio input system. Error: {}", .{err});
 }
 
-fn handleAudioInputOpenSuccess() void {
+fn handleAudioSourceOpenSuccess() void {
     std.log.info("Audio input stream opened", .{});
 }
 
-fn handleAudioInputOpenFail(err: audio_input.OpenError) void {
+fn handleAudioSourceOpenFail(err: audio_source.OpenError) void {
     std.log.err("Failed to open audio input device. Error: {}", .{err});
 }
 

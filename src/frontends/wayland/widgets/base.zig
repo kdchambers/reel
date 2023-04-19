@@ -793,8 +793,8 @@ pub const Checkbox = packed struct(u32) {
 
     pub fn draw(
         self: *@This(),
-        center: geometry.Coordinates2D(f64),
-        radius_pixels: f64,
+        center: geometry.Coordinates2D(f32),
+        radius_pixels: f32,
         screen_scale: ScaleFactor2D(f32),
         color: graphics.RGBA(f32),
         is_checked: bool,
@@ -812,7 +812,7 @@ pub const Checkbox = packed struct(u32) {
         if (is_checked) {
             try graphics.drawCircle(
                 center,
-                radius_pixels / 2,
+                radius_pixels / 2.0,
                 color,
                 screen_scale,
                 face_writer_ref,
@@ -864,6 +864,10 @@ pub const Checkbox = packed struct(u32) {
                 .start_active = false,
             },
         );
+    }
+
+    pub inline fn clicked(self: @This()) bool {
+        return self.state().left_click_press;
     }
 
     pub inline fn state(self: @This()) HoverZoneState {

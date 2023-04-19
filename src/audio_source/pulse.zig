@@ -2,7 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
-const audio = @import("../audio.zig");
+const audio = @import("../audio_source.zig");
 const DynLib = std.DynLib;
 
 pub const StreamDirection = enum(i32) {

@@ -55,7 +55,7 @@ const Font = fontana.Font(.{
 });
 
 const event_system = @import("wayland/event_system.zig");
-const audio = @import("../audio.zig");
+const audio = @import("../audio_source.zig");
 
 const graphics = @import("../graphics.zig");
 const RGBA = graphics.RGBA(f32);
@@ -328,7 +328,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     //
     // TODO: Don't hardcode bin count
     //
-    ui_state.audio_input_mel_bins = allocator.alloc(f32, 64) catch return error.OutOfMemory;
+    ui_state.audio_source_mel_bins = allocator.alloc(f32, 64) catch return error.OutOfMemory;
     zmath.fftInitUnityTable(&audio_utils.unity_table);
 }
 
@@ -680,20 +680,20 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         //
         // Redraw not required, but update widgets
         //
-        const sample_range = model.input_audio_buffer.sampleRange();
+        const sample_range = model.source_audio_buffer.sampleRange();
         const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
         if (sample_range.count >= samples_per_frame) {
             const sample_offset: usize = sample_range.count - samples_per_frame;
             const sample_index = sample_range.base_sample + sample_offset;
             var sample_buffer: [samples_per_frame]f32 = undefined;
-            const samples = model.input_audio_buffer.samplesCopyIfRequired(
+            const samples = model.source_audio_buffer.samplesCopyIfRequired(
                 sample_index,
                 samples_per_frame,
                 &sample_buffer,
             );
             const audio_power_spectrum = audio_utils.samplesToPowerSpectrum(samples);
             const mel_scaled_bins = audio_utils.powerSpectrumToMelScale(audio_power_spectrum, 64);
-            ui_state.audio_input_spectogram.update(mel_scaled_bins[3..], screen_scale) catch unreachable;
+            ui_state.audio_source_spectogram.update(mel_scaled_bins[3..], screen_scale) catch unreachable;
 
             const volume_dbs = audio_utils.powerSpectrumToVolumeDb(audio_power_spectrum);
             ui_state.audio_volume_level.setDecibelLevel(volume_dbs);

@@ -62,8 +62,9 @@ screenshot_format: widgets.Dropdown,
 
 preview_display_selector: widgets.Selector,
 
-enable_preview_checkbox: widgets.Checkbox,
-audio_input_spectogram: widgets.AudioSpectogram,
+enable_webcam_checkbox: widgets.Checkbox,
+
+audio_source_spectogram: widgets.AudioSpectogram,
 audio_volume_level: widgets.AudioVolumeLevelHorizontal,
 
-audio_input_mel_bins: []f32,
+audio_source_mel_bins: []f32,

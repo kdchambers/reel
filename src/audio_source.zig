@@ -3,8 +3,8 @@
 
 const std = @import("std");
 
-pub const backend_pulse = @import("audio/pulse.zig");
-pub const backend_pipewire = @import("audio/pipewire.zig");
+pub const backend_pulse = @import("audio_source/pulse.zig");
+pub const backend_pipewire = @import("audio_source/pipewire.zig");
 
 const Backend = enum {
     alsa,

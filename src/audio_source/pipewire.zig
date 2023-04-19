@@ -5,7 +5,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const DynLib = std.DynLib;
 
-const audio = @import("../audio.zig");
+const audio = @import("../audio_source.zig");
 
 const c = @cImport({
     @cInclude("stdio.h");

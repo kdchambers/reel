@@ -80,8 +80,8 @@ pub const WebcamStream = struct {
 // This defines all state that is relevant to the user interface
 //
 
-input_audio_buffer: AudioSampleRingBuffer,
-audio_input_volume_db: f32,
+source_audio_buffer: AudioSampleRingBuffer,
+audio_source_volume_db: f32,
 desktop_capture_frame: ?VideoFrame,
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,
