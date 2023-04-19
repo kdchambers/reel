@@ -20,21 +20,7 @@ const FaceWriter = graphics.FaceWriter;
 const QuadFace = graphics.QuadFace;
 const TriangleFace = graphics.TriangleFace;
 const RGBA = graphics.RGBA;
-
-const TextWriterInterface = struct {
-    quad_writer: *FaceWriter,
-    pub fn write(
-        self: *@This(),
-        screen_extent: geometry.Extent2D(f32),
-        texture_extent: geometry.Extent2D(f32),
-    ) !void {
-        (try self.quad_writer.create(QuadFace)).* = graphics.quadTextured(
-            screen_extent,
-            texture_extent,
-            .bottom_left,
-        );
-    }
-};
+const TextWriterInterface = graphics.TextWriterInterface;
 
 pub var vertices_buffer_ref: []Vertex = undefined;
 pub var face_writer_ref: *FaceWriter = undefined;

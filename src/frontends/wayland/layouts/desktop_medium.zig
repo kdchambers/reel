@@ -22,21 +22,6 @@ const Extent2D = geometry.Extent2D;
 const Coordinates2D = geometry.Coordinates2D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 
-const TextWriterInterface = struct {
-    quad_writer: *FaceWriter,
-    pub fn write(
-        self: *@This(),
-        screen_extent: Extent2D(f32),
-        texture_extent: Extent2D(f32),
-    ) !void {
-        (try self.quad_writer.create(QuadFace)).* = graphics.quadTextured(
-            screen_extent,
-            texture_extent,
-            .bottom_left,
-        );
-    }
-};
-
 const fontana = @import("fontana");
 const Font = fontana.Font(.{
     .backend = .freetype_harfbuzz,
@@ -58,6 +43,7 @@ const RGBA = graphics.RGBA(f32);
 const RGB = graphics.RGB(f32);
 const QuadFace = graphics.QuadFace;
 const FaceWriter = graphics.FaceWriter;
+const TextWriterInterface = graphics.TextWriterInterface;
 
 var record_button_color_normal = RGBA{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1.0 };
 var record_button_color_hover = RGBA{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
@@ -649,7 +635,7 @@ fn drawSectionRecord(
         const label_text = "Enable webcam";
         const label_text_dimensions = pen.calculateRenderDimensions(label_text);
         const label_margin_left = 10;
-        const label_extent = geometry.Extent2D(f32) {
+        const label_extent = geometry.Extent2D(f32){
             .x = -1.0 + ((margin_left_pixels + (radius_pixels * 2.0) + label_margin_left) * screen_scale.horizontal),
             .y = -1.0 + (((radius_pixels * 2.0) + margin_top_pixels) * screen_scale.vertical),
             .width = (label_text_dimensions.width + 5.0) * screen_scale.horizontal,

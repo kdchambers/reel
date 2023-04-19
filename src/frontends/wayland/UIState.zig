@@ -24,9 +24,9 @@ pub const image_format_labels = [_][]const u8{
 };
 
 pub const tab_headings = [_][]const u8{
-    "RECORD",
-    "SCREENSHOT",
-    "STREAM",
+    "Record",
+    "Screenshot",
+    "Stream",
 };
 
 pub const RegionAnchors = struct {

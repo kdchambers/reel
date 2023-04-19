@@ -378,6 +378,52 @@ pub fn RGBA(comptime BaseType: type) type {
     };
 }
 
+//
+// Default interface for Fontana font
+//
+pub const TextWriterInterface = struct {
+    quad_writer: *FaceWriter,
+    pub fn write(
+        self: *@This(),
+        screen_extent: geometry.Extent2D(f32),
+        texture_extent: geometry.Extent2D(f32),
+    ) !void {
+        //
+        // This seems to *mostly* fix mapped glyph textures being distorted.
+        // One "bad" glyph will cause the rest of the chars that follow it to
+        // also be disorted, so it seems like the coordinates are causing this
+        // issue.
+        //
+        // The fix is to reduce the precision of x,y coordinates to 1/8th of a
+        // pixel at 1920 pixels per line. I'm still seeing some minor issues
+        // in how glyphs are rendered such as bottom parts being faded. That 
+        // might require a separate fix in fontana though.
+        //
+        const max_precision = 1.0 / (1920.0 * 8.0);
+        const truncated_extent = geometry.Extent2D(f32){
+            .x = roundDown(screen_extent.x, max_precision),
+            .y = roundDown(screen_extent.y, max_precision),
+            .width = screen_extent.width,
+            .height = screen_extent.height,
+        };
+        (try self.quad_writer.create(QuadFace)).* = quadTextured(
+            truncated_extent,
+            texture_extent,
+            .bottom_left,
+        );
+    }
+};
+
+inline fn roundDown(value: f32, comptime round_interval: f32) f32 {
+    const rem = @rem(value, round_interval);
+    return if (rem != 0) value - rem else value;
+}
+
+inline fn roundUp(value: f32, comptime round_interval: f32) f32 {
+    const rem = @rem(value, round_interval);
+    return if (rem != 0) value + (round_interval - rem) else value;
+}
+
 pub fn drawCircle(
     center: geometry.Coordinates2D(f32),
     radius_pixels: f32,
