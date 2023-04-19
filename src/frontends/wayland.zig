@@ -80,6 +80,8 @@ const RequestEncoder = @import("../RequestEncoder.zig");
 
 var ui_state: UIState = undefined;
 
+var cached_webcam_enabled: bool = false;
+
 var loaded_cursor: enum {
     normal,
     pointer,
@@ -308,7 +310,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_quality.labels = &UIState.quality_labels;
     ui_state.record_quality.selected_index = 0;
 
-    ui_state.enable_preview_checkbox = try Checkbox.create();
+    ui_state.enable_webcam_checkbox = try Checkbox.create();
 
     const display_label_list = wayland_core.display_list.items;
     ui_state.preview_display_selector = Selector.create(display_label_list);
@@ -335,6 +337,16 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
     if (model.recording_context.state != last_recording_state) {
         last_recording_state = model.recording_context.state;
+        is_draw_required = true;
+    }
+
+    //
+    // TODO: A hack until app_core has a proper way of communicating changes with
+    //       frontend
+    //
+    if (cached_webcam_enabled != model.webcam_stream.enabled()) {
+        cached_webcam_enabled = !cached_webcam_enabled;
+        assert(cached_webcam_enabled == model.webcam_stream.enabled());
         is_draw_required = true;
     }
 
@@ -550,6 +562,13 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         }
     }
 
+    if (ui_state.enable_webcam_checkbox.clicked()) {
+        if (model.webcam_stream.enabled())
+            request_encoder.write(.webcam_disable) catch unreachable
+        else
+            request_encoder.write(.webcam_enable) catch unreachable;
+    }
+
     const action_tab_update = ui_state.action_tab.update();
     if (action_tab_update.tab_changed) {
         _ = ui_state.record_button.state();
@@ -756,6 +775,8 @@ fn initWaylandClient() !void {
 
     xdg_toplevel = try xdg_surface.getToplevel();
     xdg_toplevel.setListener(*bool, xdgToplevelListener, &is_shutdown_requested);
+
+    xdg_toplevel.setTitle("Reel");
 
     var toplevel_decoration: *zxdg.ToplevelDecorationV1 = undefined;
     if (wayland_core.window_decorations_opt) |window_decorations| {

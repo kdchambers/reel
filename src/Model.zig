@@ -70,6 +70,10 @@ pub const WebcamStream = struct {
     dimensions: geometry.Dimensions2D(u32),
     last_frame_index: u64,
     last_frame: [*]graphics.RGBA(u8),
+
+    pub inline fn enabled(self: @This()) bool {
+        return self.last_frame_index != std.math.maxInt(u64);
+    }
 };
 
 //

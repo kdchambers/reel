@@ -33,6 +33,9 @@ pub const Request = enum(u8) {
     record_quality_set,
     record_format_set,
 
+    webcam_enable,
+    webcam_disable,
+
     screenshot_format_set,
     screenshot_region_set,
     screenshot_display_set,
@@ -81,12 +84,9 @@ var model: Model = .{
     },
     .screenshot_format = .png,
     .webcam_stream = .{
-        .dimensions = .{
-            .width = 640,
-            .height = 480,
-        },
+        .dimensions = .{ .width = 640, .height = 480 },
         .last_frame = undefined,
-        .last_frame_index = 0,
+        .last_frame_index = std.math.maxInt(u64),
     },
     .combined_frame = null,
 };
@@ -169,18 +169,6 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         &handleAudioInputInitSuccess,
         &handleAudioInputInitFail,
     ) catch return error.AudioInputInitFail;
-
-    const pixels_count: usize = model.webcam_stream.dimensions.width * model.webcam_stream.dimensions.height;
-    model.webcam_stream.last_frame = (try gpa.alloc(graphics.RGBA(u8), pixels_count)).ptr;
-
-    webcam_opt = WebcamStream.create("/dev/video0", model.webcam_stream.dimensions) catch |err| blk: {
-        std.log.warn("Failed to connect to a webcam stream. Error: {}", .{err});
-        break :blk null;
-    };
-
-    if (webcam_opt) |webcam| {
-        model.webcam_stream.dimensions = webcam.dimensions();
-    }
 }
 
 pub fn run() !void {
@@ -266,6 +254,45 @@ pub fn run() !void {
                     model.recording_context.quality = @intToEnum(Model.VideoQuality, quality_index);
                     std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.quality)});
                 },
+                .webcam_disable => {
+                    if (model.webcam_stream.enabled()) {
+                        webcam_opt.?.deinit() catch assert(false);
+                        webcam_opt = null;
+                        const pixels_count: usize = model.webcam_stream.dimensions.width * model.webcam_stream.dimensions.height;
+                        gpa.free(model.webcam_stream.last_frame[0..pixels_count]);
+                        gpa.free(model.combined_frame.?);
+                        model.combined_frame = null;
+                        model.webcam_stream.last_frame_index = std.math.maxInt(u64);
+                        assert(!model.webcam_stream.enabled());
+                        std.log.info("Webcam: disabled", .{});
+                    } else assert(false);
+                },
+                .webcam_enable => {
+                    if (screencapture_stream == null) {
+                        std.log.err("Webcam cannot be enabled without screencapture stream", .{});
+                        continue :request_loop;
+                    }
+                    if (!model.webcam_stream.enabled()) {
+                        const pixels_count: usize = model.webcam_stream.dimensions.width * model.webcam_stream.dimensions.height;
+                        model.webcam_stream.last_frame = (try gpa.alloc(graphics.RGBA(u8), pixels_count)).ptr;
+                        webcam_opt = WebcamStream.create("/dev/video0", model.webcam_stream.dimensions) catch |err| blk: {
+                            std.log.warn("Failed to connect to a webcam stream. Error: {}", .{err});
+                            break :blk null;
+                        };
+                        if (webcam_opt) |webcam| {
+                            model.webcam_stream.dimensions = webcam.dimensions();
+                            model.webcam_stream.last_frame_index = 0;
+                            if (model.combined_frame == null) {
+                                const pixels_per_frame = screencapture_stream.?.dimensions.width * screencapture_stream.?.dimensions.height;
+                                model.combined_frame = gpa.alloc(graphics.RGBA(u8), pixels_per_frame) catch {
+                                    std.log.err("Out of memory", .{});
+                                    break :app_loop;
+                                };
+                            }
+                        } else continue :request_loop;
+                        std.log.info("Webcam: enabled", .{});
+                    } else assert(false);
+                },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
@@ -319,7 +346,7 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
     };
 
     const video_frame_to_encode: [*]const graphics.RGBA(u8) = blk: {
-        if (model.webcam_stream.last_frame_index == 0)
+        if (!model.webcam_stream.enabled())
             break :blk pixels;
 
         const combined_frame = model.combined_frame orelse {
@@ -449,23 +476,6 @@ fn handleAudioInputOpenFail(err: audio_input.OpenError) void {
 
 fn openStreamSuccessCallback(opened_stream: screencapture.StreamInterface) void {
     screencapture_stream = opened_stream;
-
-    const pixels_per_frame: usize = opened_stream.dimensions.width * opened_stream.dimensions.height;
-
-    if (model.combined_frame) |combined_frame| {
-        std.log.warn("Deallocting combined frame", .{});
-        gpa.free(combined_frame);
-        std.debug.assert(false);
-    }
-
-    model.combined_frame = gpa.alloc(graphics.RGBA(u8), pixels_per_frame) catch {
-        //
-        // TODO: You need a way to communicate with the main thread
-        //
-        std.log.err("Allocation failure", .{});
-        std.process.exit(1);
-        return;
-    };
 }
 
 fn openStreamErrorCallback() void {
