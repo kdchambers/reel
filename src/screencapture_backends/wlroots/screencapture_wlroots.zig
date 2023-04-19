@@ -138,6 +138,10 @@ pub fn openStream(
         .pause = streamPause,
         .close = streamClose,
         .state = streamState,
+        .dimensions = .{
+            .width = display_info.width,
+            .height = display_info.height,
+        },
     });
 }
 

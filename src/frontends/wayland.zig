@@ -346,13 +346,14 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
     }
 
     if (model.desktop_capture_frame) |captured_frame| {
+        const pixel_buffer: [*]const graphics.RGBA(u8) = if (model.combined_frame) |*frame| frame.ptr else captured_frame.pixels;
         renderer.video_stream_enabled = true;
         if (last_preview_frame != captured_frame.index) {
             var video_frame = renderer.videoFrame();
             {
                 const src_width = captured_frame.dimensions.width;
                 const src_height = captured_frame.dimensions.height;
-                var src_pixels = captured_frame.pixels;
+                var src_pixels = pixel_buffer;
                 var y: usize = 0;
                 var src_index: usize = 0;
                 var dst_index: usize = 0;
@@ -363,28 +364,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                         src_width * @sizeOf(graphics.RGBA(u8)),
                     );
                     src_index += src_width;
-                    dst_index += video_frame.width;
-                }
-            }
-
-            if (model.webcam_stream.last_frame_index > 0) {
-                const webcam_stream = model.webcam_stream;
-                const dimensions = webcam_stream.dimensions;
-                const src_frame = webcam_stream.last_frame;
-                assert(video_frame.width >= dimensions.width);
-                assert(video_frame.height >= dimensions.height);
-                const dst_offset_x: usize = captured_frame.dimensions.width - dimensions.width;
-                const dst_offset_y: usize = captured_frame.dimensions.height - dimensions.height;
-                var y_count: usize = dst_offset_y;
-                var dst_index: usize = (dst_offset_y * video_frame.width) + dst_offset_x;
-                var src_index: usize = 0;
-                while (y_count < captured_frame.dimensions.height) : (y_count += 1) {
-                    std.mem.copy(
-                        graphics.RGBA(u8),
-                        video_frame.pixels[dst_index .. dst_index + dimensions.width],
-                        src_frame[src_index .. src_index + dimensions.width],
-                    );
-                    src_index += dimensions.width;
                     dst_index += video_frame.width;
                 }
             }

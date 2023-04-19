@@ -89,6 +89,7 @@ var model: Model = .{
         .last_frame = undefined,
         .last_frame_index = 0,
     },
+    .combined_frame = null,
 };
 
 var model_mutex: std.Thread.Mutex = .{};
@@ -314,6 +315,48 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
         .pixels = pixels,
     };
 
+    const video_frame_to_encode: [*]const graphics.RGBA(u8) = blk: {
+        if (model.webcam_stream.last_frame_index == 0)
+            break :blk pixels;
+
+        const combined_frame = model.combined_frame orelse {
+            std.log.err("combined_frame hasn't been allocated. Webcam won't be recorded", .{});
+            break :blk pixels;
+        };
+
+        //
+        // We have to copy everything to a new buffer so that we can overlay the webcam
+        // This is a bit unfortunate from a performance perspective and perhaps could be
+        // omitted. However, it's better from a design perspective and I can optimize later
+        //
+        const pixel_count: usize = width * height;
+        std.mem.copy(
+            graphics.RGBA(u8),
+            combined_frame,
+            pixels[0..pixel_count],
+        );
+        const webcam_stream = model.webcam_stream;
+        const dimensions = webcam_stream.dimensions;
+        const src_frame = webcam_stream.last_frame;
+        assert(width >= webcam_stream.dimensions.width);
+        assert(height >= webcam_stream.dimensions.height);
+        const dst_offset_x: usize = width - webcam_stream.dimensions.width;
+        const dst_offset_y: usize = height - webcam_stream.dimensions.height;
+        var y_count: usize = dst_offset_y;
+        var dst_index: usize = (dst_offset_y * width) + dst_offset_x;
+        var src_index: usize = 0;
+        while (y_count < height) : (y_count += 1) {
+            std.mem.copy(
+                graphics.RGBA(u8),
+                combined_frame[dst_index .. dst_index + dimensions.width],
+                src_frame[src_index .. src_index + dimensions.width],
+            );
+            src_index += webcam_stream.dimensions.width;
+            dst_index += width;
+        }
+        break :blk combined_frame.ptr;
+    };
+
     if (screencapture_start == null)
         screencapture_start = std.time.nanoTimestamp();
 
@@ -332,7 +375,7 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
             sample_buffer[0..sample_multiple],
         );
 
-        video_encoder.write(pixels, samples_for_frame, 0) catch unreachable;
+        video_encoder.write(video_frame_to_encode, samples_for_frame, 0) catch unreachable;
 
         recording_frame_index_base = frame_index;
         recording_sample_count = sample_multiple;
@@ -351,7 +394,7 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
         ) else &[0]f32{};
 
         const recording_frame_index: u64 = frame_index - recording_frame_index_base;
-        video_encoder.write(pixels, samples_to_encode, recording_frame_index) catch |err| {
+        video_encoder.write(video_frame_to_encode, samples_to_encode, recording_frame_index) catch |err| {
             std.log.warn("Failed to write video frame. Error: {}", .{err});
         };
 
@@ -403,6 +446,23 @@ fn handleAudioInputOpenFail(err: audio_input.OpenError) void {
 
 fn openStreamSuccessCallback(opened_stream: screencapture.StreamInterface) void {
     screencapture_stream = opened_stream;
+
+    const pixels_per_frame: usize = opened_stream.dimensions.width * opened_stream.dimensions.height;
+
+    if (model.combined_frame) |combined_frame| {
+        std.log.warn("Deallocting combined frame", .{});
+        gpa.free(combined_frame);
+        std.debug.assert(false);
+    }
+
+    model.combined_frame = gpa.alloc(graphics.RGBA(u8), pixels_per_frame) catch {
+        //
+        // TODO: You need a way to communicate with the main thread
+        //
+        std.log.err("Allocation failure", .{});
+        std.process.exit(1);
+        return;
+    };
 }
 
 fn openStreamErrorCallback() void {

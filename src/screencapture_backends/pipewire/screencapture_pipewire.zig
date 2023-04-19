@@ -1249,6 +1249,10 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod)
             .pause = streamPause,
             .close = streamClose,
             .state = streamState,
+            .dimensions = .{
+                .width = stream_format.width,
+                .height = stream_format.height,
+            },
         });
     }
 }

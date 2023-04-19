@@ -565,10 +565,10 @@ fn encodeFrame(frame: ?*libav.Frame) !void {
             return error.ReceivePacketFailed;
         }
 
-        std.log.info("Writing video packet. Pts: {d} {d}", .{
-            packet.pts,
-            @intToFloat(f32, packet.pts) / 60.0,
-        });
+        // std.log.info("Writing video packet. Pts: {d} {d}", .{
+        //     packet.pts,
+        //     @intToFloat(f32, packet.pts) / 60.0,
+        // });
 
         //
         // Finish Frame

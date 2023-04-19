@@ -85,6 +85,8 @@ pub const StreamInterface = struct {
     pause: *const PauseFn,
     close: *const CloseFn,
     state: *const StateFn,
+
+    dimensions: geometry.Dimensions2D(u32),
 };
 
 pub const Interface = struct {
