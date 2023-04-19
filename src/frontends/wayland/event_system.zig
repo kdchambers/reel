@@ -243,11 +243,18 @@ pub fn addMouseEvent(
     return state_index;
 }
 
-pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
+const MouseMovementUpdate = packed struct(u16) {
+    hover_enter: bool = false,
+    hover_exit: bool = false,
+    reserved: u14 = 0,
+};
+
+pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) MouseMovementUpdate {
+    var result: MouseMovementUpdate = .{};
     if (blocking_events_count > 0) {
         for (blocking_events_buffer[0..blocking_events_count]) |*entry| {
             if (!entry.hover_enabled)
-                return;
+                return result;
             const extent: geometry.Extent2D(f32) = entry.extent.get();
             const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
                 position.y <= extent.y and position.y >= (extent.y - extent.height));
@@ -257,15 +264,17 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
                 //
                 entry.hover_active = true;
                 entry.state.getPtr().hover_enter = true;
+                result.hover_enter = true;
             } else if (!is_within_extent and entry.hover_active) {
                 //
                 // We're leaving an active hover zone
                 //
                 entry.hover_active = false;
                 entry.state.getPtr().hover_exit = true;
+                result.hover_exit = true;
             }
         }
-        return;
+        return result;
     }
 
     var buffer_i: usize = 0;
@@ -284,16 +293,19 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) void {
                     //
                     entry.hover_active = true;
                     entry.state.getPtr().hover_enter = true;
+                    result.hover_enter = true;
                 } else if (!is_within_extent and entry.hover_active) {
                     //
                     // We're leaving an active hover zone
                     //
                     entry.hover_active = false;
                     entry.state.getPtr().hover_exit = true;
+                    result.hover_exit = true;
                 }
             }
         }
     }
+    return result;
 }
 
 pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: MouseButton, button_action: wl.Pointer.ButtonState) void {

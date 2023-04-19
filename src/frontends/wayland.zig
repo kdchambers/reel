@@ -19,7 +19,6 @@ const zxdg = wayland.client.zxdg;
 var cursor_theme: *wl.CursorTheme = undefined;
 var cursor: *wl.Cursor = undefined;
 var cursor_surface: *wl.Surface = undefined;
-var xcursor: [:0]const u8 = undefined;
 
 // Called every time the compositor is ready to accept a new frame
 var frame_callback: *wl.Callback = undefined;
@@ -81,12 +80,27 @@ const RequestEncoder = @import("../RequestEncoder.zig");
 
 var ui_state: UIState = undefined;
 
+var loaded_cursor: enum {
+    normal,
+    pointer,
+} = .normal;
+
 const XCursor = struct {
+    const arrow = "arrow";
     const hidden = "hidden";
     const left_ptr = "left_ptr";
     const text = "text";
     const xterm = "xterm";
+    const hand = "hand";
+    const link = "link";
+    const hand1 = "hand1";
     const hand2 = "hand2";
+    const move = "move";
+    const fleur = "fleur";
+    const grabbing = "grabbing";
+    const pointer = "pointer";
+    const openhand = "openhand";
+    const pointer_move = "pointer-move";
     const top_left_corner = "top_left_corner";
     const top_right_corner = "top_right_corner";
     const bottom_left_corner = "bottom_left_corner";
@@ -576,7 +590,37 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
     if (is_mouse_moved) {
         is_mouse_moved = false;
-        event_system.handleMouseMovement(&mouse_position);
+        const changes = event_system.handleMouseMovement(&mouse_position);
+        update_cursor: {
+            if (changes.hover_enter and loaded_cursor != .pointer) {
+                cursor = cursor_theme.getCursor(XCursor.pointer) orelse blk: {
+                    break :blk cursor_theme.getCursor(XCursor.hand1) orelse {
+                        std.log.info("Failed to load a cursor image for pointing", .{});
+                        break :update_cursor;
+                    };
+                };
+                const image = cursor.images[0];
+                const image_buffer = image.getBuffer() catch {
+                    std.log.warn("Failed to get cursor image buffer", .{});
+                    break :update_cursor;
+                };
+                cursor_surface.attach(image_buffer, 0, 0);
+                cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
+                cursor_surface.commit();
+                loaded_cursor = .pointer;
+            } else if (changes.hover_exit and loaded_cursor != .normal) {
+                cursor = cursor_theme.getCursor(XCursor.left_ptr).?;
+                const image = cursor.images[0];
+                const image_buffer = image.getBuffer() catch {
+                    std.log.warn("Failed to get cursor image buffer", .{});
+                    break :update_cursor;
+                };
+                cursor_surface.attach(image_buffer, 0, 0);
+                cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
+                cursor_surface.commit();
+                loaded_cursor = .normal;
+            }
+        }
     }
 
     if (is_draw_required) {
@@ -736,9 +780,12 @@ fn initWaylandClient() !void {
     cursor_surface = try wayland_core.compositor.createSurface();
 
     const cursor_size = 24;
-    cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_core.shared_memory);
+    cursor_theme = wl.CursorTheme.load("Adwaita", cursor_size, wayland_core.shared_memory) catch blk: {
+        break :blk wl.CursorTheme.load(null, cursor_size, wayland_core.shared_memory) catch {
+            return error.LoadCursorFail;
+        };
+    };
     cursor = cursor_theme.getCursor(XCursor.left_ptr).?;
-    xcursor = XCursor.left_ptr;
 }
 
 fn toplevelDecorationListener(_: *zxdg.ToplevelDecorationV1, event: zxdg.ToplevelDecorationV1.Event, _: *const void) void {
