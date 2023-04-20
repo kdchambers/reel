@@ -2,8 +2,22 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
-const audio = @import("../audio_source.zig");
+const assert = std.debug.assert;
 const DynLib = std.DynLib;
+
+const root = @import("../audio_source.zig");
+const InitSuccessCallbackFn = root.InitSuccessCallbackFn;
+const InitFailCallbackFn = root.InitFailCallbackFn;
+const OpenFailCallbackFn = root.OpenFailCallbackFn;
+const OpenSuccessCallbackFn = root.OpenSuccessCallbackFn;
+const State = root.State;
+const ListReadyCallbackFn = root.ListReadyCallbackFn;
+const SourceInfo = root.SourceInfo;
+const SamplesReadyCallbackFn = root.SamplesReadyCallbackFn;
+const StreamState = root.StreamState;
+const StreamHandle = root.StreamHandle;
+const CreateStreamSuccessCallbackFn = root.CreateStreamSuccessCallbackFn;
+const CreateStreamFailCallbackFn = root.CreateStreamFailCallbackFn;
 
 pub const StreamDirection = enum(i32) {
     no_direction = 0,
@@ -15,20 +29,61 @@ pub const StreamDirection = enum(i32) {
 pub const InitErrors = error{
     LibraryNotAvailable,
     LookupFailed,
-    PulseConnectServerFail,
     PulseThreadedLoopStartFail,
     PulseThreadedLoopCreateFail,
     PulseThreadedLoopGetApiFail,
     PulseContextCreateFail,
     PulseContextStartFail,
+    PulseConnectServerFail,
 };
 
-pub const OpenErrors = error{
+pub const CreateStreamError = error{
+    MaxStreamCountReached,
+    InvalidSourceIndex,
+    //
+    // Pulse Specific
+    //
     PulseStreamCreateFail,
-    PulseStreamStartFail,
     PulseStreamConnectFail,
-    InvalidInputDeviceName,
+    PulseStreamStartFail,
 };
+
+const max_concurrent_streams = 4;
+const max_source_count = 16;
+
+var pulse_thread_loop: *pa_threaded_mainloop = undefined;
+var pulse_loop_api: *pa_mainloop_api = undefined;
+var pulse_context: *pa_context = undefined;
+
+const Stream = struct {
+    samplesReadyCallback: *const SamplesReadyCallbackFn = undefined,
+    pulse_stream: *pa_stream = undefined,
+    state: StreamState = .closed,
+};
+
+var handles: DynamicHandles = undefined;
+var backend_state: State = .closed;
+var library_handle_opt: ?DynLib = null;
+
+var stream_buffer = [1]Stream{.{}} ** max_concurrent_streams;
+
+var active_callbacks: union {
+    init: struct {
+        onSuccess: *const InitSuccessCallbackFn,
+        onFail: *const InitFailCallbackFn,
+    },
+    create_stream: struct {
+        onSuccess: *const CreateStreamSuccessCallbackFn,
+        onFail: *const CreateStreamFailCallbackFn,
+    },
+} = undefined;
+
+var sourceListReadyCallback: ?*const ListReadyCallbackFn = null;
+
+var list_sources_allocator: std.mem.Allocator = undefined;
+
+var source_buffer: [max_source_count]SourceInfo = undefined;
+var source_count: u32 = 0;
 
 pub fn isSupported() bool {
     if (library_handle_opt == null) {
@@ -37,54 +92,423 @@ pub fn isSupported() bool {
     return true;
 }
 
-var stream_state: audio.State = .closed;
-
-var onReadSamplesCallback: *const audio.OnReadSamplesFn = undefined;
-
-var onInitFailCallback: *const audio.InitFailCallbackFn = undefined;
-var onInitSuccessCallback: *const audio.InitSuccessCallbackFn = undefined;
-
-var onOpenFailCallback: *const audio.OpenFailCallbackFn = undefined;
-var onOpenSuccessCallback: *const audio.OpenSuccessCallbackFn = undefined;
-
-var library_handle_opt: ?DynLib = null;
-
-pub fn createInterface(read_samples_callback: *const audio.OnReadSamplesFn) audio.Interface {
-    onReadSamplesCallback = read_samples_callback;
+pub fn interface() root.Interface {
     return .{
         .init = &init,
-        .open = &open,
-        .close = &close,
-        .state = &state,
-        .inputList = &inputList,
+        .deinit = &deinit,
+        .listSources = &listSources,
+        .createStream = &createStream,
+        .streamStart = &streamStart,
+        .streamPause = &streamPause,
+        .streamClose = &streamClose,
+        .streamState = &streamState,
     };
 }
 
-fn state() audio.State {
-    return stream_state;
+pub fn init(
+    onSuccess: *const InitSuccessCallbackFn,
+    onFail: *const InitFailCallbackFn,
+) InitErrors!void {
+    assert(backend_state == .closed);
+
+    active_callbacks = .{ .init = .{
+        .onSuccess = onSuccess,
+        .onFail = onFail,
+    } };
+
+    var library_handle = library_handle_opt orelse DynLib.open("libpulse.so") catch return error.LibraryNotAvailable;
+
+    handles.threaded_mainloop_new = library_handle.lookup(@TypeOf(handles.threaded_mainloop_new), "pa_threaded_mainloop_new") orelse
+        return error.LookupFailed;
+    handles.threaded_mainloop_get_api = library_handle.lookup(@TypeOf(handles.threaded_mainloop_get_api), "pa_threaded_mainloop_get_api") orelse
+        return error.LookupFailed;
+    handles.threaded_mainloop_start = library_handle.lookup(@TypeOf(handles.threaded_mainloop_start), "pa_threaded_mainloop_start") orelse
+        return error.LookupFailed;
+    handles.threaded_mainloop_free = library_handle.lookup(@TypeOf(handles.threaded_mainloop_free), "pa_threaded_mainloop_free") orelse
+        return error.LookupFailed;
+    handles.threaded_mainloop_stop = library_handle.lookup(@TypeOf(handles.threaded_mainloop_stop), "pa_threaded_mainloop_stop") orelse
+        return error.LookupFailed;
+    handles.threaded_mainloop_unlock = library_handle.lookup(@TypeOf(handles.threaded_mainloop_unlock), "pa_threaded_mainloop_unlock") orelse
+        return error.LookupFailed;
+    handles.threaded_mainloop_lock = library_handle.lookup(@TypeOf(handles.threaded_mainloop_lock), "pa_threaded_mainloop_lock") orelse
+        return error.LookupFailed;
+    handles.threaded_mainloop_wait = library_handle.lookup(@TypeOf(handles.threaded_mainloop_wait), "pa_threaded_mainloop_wait") orelse
+        return error.LookupFailed;
+
+    handles.context_new = library_handle.lookup(@TypeOf(handles.context_new), "pa_context_new") orelse
+        return error.LookupFailed;
+    handles.context_new_with_proplist = library_handle.lookup(@TypeOf(handles.context_new_with_proplist), "pa_context_new_with_proplist") orelse
+        return error.LookupFailed;
+    handles.context_connect = library_handle.lookup(@TypeOf(handles.context_connect), "pa_context_connect") orelse
+        return error.LookupFailed;
+    handles.context_disconnect = library_handle.lookup(@TypeOf(handles.context_disconnect), "pa_context_disconnect") orelse
+        return error.LookupFailed;
+    handles.context_unref = library_handle.lookup(@TypeOf(handles.context_unref), "pa_context_unref") orelse
+        return error.LookupFailed;
+    handles.context_set_state_callback = library_handle.lookup(@TypeOf(handles.context_set_state_callback), "pa_context_set_state_callback") orelse
+        return error.LookupFailed;
+    handles.context_get_state = library_handle.lookup(@TypeOf(handles.context_get_state), "pa_context_get_state") orelse
+        return error.LookupFailed;
+    handles.context_get_sink_info_list = library_handle.lookup(@TypeOf(handles.context_get_sink_info_list), "pa_context_get_sink_info_list") orelse
+        return error.LookupFailed;
+    handles.context_get_source_info_list = library_handle.lookup(@TypeOf(handles.context_get_source_info_list), "pa_context_get_source_info_list") orelse
+        return error.LookupFailed;
+    handles.context_get_card_info_list = library_handle.lookup(@TypeOf(handles.context_get_card_info_list), "pa_context_get_card_info_list") orelse
+        return error.LookupFailed;
+    handles.context_get_source_info_by_index = library_handle.lookup(@TypeOf(handles.context_get_source_info_by_index), "pa_context_get_source_info_by_index") orelse
+        return error.LookupFailed;
+
+    handles.stream_new = library_handle.lookup(@TypeOf(handles.stream_new), "pa_stream_new") orelse
+        return error.LookupFailed;
+    handles.stream_set_read_callback = library_handle.lookup(@TypeOf(handles.stream_set_read_callback), "pa_stream_set_read_callback") orelse
+        return error.LookupFailed;
+    handles.stream_peek = library_handle.lookup(@TypeOf(handles.stream_peek), "pa_stream_peek") orelse
+        return error.LookupFailed;
+    handles.stream_drop = library_handle.lookup(@TypeOf(handles.stream_drop), "pa_stream_drop") orelse
+        return error.LookupFailed;
+    handles.stream_get_state = library_handle.lookup(@TypeOf(handles.stream_get_state), "pa_stream_get_state") orelse
+        return error.LookupFailed;
+    handles.stream_set_state_callback = library_handle.lookup(@TypeOf(handles.stream_set_state_callback), "pa_stream_set_state_callback") orelse
+        return error.LookupFailed;
+    handles.stream_connect_record = library_handle.lookup(@TypeOf(handles.stream_connect_record), "pa_stream_connect_record") orelse
+        return error.LookupFailed;
+    handles.stream_unref = library_handle.lookup(@TypeOf(handles.stream_unref), "pa_stream_unref") orelse
+        return error.LookupFailed;
+    handles.stream_get_sample_spec = library_handle.lookup(@TypeOf(handles.stream_get_sample_spec), "pa_stream_get_sample_spec") orelse
+        return error.LookupFailed;
+    handles.stream_get_channel_map = library_handle.lookup(@TypeOf(handles.stream_get_channel_map), "pa_stream_get_channel_map") orelse
+        return error.LookupFailed;
+    handles.stream_get_device_name = library_handle.lookup(@TypeOf(handles.stream_get_device_name), "pa_stream_get_device_name") orelse
+        return error.LookupFailed;
+    handles.stream_get_device_index = library_handle.lookup(@TypeOf(handles.stream_get_device_index), "pa_stream_get_device_index") orelse
+        return error.LookupFailed;
+
+    pulse_thread_loop = handles.threaded_mainloop_new() orelse
+        return error.PulseThreadedLoopCreateFail;
+    pulse_loop_api = handles.threaded_mainloop_get_api(pulse_thread_loop) orelse
+        return error.PulseThreadedLoopGetApiFail;
+    pulse_context = handles.context_new(pulse_loop_api, "Reel") orelse
+        return error.PulseContextCreateFail;
+    if (handles.context_connect(pulse_context, null, .{}, null) < 0) {
+        return error.PulseConnectServerFail;
+    }
+
+    backend_state = .initializating;
+
+    handles.context_set_state_callback(pulse_context, onContextStateChangedCallback, null);
+
+    if (handles.threaded_mainloop_start(pulse_thread_loop) != 0) {
+        return error.PulseThreadedLoopStartFail;
+    }
 }
 
-var inputListCallbackFn: *const audio.InputListCallbackFn = undefined;
-var input_list_allocator: std.mem.Allocator = undefined;
+pub fn deinit() void {
+    for (stream_buffer) |stream| {
+        if (stream.state == .paused or stream.state == .running) {
+            //
+            // TODO: Don't just unref, disconnect, etc
+            //
+            handles.stream_unref(stream.pulse_stream);
+        }
+    }
 
-var input_devices: [32]audio.InputDeviceInfo = undefined;
-var input_device_count: u32 = 0;
+    handles.context_disconnect(pulse_context);
+    handles.context_unref(pulse_context);
+    handles.threaded_mainloop_stop(pulse_thread_loop);
+    handles.threaded_mainloop_free(pulse_thread_loop);
 
-fn inputList(allocator: std.mem.Allocator, callback: *const audio.InputListCallbackFn) void {
-    inputListCallbackFn = callback;
-    input_list_allocator = allocator;
-    std.debug.assert(stream_state == .initialized or stream_state == .open);
+    for (source_buffer[0..source_count]) |source_info| {
+        list_sources_allocator.free(std.mem.span(source_info.name));
+        list_sources_allocator.free(std.mem.span(source_info.description));
+    }
+}
+
+fn state() State {
+    return backend_state;
+}
+
+fn listSources(allocator: std.mem.Allocator, listReadyCallback: *const ListReadyCallbackFn) void {
+    assert(backend_state == .initialized);
+    if (source_count > 0) {
+        //
+        // We've already stored the list, just return it
+        //
+        listReadyCallback(source_buffer[0..source_count]);
+    } else {
+        list_sources_allocator = allocator;
+        sourceListReadyCallback = listReadyCallback;
+        _ = handles.context_get_source_info_list(pulse_context, handleSourceInfo, null);
+    }
+}
+
+pub fn createStream(
+    source_index_opt: ?u32,
+    samplesReadyCallback: *const SamplesReadyCallbackFn,
+    onSuccess: *const CreateStreamSuccessCallbackFn,
+    onFail: *const CreateStreamFailCallbackFn,
+) CreateStreamError!void {
+    assert(backend_state == .initialized);
+
+    active_callbacks = .{ .create_stream = .{
+        .onSuccess = onSuccess,
+        .onFail = onFail,
+    } };
+
+    var stream_ptr: *Stream = blk: {
+        for (&stream_buffer) |*stream| {
+            if (stream.state == .closed) {
+                stream.samplesReadyCallback = samplesReadyCallback;
+                stream.state = .initializating;
+                break :blk stream;
+            }
+        }
+        return error.MaxStreamCountReached;
+    };
+
+    handles.threaded_mainloop_lock(pulse_thread_loop);
+
+    const pulse_stream = handles.stream_new(pulse_context, "Audio Input", &_sample_spec, null) orelse
+        return error.PulseStreamCreateFail;
+
+    stream_ptr.*.pulse_stream = pulse_stream;
+
+    handles.stream_set_state_callback(pulse_stream, onStreamStateCallback, stream_ptr);
+    handles.stream_set_read_callback(pulse_stream, streamReadCallback, stream_ptr);
+
+    const target_fps = 30;
+    const bytes_per_sample = 2 * @sizeOf(i16);
+    const bytes_per_second = 44100 * bytes_per_sample;
+    const buffer_size: u32 = @divExact(bytes_per_second, target_fps);
+
+    const flags: StreamFlags = .{};
+    const buffer_attributes = BufferAttr{
+        .max_length = std.math.maxInt(u32),
+        .tlength = std.math.maxInt(u32),
+        .minreq = std.math.maxInt(u32),
+        .prebuf = buffer_size,
+        .fragsize = buffer_size,
+    };
 
     //
-    // We've already stored the list, just return it
+    // If using `source_index_opt`, it's required that listSources has already
+    // been called. Otherwise it's not possible to know what it would refer to.
     //
-    if (input_device_count > 0) {
-        inputListCallbackFn(input_devices[0..input_device_count]);
+    if (source_index_opt) |source_index|
+        assert(source_index < source_count);
+
+    const source_name = if (source_index_opt) |source_index| source_buffer[source_index].name else null;
+
+    std.log.info("audio_input_pulse: Connecting to device \"{s}\"", .{source_name orelse "default"});
+    if (handles.stream_connect_record(pulse_stream, source_name, &buffer_attributes, flags) != 0) {
+        return error.PulseStreamConnectFail;
+    }
+
+    handles.threaded_mainloop_unlock(pulse_thread_loop);
+}
+
+fn streamStart(stream: StreamHandle) void {
+    assert(stream.index < max_concurrent_streams);
+    assert(stream_buffer[stream.index].state == .paused);
+    stream_buffer[stream.index].state = .running;
+}
+
+fn streamPause(stream: StreamHandle) void {
+    assert(stream.index < max_concurrent_streams);
+    assert(stream_buffer[stream.index].state == .running);
+    stream_buffer[stream.index].state = .paused;
+}
+
+fn streamClose(stream: StreamHandle) void {
+    assert(stream.index < max_concurrent_streams);
+    handles.stream_unref(stream_buffer[stream.index].pulse_stream);
+    stream_buffer[stream.index].state = .closed;
+    assert(stream_buffer[stream.index].state == .closed);
+}
+
+fn streamState(stream: StreamHandle) StreamState {
+    assert(stream.index < max_concurrent_streams);
+    return stream_buffer[stream.index].state;
+}
+
+fn onStreamStateCallback(pulse_stream: *pa_stream, userdata: ?*anyopaque) callconv(.C) void {
+    const stream = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
+    switch (handles.stream_get_state(pulse_stream)) {
+        .creating => assert(stream.state == .initializating),
+        .ready => {
+            assert(stream.state == .initializating);
+            const sample_spec = handles.stream_get_sample_spec(pulse_stream);
+            const channel_map = handles.stream_get_channel_map(pulse_stream);
+            assert(sample_spec.channels == channel_map.channels);
+            std.log.info("Audio input stream channels: {d} {s} {s}", .{
+                channel_map.channels,
+                @tagName(channel_map.map[0]),
+                @tagName(channel_map.map[1]),
+            });
+
+            stream.state = .paused;
+            active_callbacks.create_stream.onSuccess(.{
+                //
+                // Calculate the index based on where the pointer is positioned in `stream_buffer`
+                //
+                .index = @intCast(u32, @divExact(@ptrToInt(stream) - @ptrToInt(&stream_buffer[0]), @sizeOf(Stream))),
+            });
+        },
+        .failed => {
+            stream.state = .fatal;
+            active_callbacks.create_stream.onFail(error.PulseStreamStartFail);
+        },
+        .terminated => {
+            assert(stream.state == .paused or stream.state == .running);
+            stream.state = .closed;
+        },
+        .unconnected => std.log.info("pulse: Stream unconnected", .{}),
+    }
+}
+
+fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?*anyopaque) callconv(.C) void {
+    //
+    // TODO: Check the `success` parameter
+    //
+    _ = success;
+    _ = userdata;
+
+    switch (handles.context_get_state(context)) {
+        .connecting, .authorizing, .setting_name => assert(backend_state == .initializating),
+        .ready => {
+            assert(backend_state == .initializating);
+            std.log.info("pulse: Connected to context", .{});
+            backend_state = .initialized;
+            active_callbacks.init.onSuccess();
+        },
+        .terminated => {
+            assert(backend_state == .initialized);
+            backend_state = .closed;
+            std.log.info("pulse: Terminated", .{});
+        },
+        .failed => {
+            backend_state = .fatal;
+            active_callbacks.init.onFail(error.PulseContextStartFail);
+        },
+        .unconnected => std.log.info("pulse: Unconnected", .{}),
+    }
+}
+
+fn streamReadCallback(pulse_stream: *pa_stream, bytes_available_count: u64, userdata: ?*anyopaque) callconv(.C) void {
+    const stream = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
+    assert(stream.state == .paused or stream.state == .running);
+
+    assert(backend_state == .initialized);
+
+    if (stream.state == .running)
+        return;
+
+    var pcm_buffer_opt: ?[*]i16 = undefined;
+    var bytes_read_count: u64 = bytes_available_count;
+    const ret_code = handles.stream_peek(pulse_stream, @ptrCast(*?*void, &pcm_buffer_opt), &bytes_read_count);
+    if (ret_code < 0) {
+        std.log.err("Failed to read stream", .{});
+        // TODO:
+        assert(false);
+    }
+
+    if (pcm_buffer_opt) |pcm_buffer| {
+        stream.samplesReadyCallback(
+            //
+            // Calculate the index based on where the pointer is positioned in `stream_buffer`
+            //
+            StreamHandle{ .index = @intCast(u32, @divExact(@ptrToInt(stream) - @ptrToInt(&stream_buffer[0]), @sizeOf(Stream))) },
+            pcm_buffer[0..@divExact(bytes_read_count, @sizeOf(i16))],
+        );
+    } else {
+        //
+        // There's no input data to read
+        //
+        if (bytes_read_count != 0)
+            return;
+        //
+        // If `temp_buffer_opt` == null, but `bytes_read_count` != 0, it indicates there is a hole in the
+        // audio stream. In this scenario we still want to call `pa_stream_drop`.
+        // https://freedesktop.org/software/pulseaudio/doxygen/stream_8h.html#ac2838c449cde56e169224d7fe3d00824
+        //
+    }
+    if (handles.stream_drop(pulse_stream) != 0) {
+        std.log.err("pa_stream_drop fail", .{});
+    }
+}
+
+fn handleCardInfo(context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
+    _ = context;
+    _ = userdata;
+    if (eol > 0) return;
+    std.log.info("Card: {s}", .{info.name});
+}
+
+fn handleSourceInfo(context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
+    _ = context;
+    _ = userdata;
+
+    assert(backend_state == .initialized);
+
+    if (eol > 0) {
+        sourceListReadyCallback.?(source_buffer[0..source_count]);
         return;
     }
 
-    _ = handles.context_get_source_info_list(_context, handleSourceInfo, null);
+    std.log.info("Name: {s}", .{info.description});
+    std.log.info("State: {s}", .{@tagName(info.state)});
+    std.log.info("Monitor: {s}", .{info.monitor_of_sink_name orelse "null"});
+
+    for (0..info.n_ports) |i| {
+        const current_port = info.ports[i];
+        std.log.info("  {d} Port type: {s} name: {s} desc: {s}", .{
+            i,
+            @tagName(current_port.*.type),
+            current_port.*.name,
+            current_port.*.description,
+        });
+    }
+
+    if (source_count >= max_source_count) {
+        std.log.warn("pulse: Internal input device buffer full. Ignoring device", .{});
+        return;
+    }
+
+    const name = list_sources_allocator.dupeZ(u8, std.mem.span(info.name)) catch "";
+    const description = list_sources_allocator.dupeZ(u8, std.mem.span(info.description)) catch "";
+    source_buffer[source_count] = .{
+        .name = name,
+        .description = description,
+    };
+
+    if (info.active_port) |active_port| {
+        if (active_port.*.type == .analog) {
+            source_buffer[source_count].source_type = .microphone;
+            std.log.info("Adding mic", .{});
+        }
+    } else if (info.n_ports == 1) {
+        if (info.ports[0].*.type == .mic) {
+            source_buffer[source_count].source_type = .microphone;
+            std.log.info("Adding mic", .{});
+        }
+    } else if (info.monitor_of_sink_name != null) {
+        source_buffer[source_count].source_type = .desktop;
+        std.log.info("Adding desktop output", .{});
+    }
+
+    source_count += 1;
 }
+
+fn handleSinkInfo(context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
+    _ = context;
+    _ = userdata;
+    if (eol > 0) return;
+    std.log.info("Sink: {s} {s}", .{ info.name, info.description });
+}
+
+//
+// Pulse Audio bindings / definitions
+// TODO: Move to separate file
+//
 
 const pa_mainloop_api = opaque {};
 const pa_threaded_mainloop = opaque {};
@@ -153,7 +577,7 @@ extern fn pa_threaded_mainloop_wait(loop: *pa_threaded_mainloop) callconv(.C) vo
 // Context
 //
 
-const ContextSuccessFn = fn (context: *pa_context, success: i32, userdata: ?*void) callconv(.C) void;
+const ContextSuccessFn = fn (context: *pa_context, success: i32, userdata: ?*anyopaque) callconv(.C) void;
 
 const pa_spawn_api = extern struct {
     prefork: *const fn () callconv(.C) void,
@@ -162,9 +586,9 @@ const pa_spawn_api = extern struct {
 };
 const pa_operation = opaque {};
 
-const pa_sink_info_cb_t = fn (context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*void) callconv(.C) void;
-const pa_source_info_cb_t = fn (context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*void) callconv(.C) void;
-const pa_card_info_cb_t = fn (context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*void) callconv(.C) void;
+const pa_sink_info_cb_t = fn (context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void;
+const pa_source_info_cb_t = fn (context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void;
+const pa_card_info_cb_t = fn (context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void;
 
 const pa_card_profile_info = extern struct {
     name: [*:0]const u8,
@@ -195,7 +619,7 @@ const pa_card_port_info = extern struct {
     latency_offest: u64,
     profiles2: **pa_card_profile_info2,
     availability_group: [*:0]const u8,
-    type: u32,
+    type: PortType,
 };
 
 const pa_card_info = extern struct {
@@ -208,47 +632,36 @@ const pa_card_info = extern struct {
     active_profile: *pa_card_profile_info,
     proplist: *pa_proplist,
     n_ports: u32,
-    ports: **pa_card_port_info,
+    ports: [*]*pa_card_port_info,
     profiles2: **pa_card_profile_info2,
     active_profile2: *pa_card_profile_info2,
 };
 
-fn handleCardInfo(context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*void) callconv(.C) void {
-    _ = context;
-    _ = userdata;
-    if (eol > 0) return;
-    std.log.info("Card: {s}", .{info.name});
-}
-
-fn handleSourceInfo(context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*void) callconv(.C) void {
-    _ = context;
-    _ = userdata;
-    if (eol > 0) {
-        inputListCallbackFn(input_devices[0..input_device_count]);
-        return;
-    }
-
-    if (input_device_count >= input_devices.len) {
-        std.log.warn("pulse: Internal input device buffer full. Ignoring device", .{});
-        return;
-    }
-
-    const name = input_list_allocator.dupeZ(u8, std.mem.span(info.name)) catch "";
-    const description = input_list_allocator.dupeZ(u8, std.mem.span(info.description)) catch "";
-    input_devices[input_device_count] = .{
-        .name = name,
-        .description = description,
-    };
-
-    input_device_count += 1;
-}
-
-fn handleSinkInfo(context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*void) callconv(.C) void {
-    _ = context;
-    _ = userdata;
-    if (eol > 0) return;
-    std.log.info("Sink: {s} {s}", .{ info.name, info.description });
-}
+const PortType = enum(u32) {
+    unknown = 0,
+    aux,
+    speaker,
+    headphones,
+    line,
+    mic,
+    headset,
+    handset,
+    earpiece,
+    spdif,
+    hdmi,
+    tv,
+    radio,
+    video,
+    usb,
+    bluetooth,
+    portable,
+    handsfree,
+    car,
+    hifi,
+    phone,
+    network,
+    analog,
+};
 
 const PA_CHANNELS_MAX = 32;
 
@@ -317,7 +730,7 @@ const pa_source_port_info = extern struct {
     priority: u32,
     available: i32,
     availability_group: ?[*:0]const u8,
-    type: u32,
+    type: PortType,
 };
 
 const pa_format_info = extern struct {
@@ -418,7 +831,7 @@ const pa_source_info = extern struct {
     volume: pa_cvolume,
     mute: i32,
     monitor_of_sink: u32,
-    monitor_of_sink_name: [*:0]const u8,
+    monitor_of_sink_name: ?[*:0]const u8,
     latency: pa_usec_t,
     driver: [*:0]const u8,
     flags: pa_source_flags_t,
@@ -430,8 +843,8 @@ const pa_source_info = extern struct {
     n_volume_steps: u32,
     card: u32,
     n_ports: u32,
-    ports: **pa_source_port_info,
-    active_port: *pa_source_port_info,
+    ports: [*]*pa_source_port_info,
+    active_port: ?*pa_source_port_info,
     n_formats: u8,
     formats: **pa_format_info,
 };
@@ -448,59 +861,55 @@ extern fn pa_context_connect(
     flags: ContextFlags,
     api: ?*pa_spawn_api,
 ) i32;
+extern fn pa_context_disconnect(context: *pa_context) callconv(.C) void;
 extern fn pa_context_unref(context: *pa_context) callconv(.C) void;
 extern fn pa_context_set_state_callback(
     context: *pa_context,
     state_callback: *const ContextSuccessFn,
-    userdata: ?*void,
+    userdata: ?*anyopaque,
 ) callconv(.C) void;
 extern fn pa_context_get_state(context: *const pa_context) callconv(.C) ContextState;
 extern fn pa_context_get_sink_info_list(
     context: *const pa_context,
     callback: *const pa_sink_info_cb_t,
-    userdata: ?*void,
+    userdata: ?*anyopaque,
 ) callconv(.C) *pa_operation;
 extern fn pa_context_get_source_info_list(
     context: *const pa_context,
     callback: *const pa_source_info_cb_t,
-    userdata: ?*void,
+    userdata: ?*anyopaque,
 ) callconv(.C) *pa_operation;
 extern fn pa_context_get_card_info_list(
     context: *const pa_context,
     callback: *const pa_card_info_cb_t,
-    userdata: ?*void,
+    userdata: ?*anyopaque,
 ) callconv(.C) *pa_operation;
 extern fn pa_context_get_source_info_by_index(
     context: *const pa_context,
     index: u32,
     callback: *const pa_source_info_cb_t,
-    userdata: ?*void,
+    userdata: ?*anyopaque,
 ) callconv(.C) *pa_operation;
 
 //
 // Stream
 //
 
-const StreamRequestFn = fn (stream: *pa_stream, bytes_available_count: u64, userdata: ?*void) callconv(.C) void;
-const StreamNotifyFn = fn (stream: *pa_stream, userdata: ?*void) callconv(.C) void;
+const StreamRequestFn = fn (stream: *pa_stream, bytes_available_count: u64, userdata: ?*anyopaque) callconv(.C) void;
+const StreamNotifyFn = fn (stream: *pa_stream, userdata: ?*anyopaque) callconv(.C) void;
 
 extern fn pa_stream_new(context: *pa_context, name: [*:0]const u8, sample_spec: *const SampleSpec, map: ?*const ChannelMap) ?*pa_stream;
-extern fn pa_stream_set_read_callback(stream: *pa_stream, callback: *const StreamRequestFn, userdata: ?*void) callconv(.C) void;
+extern fn pa_stream_set_read_callback(stream: *pa_stream, callback: *const StreamRequestFn, userdata: ?*anyopaque) callconv(.C) void;
 extern fn pa_stream_peek(stream: *pa_stream, data: *?*const void, data_size_bytes: *u64) callconv(.C) i32;
 extern fn pa_stream_drop(stream: *pa_stream) callconv(.C) i32;
-extern fn pa_stream_get_state(stream: *pa_stream) callconv(.C) StreamState;
-extern fn pa_stream_set_state_callback(stream: *pa_stream, callback: *const StreamNotifyFn, userdata: ?*void) callconv(.C) void;
+extern fn pa_stream_get_state(stream: *pa_stream) callconv(.C) PulseStreamState;
+extern fn pa_stream_set_state_callback(stream: *pa_stream, callback: *const StreamNotifyFn, userdata: ?*anyopaque) callconv(.C) void;
 extern fn pa_stream_connect_record(stream: *pa_stream, device: ?[*:0]const u8, buffer_attributes: ?*const BufferAttr, flags: StreamFlags) callconv(.C) i32;
 extern fn pa_stream_unref(stream: *pa_stream) callconv(.C) void;
 extern fn pa_stream_get_sample_spec(stream: *pa_stream) callconv(.C) *const pa_sample_spec;
 extern fn pa_stream_get_channel_map(stream: *pa_stream) callconv(.C) *const pa_channel_map;
 extern fn pa_stream_get_device_name(stream: *pa_stream) callconv(.C) [*:0]const u8;
 extern fn pa_stream_get_device_index(stream: *pa_stream) callconv(.C) u32;
-
-var _thread_loop: *pa_threaded_mainloop = undefined;
-var _loop_api: *pa_mainloop_api = undefined;
-var _context: *pa_context = undefined;
-var _stream: *pa_stream = undefined;
 
 const StreamFlags = packed struct(i32) {
     start_corked: bool = false,
@@ -543,91 +952,14 @@ const _sample_spec = SampleSpec{
     .channels = 2,
 };
 
-const StreamState = enum(i32) {
+// TODO: Rename when moved into it's own file (Was StreamState)
+const PulseStreamState = enum(i32) {
     unconnected,
     creating,
     ready,
     failed,
     terminated,
 };
-
-fn streamReadCallback(stream: *pa_stream, bytes_available_count: u64, userdata: ?*void) callconv(.C) void {
-    _ = userdata;
-    var pcm_buffer_opt: ?[*]i16 = undefined;
-    var bytes_read_count: u64 = bytes_available_count;
-    const ret_code = handles.stream_peek(stream, @ptrCast(*?*void, &pcm_buffer_opt), &bytes_read_count);
-    if (ret_code < 0) {
-        std.log.err("Failed to read stream", .{});
-        // TODO:
-        std.debug.assert(false);
-    }
-
-    if (pcm_buffer_opt) |pcm_buffer| {
-        onReadSamplesCallback(pcm_buffer[0..@divExact(bytes_read_count, @sizeOf(i16))]);
-    } else {
-        //
-        // There's no input data to read
-        //
-        if (bytes_read_count != 0)
-            return;
-        //
-        // If `temp_buffer_opt` == null, but `bytes_read_count` != 0, it indicates there is a hole in the
-        // audio stream. In this scenario we still want to call `pa_stream_drop`.
-        // https://freedesktop.org/software/pulseaudio/doxygen/stream_8h.html#ac2838c449cde56e169224d7fe3d00824
-        //
-    }
-    if (handles.stream_drop(stream) != 0) {
-        std.log.err("pa_stream_drop fail", .{});
-    }
-}
-
-fn onStreamStateCallback(stream: *pa_stream, userdata: ?*void) callconv(.C) void {
-    _ = userdata;
-    switch (handles.stream_get_state(stream)) {
-        .creating, .terminated => {},
-        .ready => {
-            const sample_spec = handles.stream_get_sample_spec(stream);
-            const channel_map = handles.stream_get_channel_map(stream);
-            std.debug.assert(sample_spec.channels == channel_map.channels);
-            std.log.info("Audio input stream channels: {d} {s} {s}", .{
-                channel_map.channels,
-                @tagName(channel_map.map[0]),
-                @tagName(channel_map.map[1]),
-            });
-            stream_state = .open;
-            onOpenSuccessCallback();
-
-            const stream_device_name = handles.stream_get_device_name(stream);
-
-            const input_device_description = blk: for (input_devices[0..input_device_count]) |input_device| {
-                if (std.mem.eql(u8, std.mem.span(input_device.name), std.mem.span(stream_device_name)))
-                    break :blk input_device.description;
-            } else "unknown";
-
-            std.log.info("pulse: Connected to input device {s}. Description: {s}", .{
-                stream_device_name,
-                input_device_description,
-            });
-        },
-        .failed => onOpenFailCallback(error.PulseStreamStartFail),
-        .unconnected => std.log.info("pulse: Stream unconnected", .{}),
-    }
-}
-
-fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?*void) callconv(.C) void {
-    _ = success;
-    _ = userdata;
-    switch (handles.context_get_state(context)) {
-        .connecting, .authorizing, .setting_name => {},
-        .ready => {
-            stream_state = .initialized;
-            onInitSuccessCallback();
-        },
-        .terminated => std.log.info("pulse: Terminated", .{}),
-        .failed => onInitFailCallback(error.PulseContextStartFail),
-        .unconnected => std.log.info("pulse: Unconnected", .{}),
-    }
-}
 
 const DynamicHandles = struct {
     threaded_mainloop_new: *const @TypeOf(pa_threaded_mainloop_new),
@@ -642,6 +974,7 @@ const DynamicHandles = struct {
     context_new: *const @TypeOf(pa_context_new),
     context_new_with_proplist: *const @TypeOf(pa_context_new_with_proplist),
     context_connect: *const @TypeOf(pa_context_connect),
+    context_disconnect: *const @TypeOf(pa_context_disconnect),
     context_unref: *const @TypeOf(pa_context_unref),
     context_set_state_callback: *const @TypeOf(pa_context_set_state_callback),
     context_get_state: *const @TypeOf(pa_context_get_state),
@@ -663,165 +996,6 @@ const DynamicHandles = struct {
     stream_get_device_name: *const @TypeOf(pa_stream_get_device_name),
     stream_get_device_index: *const @TypeOf(pa_stream_get_device_index),
 };
-
-var handles: DynamicHandles = undefined;
-
-pub fn init(
-    onSuccess: *const audio.InitSuccessCallbackFn,
-    onFail: *const audio.InitFailCallbackFn,
-) InitErrors!void {
-    std.debug.assert(stream_state == .closed);
-
-    var library_handle = library_handle_opt orelse DynLib.open("libpulse.so") catch return error.LibraryNotAvailable;
-
-    onInitFailCallback = onFail;
-    onInitSuccessCallback = onSuccess;
-
-    handles.threaded_mainloop_new = library_handle.lookup(@TypeOf(handles.threaded_mainloop_new), "pa_threaded_mainloop_new") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_get_api = library_handle.lookup(@TypeOf(handles.threaded_mainloop_get_api), "pa_threaded_mainloop_get_api") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_start = library_handle.lookup(@TypeOf(handles.threaded_mainloop_start), "pa_threaded_mainloop_start") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_free = library_handle.lookup(@TypeOf(handles.threaded_mainloop_free), "pa_threaded_mainloop_free") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_stop = library_handle.lookup(@TypeOf(handles.threaded_mainloop_stop), "pa_threaded_mainloop_stop") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_unlock = library_handle.lookup(@TypeOf(handles.threaded_mainloop_unlock), "pa_threaded_mainloop_unlock") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_lock = library_handle.lookup(@TypeOf(handles.threaded_mainloop_lock), "pa_threaded_mainloop_lock") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_wait = library_handle.lookup(@TypeOf(handles.threaded_mainloop_wait), "pa_threaded_mainloop_wait") orelse
-        return error.LookupFailed;
-
-    handles.context_new = library_handle.lookup(@TypeOf(handles.context_new), "pa_context_new") orelse
-        return error.LookupFailed;
-    handles.context_new_with_proplist = library_handle.lookup(@TypeOf(handles.context_new_with_proplist), "pa_context_new_with_proplist") orelse
-        return error.LookupFailed;
-    handles.context_connect = library_handle.lookup(@TypeOf(handles.context_connect), "pa_context_connect") orelse
-        return error.LookupFailed;
-    handles.context_unref = library_handle.lookup(@TypeOf(handles.context_unref), "pa_context_unref") orelse
-        return error.LookupFailed;
-    handles.context_set_state_callback = library_handle.lookup(@TypeOf(handles.context_set_state_callback), "pa_context_set_state_callback") orelse
-        return error.LookupFailed;
-    handles.context_get_state = library_handle.lookup(@TypeOf(handles.context_get_state), "pa_context_get_state") orelse
-        return error.LookupFailed;
-    handles.context_get_sink_info_list = library_handle.lookup(@TypeOf(handles.context_get_sink_info_list), "pa_context_get_sink_info_list") orelse
-        return error.LookupFailed;
-    handles.context_get_source_info_list = library_handle.lookup(@TypeOf(handles.context_get_source_info_list), "pa_context_get_source_info_list") orelse
-        return error.LookupFailed;
-    handles.context_get_card_info_list = library_handle.lookup(@TypeOf(handles.context_get_card_info_list), "pa_context_get_card_info_list") orelse
-        return error.LookupFailed;
-    handles.context_get_source_info_by_index = library_handle.lookup(@TypeOf(handles.context_get_source_info_by_index), "pa_context_get_source_info_by_index") orelse
-        return error.LookupFailed;
-
-    handles.stream_new = library_handle.lookup(@TypeOf(handles.stream_new), "pa_stream_new") orelse
-        return error.LookupFailed;
-    handles.stream_set_read_callback = library_handle.lookup(@TypeOf(handles.stream_set_read_callback), "pa_stream_set_read_callback") orelse
-        return error.LookupFailed;
-    handles.stream_peek = library_handle.lookup(@TypeOf(handles.stream_peek), "pa_stream_peek") orelse
-        return error.LookupFailed;
-    handles.stream_drop = library_handle.lookup(@TypeOf(handles.stream_drop), "pa_stream_drop") orelse
-        return error.LookupFailed;
-    handles.stream_get_state = library_handle.lookup(@TypeOf(handles.stream_get_state), "pa_stream_get_state") orelse
-        return error.LookupFailed;
-    handles.stream_set_state_callback = library_handle.lookup(@TypeOf(handles.stream_set_state_callback), "pa_stream_set_state_callback") orelse
-        return error.LookupFailed;
-    handles.stream_connect_record = library_handle.lookup(@TypeOf(handles.stream_connect_record), "pa_stream_connect_record") orelse
-        return error.LookupFailed;
-    handles.stream_unref = library_handle.lookup(@TypeOf(handles.stream_unref), "pa_stream_unref") orelse
-        return error.LookupFailed;
-    handles.stream_get_sample_spec = library_handle.lookup(@TypeOf(handles.stream_get_sample_spec), "pa_stream_get_sample_spec") orelse
-        return error.LookupFailed;
-    handles.stream_get_channel_map = library_handle.lookup(@TypeOf(handles.stream_get_channel_map), "pa_stream_get_channel_map") orelse
-        return error.LookupFailed;
-    handles.stream_get_device_name = library_handle.lookup(@TypeOf(handles.stream_get_device_name), "pa_stream_get_device_name") orelse
-        return error.LookupFailed;
-    handles.stream_get_device_index = library_handle.lookup(@TypeOf(handles.stream_get_device_index), "pa_stream_get_device_index") orelse
-        return error.LookupFailed;
-
-    _thread_loop = handles.threaded_mainloop_new() orelse return error.PulseThreadedLoopCreateFail;
-    _loop_api = handles.threaded_mainloop_get_api(_thread_loop) orelse return error.PulseThreadedLoopGetApiFail;
-    _context = handles.context_new(_loop_api, "Reel") orelse return error.PulseContextCreateFail;
-
-    if (handles.context_connect(_context, null, .{}, null) < 0) {
-        return error.PulseConnectServerFail;
-    }
-
-    handles.context_set_state_callback(_context, onContextStateChangedCallback, null);
-
-    if (handles.threaded_mainloop_start(_thread_loop) != 0) {
-        return error.PulseThreadedLoopStartFail;
-    }
-}
-
-const device_input_name_buffer_size = 256;
-var device_input_name_buffer: [device_input_name_buffer_size]u8 = undefined;
-var input_device_name: ?[*:0]const u8 = null;
-
-pub fn open(
-    device_name_opt: ?[*:0]const u8,
-    onSuccess: *const audio.OpenSuccessCallbackFn,
-    onFail: *const audio.OpenFailCallbackFn,
-) OpenErrors!void {
-    onOpenFailCallback = onFail;
-    onOpenSuccessCallback = onSuccess;
-
-    std.debug.assert(stream_state == .initialized);
-
-    if (device_name_opt) |device_name| {
-        var i: usize = 0;
-        while (device_name[i] != 0) : (i += 1) {
-            if (i >= device_input_name_buffer_size)
-                return error.InvalidInputDeviceName;
-            device_input_name_buffer[i] = device_name[i];
-        }
-        input_device_name = device_input_name_buffer[0..i :0];
-    }
-
-    handles.threaded_mainloop_lock(_thread_loop);
-    defer handles.threaded_mainloop_unlock(_thread_loop);
-
-    _stream = handles.stream_new(_context, "Audio Input", &_sample_spec, null) orelse {
-        onOpenFailCallback(error.PulseStreamCreateFail);
-        return;
-    };
-
-    handles.stream_set_state_callback(_stream, onStreamStateCallback, null);
-    handles.stream_set_read_callback(_stream, streamReadCallback, null);
-
-    const target_fps = 30;
-    const bytes_per_sample = 2 * @sizeOf(i16);
-    const bytes_per_second = 44100 * bytes_per_sample;
-    const buffer_size: u32 = @divExact(bytes_per_second, target_fps);
-
-    const flags: StreamFlags = .{};
-    const buffer_attributes = BufferAttr{
-        .max_length = std.math.maxInt(u32),
-        .tlength = std.math.maxInt(u32),
-        .minreq = std.math.maxInt(u32),
-        .prebuf = buffer_size,
-        .fragsize = buffer_size,
-    };
-
-    const device_name = input_device_name orelse "default";
-    std.log.info("audio_input_pulse: Connecting to device \"{s}\"", .{device_name});
-    if (handles.stream_connect_record(_stream, input_device_name, &buffer_attributes, flags) != 0) {
-        return error.PulseStreamConnectFail;
-    }
-}
-
-pub fn close() void {
-    handles.stream_unref(_stream);
-    handles.context_unref(_context);
-    handles.threaded_mainloop_stop(_thread_loop);
-    handles.threaded_mainloop_free(_thread_loop);
-
-    for (input_devices[0..input_device_count]) |input_device| {
-        input_list_allocator.free(std.mem.span(input_device.name));
-        input_list_allocator.free(std.mem.span(input_device.description));
-    }
-}
 
 pub const SampleFormat = enum(i32) {
     u8,
