@@ -238,8 +238,6 @@ pub fn createStream(
         return error.MaxStreamCountReached;
     };
 
-    handles.threaded_mainloop_lock(pulse_thread_loop);
-
     const pulse_stream = handles.stream_new(pulse_context, "Audio Input", &default_sample_spec, null) orelse
         return error.PulseStreamCreateFail;
 
@@ -275,8 +273,6 @@ pub fn createStream(
     if (handles.stream_connect_record(pulse_stream, source_name, &buffer_attributes, flags) != 0) {
         return error.PulseStreamConnectFail;
     }
-
-    handles.threaded_mainloop_unlock(pulse_thread_loop);
 }
 
 fn streamStart(stream: StreamHandle) void {
