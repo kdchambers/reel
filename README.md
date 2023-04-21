@@ -53,6 +53,14 @@ To build, you'll need a master build of the zig compiler. The latest version tes
 - wayland-client
 - wayland-cursor
 
+(Pulseaudio audio source backend only)
+
+- pulseaudio
+
+(Pipewire audio source backend only)
+
+- Pipewire
+
 (Pipewire screencapture backend only)
 
 - Pipewire
