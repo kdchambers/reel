@@ -224,8 +224,20 @@ pub fn run() !void {
                         .avi => .avi,
                         // .mkv => .mkv,
                     };
+                    var file_name_buffer: [256]u8 = undefined;
+                    const date_time = DateTime.now();
+                    const output_file_name = std.fmt.bufPrint(&file_name_buffer, "reel_{d}_{d}_{d}{d}{d}", .{
+                        date_time.year,
+                        date_time.month,
+                        date_time.hour,
+                        date_time.minute,
+                        date_time.second,
+                    }) catch blk: {
+                        std.log.err("Failed to generate unique name for recording. Saving as `reel_recording`", .{});
+                        break :blk "reel_recording";
+                    };
                     const options = RecordOptions{
-                        .output_name = "reel_test",
+                        .output_name = output_file_name,
                         .dimensions = .{
                             .width = 1920,
                             .height = 1080,
@@ -538,8 +550,8 @@ fn saveImageToFile(
         date_time.second,
         @tagName(file_format),
     }) catch blk: {
-        std.log.err("Failed to generate name for screenshot image. Saving to screenshot.png", .{});
-        break :blk "screenshot.png";
+        std.log.err("Failed to generate unique name for screenshot image. Saving as `reel_screenshot.png`", .{});
+        break :blk "reel_screenshot.png";
     };
 
     const pixel_count: usize = @intCast(usize, width) * height;
