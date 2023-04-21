@@ -367,6 +367,39 @@ pub fn draw(
     }
 
     {
+        //
+        // Enable webcam checkbox
+        //
+        const margin_top_pixels = 30;
+        const margin_left_pixels = 20;
+        const radius_pixels: f32 = 10;
+        const center_point = geometry.Coordinates2D(f32){
+            .x = -1.0 + ((margin_left_pixels + radius_pixels) * screen_scale.horizontal),
+            .y = -1.0 + ((margin_top_pixels + radius_pixels) * screen_scale.vertical),
+        };
+        const color = graphics.RGBA(f32).fromInt(50, 50, 50, 255);
+        try ui_state.enable_webcam_checkbox.draw(
+            center_point,
+            radius_pixels,
+            screen_scale,
+            color,
+            model.webcam_stream.enabled(),
+        );
+
+        const label_text = "Enable webcam";
+        var text_writer_interface = TextWriterInterface{ .quad_writer = face_writer };
+        const label_text_dimensions = pen.calculateRenderDimensions(label_text);
+        const label_margin_left = 10;
+        const label_extent = geometry.Extent2D(f32){
+            .x = -1.0 + ((margin_left_pixels + (radius_pixels * 2.0) + label_margin_left) * screen_scale.horizontal),
+            .y = -1.0 + (((radius_pixels * 2.0) + margin_top_pixels) * screen_scale.vertical),
+            .width = (label_text_dimensions.width + 5.0) * screen_scale.horizontal,
+            .height = (radius_pixels * 2.0) * screen_scale.vertical,
+        };
+        try pen.writeCentered(label_text, label_extent, screen_scale, &text_writer_interface);
+    }
+
+    {
         audio_source_section_region.anchor.right = window.right;
         audio_source_section_region.anchor.left = preview_region.left();
 
@@ -404,25 +437,28 @@ pub fn draw(
             ui_state.audio_source_spectogram.min_cutoff_db = -7.0;
             ui_state.audio_source_spectogram.max_cutoff_db = -2.0;
 
-            const sample_range = model.source_audio_buffer.sampleRange();
-            const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
-            if (sample_range.count >= samples_per_frame) {
-                const sample_offset: usize = sample_range.count - samples_per_frame;
-                const sample_index = sample_range.base_sample + sample_offset;
-                var sample_buffer: [samples_per_frame]f32 = undefined;
-                const samples = model.source_audio_buffer.samplesCopyIfRequired(
-                    sample_index,
-                    samples_per_frame,
-                    &sample_buffer,
-                );
+            if (model.audio_streams.len != 0) {
+                const audio_buffer = model.audio_streams[0].sample_buffer;
+                const sample_range = audio_buffer.sampleRange();
+                const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
+                if (sample_range.count >= samples_per_frame) {
+                    const sample_offset: usize = sample_range.count - samples_per_frame;
+                    const sample_index = sample_range.base_sample + sample_offset;
+                    var sample_buffer: [samples_per_frame]f32 = undefined;
+                    const samples = audio_buffer.samplesCopyIfRequired(
+                        sample_index,
+                        samples_per_frame,
+                        &sample_buffer,
+                    );
 
-                const audio_power_spectrum = audio.samplesToPowerSpectrum(samples);
-                const mel_scaled_bins = audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
-                try ui_state.audio_source_spectogram.draw(
-                    mel_scaled_bins[3..],
-                    spectrogram_region.toExtent(),
-                    screen_scale,
-                );
+                    const audio_power_spectrum = audio.samplesToPowerSpectrum(samples);
+                    const mel_scaled_bins = audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
+                    try ui_state.audio_source_spectogram.draw(
+                        mel_scaled_bins[3..],
+                        spectrogram_region.toExtent(),
+                        screen_scale,
+                    );
+                } else {}
             } else {
                 const mel_scaled_bins_buffer = [1]f32{-9.0} ** 64;
                 try ui_state.audio_source_spectogram.draw(
@@ -613,35 +649,6 @@ fn drawSectionRecord(
             screen_scale,
             record_button_color_normal,
         );
-    }
-
-    {
-        const margin_top_pixels = 30;
-        const margin_left_pixels = 20;
-        const radius_pixels: f32 = 10;
-        const center_point = geometry.Coordinates2D(f32){
-            .x = -1.0 + ((margin_left_pixels + radius_pixels) * screen_scale.horizontal),
-            .y = -1.0 + ((margin_top_pixels + radius_pixels) * screen_scale.vertical),
-        };
-        const color = graphics.RGBA(f32).fromInt(50, 50, 50, 255);
-        try ui_state.enable_webcam_checkbox.draw(
-            center_point,
-            radius_pixels,
-            screen_scale,
-            color,
-            model.webcam_stream.enabled(),
-        );
-
-        const label_text = "Enable webcam";
-        const label_text_dimensions = pen.calculateRenderDimensions(label_text);
-        const label_margin_left = 10;
-        const label_extent = geometry.Extent2D(f32){
-            .x = -1.0 + ((margin_left_pixels + (radius_pixels * 2.0) + label_margin_left) * screen_scale.horizontal),
-            .y = -1.0 + (((radius_pixels * 2.0) + margin_top_pixels) * screen_scale.vertical),
-            .width = (label_text_dimensions.width + 5.0) * screen_scale.horizontal,
-            .height = (radius_pixels * 2.0) * screen_scale.vertical,
-        };
-        try pen.writeCentered(label_text, label_extent, screen_scale, &text_writer_interface);
     }
 }
 

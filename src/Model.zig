@@ -28,9 +28,7 @@ pub const VideoStream = struct {
     index: u8,
 };
 
-pub const AudioStream = struct {
-    index: u8,
-};
+pub const AudioStreamHandle = u16;
 
 pub const VideoFormat = enum(u8) {
     mp4,
@@ -56,7 +54,7 @@ pub const RecordingContext = struct {
     quality: VideoQuality,
     start: i128,
     video_streams: []VideoStream,
-    audio_streams: []AudioStream,
+    audio_streams: []AudioStreamHandle,
     state: State = .idle,
 };
 
@@ -76,12 +74,19 @@ pub const WebcamStream = struct {
     }
 };
 
+pub const AudioStream = struct {
+    state: enum { open, closed, paused },
+    source_type: enum { microphone, desktop, unknown },
+    source_name: []const u8,
+    sample_buffer: AudioSampleRingBuffer,
+};
+
 //
 // This defines all state that is relevant to the user interface
 //
 
-source_audio_buffer: AudioSampleRingBuffer,
-audio_source_volume_db: f32,
+audio_streams: []AudioStream,
+
 desktop_capture_frame: ?VideoFrame,
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,

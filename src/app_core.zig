@@ -18,6 +18,7 @@ const video_encoder = @import("video_record.zig");
 const RequestBuffer = @import("RequestBuffer.zig");
 const geometry = @import("geometry.zig");
 const WebcamStream = @import("WebcamStream.zig").WebcamStream;
+const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 
 const audio_source = @import("audio_source.zig");
 var audio_source_interface: audio_source.Interface = undefined;
@@ -70,9 +71,11 @@ var app_state: State = .uninitialized;
 var screencapture_interface: screencapture.Interface = undefined;
 var frontend_interface: frontend.Interface = undefined;
 
+const max_audio_streams = 2;
+var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
+
 var model: Model = .{
-    .source_audio_buffer = undefined,
-    .audio_source_volume_db = -9.0,
+    .audio_streams = &.{},
     .desktop_capture_frame = null,
     .recording_context = .{
         .format = .mp4,
@@ -111,7 +114,11 @@ var recording_frame_index_base: u64 = 0;
 
 var gpa: std.mem.Allocator = undefined;
 
-var audio_source_stream: audio_source.StreamHandle = undefined;
+var microphone_audio_stream = audio_source.StreamHandle{ .index = std.math.maxInt(u32) };
+var desktop_audio_stream = audio_source.StreamHandle{ .index = std.math.maxInt(u32) };
+var audio_sources_ref: []audio_source.SourceInfo = undefined;
+
+var active_audio_stream: *audio_source.StreamHandle = &microphone_audio_stream;
 
 //
 // TODO: This should probably be heap allocated
@@ -158,12 +165,6 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 
     frontend_interface = frontend.interface(options.frontend);
     frontend_interface.init(gpa) catch return error.FrontendInitFail;
-
-    //
-    // Buffer size of ~100 milliseconds at a sample rate of 44100 and 2 channels
-    //
-    const buffer_capacity_samples: usize = @divExact(44100, 10) * 2;
-    try model.source_audio_buffer.init(gpa, buffer_capacity_samples);
 
     audio_source_interface = audio_source.bestInterface();
 
@@ -327,7 +328,9 @@ pub fn run() !void {
 pub fn deinit() void {
     audio_source_interface.deinit();
 
-    model.source_audio_buffer.deinit(gpa);
+    for (model.audio_streams) |*audio_stream| {
+        audio_stream.sample_buffer.deinit(gpa);
+    }
 
     //
     // TODO:
@@ -412,37 +415,45 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
 
         recording_start_timestamp = std.time.nanoTimestamp();
 
-        const sample_index = model.source_audio_buffer.lastNSample(sample_multiple);
-        const samples_for_frame = model.source_audio_buffer.samplesCopyIfRequired(
-            sample_index,
-            sample_multiple,
-            sample_buffer[0..sample_multiple],
-        );
+        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
+        const samples_for_frame = blk: {
+            if (audio_buffer_opt) |audio_buffer| {
+                const sample_index = audio_buffer.lastNSample(sample_multiple);
+                recording_sample_base_index = sample_index;
+                break :blk audio_buffer.samplesCopyIfRequired(
+                    sample_index,
+                    sample_multiple,
+                    sample_buffer[0..sample_multiple],
+                );
+            } else break :blk sample_buffer[0..sample_multiple];
+        };
 
         video_encoder.write(video_frame_to_encode, samples_for_frame, 0) catch unreachable;
 
         recording_frame_index_base = frame_index;
         recording_sample_count = sample_multiple;
-        recording_sample_base_index = sample_index;
     } else if (model.recording_context.state == .recording) {
-        const sample_index: u64 = recording_sample_base_index + recording_sample_count;
-        const samples_in_buffer: u64 = model.source_audio_buffer.availableSamplesFrom(sample_index);
-        const overflow: u64 = samples_in_buffer % sample_multiple;
-        const samples_to_load: u64 = @min(samples_in_buffer - overflow, sample_multiple * 3);
-        assert(samples_to_load % sample_multiple == 0);
-
-        const samples_to_encode = if (samples_to_load > 0) model.source_audio_buffer.samplesCopyIfRequired(
-            sample_index,
-            samples_to_load,
-            sample_buffer[0..samples_to_load],
-        ) else &[0]f32{};
+        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
+        const samples_to_encode = blk: {
+            if (audio_buffer_opt) |audio_buffer| {
+                const sample_index: u64 = recording_sample_base_index + recording_sample_count;
+                const samples_in_buffer: u64 = audio_buffer.availableSamplesFrom(sample_index);
+                const overflow: u64 = samples_in_buffer % sample_multiple;
+                const samples_to_load: u64 = @min(samples_in_buffer - overflow, sample_multiple * 3);
+                assert(samples_to_load % sample_multiple == 0);
+                recording_sample_count += samples_to_load;
+                break :blk if (samples_to_load > 0) audio_buffer.samplesCopyIfRequired(
+                    sample_index,
+                    samples_to_load,
+                    sample_buffer[0..samples_to_load],
+                ) else &[0]f32{};
+            } else break :blk sample_buffer[0..sample_multiple];
+        };
 
         const recording_frame_index: u64 = frame_index - recording_frame_index_base;
         video_encoder.write(video_frame_to_encode, samples_to_encode, recording_frame_index) catch |err| {
             std.log.warn("Failed to write video frame. Error: {}", .{err});
         };
-
-        recording_sample_count += samples_to_load;
     }
 
     last_screencapture_input_timestamp = std.time.nanoTimestamp();
@@ -452,13 +463,17 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
 
 // NOTE: This will be called on a separate thread
 pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16) void {
-    _ = stream;
+    if (active_audio_stream.*.index == stream.index) {
+        // NOTE: model_mutex is also protecting `last_audio_source_timestamp` here
+        model_mutex.lock();
+        defer model_mutex.unlock();
+        last_audio_source_timestamp = std.time.nanoTimestamp();
 
-    // NOTE: model_mutex is also protecting `last_audio_source_timestamp` here
-    model_mutex.lock();
-    defer model_mutex.unlock();
-    last_audio_source_timestamp = std.time.nanoTimestamp();
-    model.source_audio_buffer.appendOverwrite(pcm_buffer);
+        //
+        // TODO
+        //
+        model.audio_streams[0].sample_buffer.appendOverwrite(pcm_buffer);
+    }
 }
 
 fn handleAudioSourceInitSuccess() void {
@@ -467,18 +482,43 @@ fn handleAudioSourceInitSuccess() void {
 }
 
 fn handleSourceListReady(audio_sources: []audio_source.SourceInfo) void {
-    std.log.info("Audio devices found", .{});
-    for (audio_sources) |source| {
-        std.log.info("name: {s} desc: {s}", .{ source.name, source.description });
+    std.log.info("Audio devices found: {d}", .{audio_sources.len});
+    audio_sources_ref = audio_sources;
+    var have_microphone: bool = false;
+    // var have_desktop: bool = false;
+    for (audio_sources, 0..) |source, source_i| {
+        std.log.info("  {d}: name: {s} desc: {s} type {s}", .{ source_i, source.name, source.description, @tagName(source.source_type) });
+        if (!have_microphone and source.source_type == .microphone) {
+            audio_source_interface.createStream(
+                @intCast(u32, source_i),
+                &onAudioSamplesReady,
+                &handleAudioSourceCreateStreamSuccess,
+                &handleAudioSourceCreateStreamFail,
+            ) catch |err| {
+                std.log.err("audio_source: Failed to connect to device. Error: {}", .{err});
+                continue;
+            };
+            std.log.info("Microphone connected: {d}", .{source_i});
+            microphone_audio_stream = .{ .index = @intCast(u32, source_i) };
+            have_microphone = true;
+            assert(active_audio_stream.index == microphone_audio_stream.index);
+            continue;
+        }
+        // if (!have_desktop and source.source_type == .desktop) {
+        //     audio_source_interface.createStream(
+        //         @intCast(u32, source_i),
+        //         &onAudioSamplesReady,
+        //         &handleAudioSourceCreateStreamSuccess,
+        //         &handleAudioSourceCreateStreamFail,
+        //     ) catch |err| {
+        //         std.log.err("audio_source: Failed to connect to device. Error: {}", .{err});
+        //         continue;
+        //     };
+        //     std.log.info("Desktop connected: {d}", .{source_i});
+        //     desktop_audio_stream = .{ .index = @intCast(u32, source_i) };
+        //     have_desktop = true;
+        // }
     }
-    audio_source_interface.createStream(
-        null,
-        &onAudioSamplesReady,
-        &handleAudioSourceCreateStreamSuccess,
-        &handleAudioSourceCreateStreamFail,
-    ) catch |err| {
-        std.log.err("audio_source: Failed to connect to device. Error: {}", .{err});
-    };
 }
 
 fn handleAudioSourceInitFail(err: audio_source.InitError) void {
@@ -486,8 +526,23 @@ fn handleAudioSourceInitFail(err: audio_source.InitError) void {
 }
 
 fn handleAudioSourceCreateStreamSuccess(stream: audio_source.StreamHandle) void {
-    audio_source_stream = stream;
-    std.log.info("Audio input stream opened", .{});
+    const model_stream_index = model.audio_streams.len;
+    const source_info = audio_sources_ref[stream.index];
+    //
+    // Buffer size of ~100 milliseconds at a sample rate of 44100 and 2 channels
+    //
+    const buffer_capacity_samples: usize = @divExact(44100, 10) * 2;
+    audio_stream_buffer[model_stream_index].sample_buffer.init(gpa, buffer_capacity_samples) catch |err| {
+        std.log.err("Failed to allocate audio stream. Error: {}", .{err});
+        return;
+    };
+    audio_stream_buffer[model_stream_index].state = .open;
+    audio_stream_buffer[model_stream_index].source_name = std.mem.span(source_info.name);
+    audio_stream_buffer[model_stream_index].source_type = switch (source_info.source_type) {
+        .desktop => .desktop,
+        .microphone, .unknown => .microphone,
+    };
+    model.audio_streams = audio_stream_buffer[0 .. model_stream_index + 1];
 }
 
 fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {

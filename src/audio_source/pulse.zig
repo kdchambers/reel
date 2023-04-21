@@ -115,7 +115,7 @@ var active_callbacks: union {
     },
 } = undefined;
 
-var sourceListReadyCallback: ?*const ListReadyCallbackFn = null;
+var sourceListReadyCallback: *const ListReadyCallbackFn = undefined;
 
 var list_sources_allocator: std.mem.Allocator = undefined;
 
@@ -222,21 +222,34 @@ pub fn createStream(
 ) CreateStreamError!void {
     assert(backend_state == .initialized);
 
+    //
+    // TODO: Add back support for opening default stream
+    //       Because the design is a little broken atm we're gonna
+    //       assume / assert that source_index corresponds to the index
+    //       of the source returned by pulse
+    //
+    assert(source_index_opt != null);
+
     active_callbacks = .{ .create_stream = .{
         .onSuccess = onSuccess,
         .onFail = onFail,
     } };
 
-    var stream_ptr: *Stream = blk: {
-        for (&stream_buffer) |*stream| {
-            if (stream.state == .closed) {
-                stream.samplesReadyCallback = samplesReadyCallback;
-                stream.state = .initializating;
-                break :blk stream;
-            }
-        }
-        return error.MaxStreamCountReached;
-    };
+    var stream_ptr = &stream_buffer[source_index_opt.?];
+    assert(stream_ptr.state == .closed);
+    stream_ptr.samplesReadyCallback = samplesReadyCallback;
+    stream_ptr.state = .initializating;
+
+    // var stream_ptr: *Stream = blk: {
+    //     for (&stream_buffer) |*stream| {
+    //         if (stream.state == .closed) {
+    //             stream.samplesReadyCallback = samplesReadyCallback;
+    //             stream.state = .initializating;
+    //             break :blk stream;
+    //         }
+    //     }
+    //     return error.MaxStreamCountReached;
+    // };
 
     const pulse_stream = handles.stream_new(pulse_context, "Audio Input", &default_sample_spec, null) orelse
         return error.PulseStreamCreateFail;
@@ -419,7 +432,7 @@ fn handleSourceInfo(context: *pa.Context, info: *const pa.SourceInfo, eol: i32, 
     assert(backend_state == .initialized);
 
     if (eol > 0) {
-        sourceListReadyCallback.?(source_buffer[0..source_count]);
+        sourceListReadyCallback(source_buffer[0..source_count]);
         return;
     }
 
