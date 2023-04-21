@@ -1,7 +1,7 @@
 *Screen capture software for Linux / Wayland*
 ___
 
-⚠️ **Reel is still in early development but can be used for some simple use-cases** ⚠️
+⚠️ **Early development warning** ⚠️
 
 ## Goals
 
@@ -9,18 +9,18 @@ ___
 - Easy to build and package. Reduced number of build and runtime dependencies
 - Support and keep up to date with all relevant Wayland and Vulkan extensions / protocols
 - Support Wayland compositor specific extensions
-- GUI is optional, should work via an IPC interface
+- Control with scripts over an IPC interface
 
 ## Progress
 
-The following is a course-grained summary of what features / backends have been implemented. For a more complete list of features, check out the issue tracker.
+The following is a course-grained summary of what features / backends have been implemented. Additional features can be found on the issue tracker.
 
 | Feature | Status |
 | ---- | ----- |
 | Screenshot | ✅ |
 | Record Video | ✅ |
 | Stream Video | ❌ |
-| Webcam Backend video4linux2 | ⚠️ |
+| Webcam Backend video4linux2 | ✅ |
 | Webcam Backend Pipewire | ❌ |
 | Audio Input Backend ALSA | ❌ |
 | Audio Input Backend Pulse | ✅ |
@@ -56,8 +56,7 @@ To build, you'll need a master build of the zig compiler. The latest version tes
 (Pipewire screencapture backend only)
 
 - Pipewire
-- Dbus 
-- SPA
+- Dbus
 
 (Wlroots screencapture backend only)
 
@@ -72,13 +71,6 @@ zig build run -Doptimize=ReleaseSafe
 ```
 
 **NOTE**: If you build in Debug mode, you may run into dropped frames while recording.
-
-If you've attempted to build this project and ran into any sort of problem, please submit a bug report so that I can fix it! 
-
-Although I've done my best to test across Linux distributions, there are areas where different hardware configurations (Screens dimension / resolution, refresh rates, graphics card, etc) need to be taken into account and handled properly.
-
-Thank you!
-
 
 ## License
 
