@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Keith Chambers
 
-const dbus_bindings = @import("dbus_bindings.zig");
+const dbus_bindings = @import("cbindings.zig");
 
 pub const Bus = dbus_bindings.dbus.Bus;
 pub const Connection = dbus_bindings.dbus.Connection;

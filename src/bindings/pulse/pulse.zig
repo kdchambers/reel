@@ -4,7 +4,7 @@
 const std = @import("std");
 const DynLib = std.DynLib;
 
-const b = @import("c-bindings.zig");
+const b = @import("cbindings.zig");
 
 pub const ThreadedMainloop = b.pa_threaded_mainloop;
 pub const MainloopApi = b.pa_mainloop_api;
