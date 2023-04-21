@@ -19,12 +19,7 @@ const StreamHandle = root.StreamHandle;
 const CreateStreamSuccessCallbackFn = root.CreateStreamSuccessCallbackFn;
 const CreateStreamFailCallbackFn = root.CreateStreamFailCallbackFn;
 
-pub const StreamDirection = enum(i32) {
-    no_direction = 0,
-    playback = 1,
-    record = 2,
-    upload = 3,
-};
+const pa = @import("../bindings/pulse/pulse.zig");
 
 pub const InitErrors = error{
     LibraryNotAvailable,
@@ -51,17 +46,59 @@ pub const CreateStreamError = error{
 const max_concurrent_streams = 4;
 const max_source_count = 16;
 
-var pulse_thread_loop: *pa_threaded_mainloop = undefined;
-var pulse_loop_api: *pa_mainloop_api = undefined;
-var pulse_context: *pa_context = undefined;
+const default_sample_spec = pa.SampleSpec{
+    .format = .s16le,
+    .rate = 44100,
+    .channels = 2,
+};
+
+var pulse_thread_loop: *pa.ThreadedMainloop = undefined;
+var pulse_loop_api: *pa.MainloopApi = undefined;
+var pulse_context: *pa.Context = undefined;
 
 const Stream = struct {
     samplesReadyCallback: *const SamplesReadyCallbackFn = undefined,
-    pulse_stream: *pa_stream = undefined,
+    pulse_stream: *pa.Stream = undefined,
     state: StreamState = .closed,
 };
 
-var handles: DynamicHandles = undefined;
+const required_symbols = pa.SymbolList{
+    .threaded_mainloop_new = true,
+    .threaded_mainloop_get_api = true,
+    .threaded_mainloop_start = true,
+    .threaded_mainloop_free = true,
+    .threaded_mainloop_stop = true,
+    .threaded_mainloop_unlock = true,
+    .threaded_mainloop_lock = true,
+    .threaded_mainloop_wait = true,
+
+    .context_new = true,
+    .context_new_with_proplist = true,
+    .context_connect = true,
+    .context_disconnect = true,
+    .context_unref = true,
+    .context_set_state_callback = true,
+    .context_get_state = true,
+    .context_get_source_info_list = true,
+    .context_get_card_info_list = true,
+    .context_get_source_info_by_index = true,
+
+    .stream_new = true,
+    .stream_set_read_callback = true,
+    .stream_peek = true,
+    .stream_drop = true,
+    .stream_get_state = true,
+    .stream_set_state_callback = true,
+    .stream_connect_record = true,
+    .stream_unref = true,
+    .stream_get_sample_spec = true,
+    .stream_get_channel_map = true,
+    .stream_get_device_name = true,
+    .stream_get_device_index = true,
+};
+
+var handles: pa.DynamicLoader(required_symbols) = undefined;
+
 var backend_state: State = .closed;
 var library_handle_opt: ?DynLib = null;
 
@@ -117,71 +154,7 @@ pub fn init(
     } };
 
     var library_handle = library_handle_opt orelse DynLib.open("libpulse.so") catch return error.LibraryNotAvailable;
-
-    handles.threaded_mainloop_new = library_handle.lookup(@TypeOf(handles.threaded_mainloop_new), "pa_threaded_mainloop_new") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_get_api = library_handle.lookup(@TypeOf(handles.threaded_mainloop_get_api), "pa_threaded_mainloop_get_api") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_start = library_handle.lookup(@TypeOf(handles.threaded_mainloop_start), "pa_threaded_mainloop_start") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_free = library_handle.lookup(@TypeOf(handles.threaded_mainloop_free), "pa_threaded_mainloop_free") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_stop = library_handle.lookup(@TypeOf(handles.threaded_mainloop_stop), "pa_threaded_mainloop_stop") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_unlock = library_handle.lookup(@TypeOf(handles.threaded_mainloop_unlock), "pa_threaded_mainloop_unlock") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_lock = library_handle.lookup(@TypeOf(handles.threaded_mainloop_lock), "pa_threaded_mainloop_lock") orelse
-        return error.LookupFailed;
-    handles.threaded_mainloop_wait = library_handle.lookup(@TypeOf(handles.threaded_mainloop_wait), "pa_threaded_mainloop_wait") orelse
-        return error.LookupFailed;
-
-    handles.context_new = library_handle.lookup(@TypeOf(handles.context_new), "pa_context_new") orelse
-        return error.LookupFailed;
-    handles.context_new_with_proplist = library_handle.lookup(@TypeOf(handles.context_new_with_proplist), "pa_context_new_with_proplist") orelse
-        return error.LookupFailed;
-    handles.context_connect = library_handle.lookup(@TypeOf(handles.context_connect), "pa_context_connect") orelse
-        return error.LookupFailed;
-    handles.context_disconnect = library_handle.lookup(@TypeOf(handles.context_disconnect), "pa_context_disconnect") orelse
-        return error.LookupFailed;
-    handles.context_unref = library_handle.lookup(@TypeOf(handles.context_unref), "pa_context_unref") orelse
-        return error.LookupFailed;
-    handles.context_set_state_callback = library_handle.lookup(@TypeOf(handles.context_set_state_callback), "pa_context_set_state_callback") orelse
-        return error.LookupFailed;
-    handles.context_get_state = library_handle.lookup(@TypeOf(handles.context_get_state), "pa_context_get_state") orelse
-        return error.LookupFailed;
-    handles.context_get_sink_info_list = library_handle.lookup(@TypeOf(handles.context_get_sink_info_list), "pa_context_get_sink_info_list") orelse
-        return error.LookupFailed;
-    handles.context_get_source_info_list = library_handle.lookup(@TypeOf(handles.context_get_source_info_list), "pa_context_get_source_info_list") orelse
-        return error.LookupFailed;
-    handles.context_get_card_info_list = library_handle.lookup(@TypeOf(handles.context_get_card_info_list), "pa_context_get_card_info_list") orelse
-        return error.LookupFailed;
-    handles.context_get_source_info_by_index = library_handle.lookup(@TypeOf(handles.context_get_source_info_by_index), "pa_context_get_source_info_by_index") orelse
-        return error.LookupFailed;
-
-    handles.stream_new = library_handle.lookup(@TypeOf(handles.stream_new), "pa_stream_new") orelse
-        return error.LookupFailed;
-    handles.stream_set_read_callback = library_handle.lookup(@TypeOf(handles.stream_set_read_callback), "pa_stream_set_read_callback") orelse
-        return error.LookupFailed;
-    handles.stream_peek = library_handle.lookup(@TypeOf(handles.stream_peek), "pa_stream_peek") orelse
-        return error.LookupFailed;
-    handles.stream_drop = library_handle.lookup(@TypeOf(handles.stream_drop), "pa_stream_drop") orelse
-        return error.LookupFailed;
-    handles.stream_get_state = library_handle.lookup(@TypeOf(handles.stream_get_state), "pa_stream_get_state") orelse
-        return error.LookupFailed;
-    handles.stream_set_state_callback = library_handle.lookup(@TypeOf(handles.stream_set_state_callback), "pa_stream_set_state_callback") orelse
-        return error.LookupFailed;
-    handles.stream_connect_record = library_handle.lookup(@TypeOf(handles.stream_connect_record), "pa_stream_connect_record") orelse
-        return error.LookupFailed;
-    handles.stream_unref = library_handle.lookup(@TypeOf(handles.stream_unref), "pa_stream_unref") orelse
-        return error.LookupFailed;
-    handles.stream_get_sample_spec = library_handle.lookup(@TypeOf(handles.stream_get_sample_spec), "pa_stream_get_sample_spec") orelse
-        return error.LookupFailed;
-    handles.stream_get_channel_map = library_handle.lookup(@TypeOf(handles.stream_get_channel_map), "pa_stream_get_channel_map") orelse
-        return error.LookupFailed;
-    handles.stream_get_device_name = library_handle.lookup(@TypeOf(handles.stream_get_device_name), "pa_stream_get_device_name") orelse
-        return error.LookupFailed;
-    handles.stream_get_device_index = library_handle.lookup(@TypeOf(handles.stream_get_device_index), "pa_stream_get_device_index") orelse
-        return error.LookupFailed;
+    handles.load(&library_handle) catch return error.LibraryNotAvailable;
 
     pulse_thread_loop = handles.threaded_mainloop_new() orelse
         return error.PulseThreadedLoopCreateFail;
@@ -267,7 +240,7 @@ pub fn createStream(
 
     handles.threaded_mainloop_lock(pulse_thread_loop);
 
-    const pulse_stream = handles.stream_new(pulse_context, "Audio Input", &_sample_spec, null) orelse
+    const pulse_stream = handles.stream_new(pulse_context, "Audio Input", &default_sample_spec, null) orelse
         return error.PulseStreamCreateFail;
 
     stream_ptr.*.pulse_stream = pulse_stream;
@@ -280,8 +253,8 @@ pub fn createStream(
     const bytes_per_second = 44100 * bytes_per_sample;
     const buffer_size: u32 = @divExact(bytes_per_second, target_fps);
 
-    const flags: StreamFlags = .{};
-    const buffer_attributes = BufferAttr{
+    const flags: pa.StreamFlags = .{};
+    const buffer_attributes = pa.BufferAttr{
         .max_length = std.math.maxInt(u32),
         .tlength = std.math.maxInt(u32),
         .minreq = std.math.maxInt(u32),
@@ -330,7 +303,7 @@ fn streamState(stream: StreamHandle) StreamState {
     return stream_buffer[stream.index].state;
 }
 
-fn onStreamStateCallback(pulse_stream: *pa_stream, userdata: ?*anyopaque) callconv(.C) void {
+fn onStreamStateCallback(pulse_stream: *pa.Stream, userdata: ?*anyopaque) callconv(.C) void {
     const stream = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
     switch (handles.stream_get_state(pulse_stream)) {
         .creating => assert(stream.state == .initializating),
@@ -365,7 +338,7 @@ fn onStreamStateCallback(pulse_stream: *pa_stream, userdata: ?*anyopaque) callco
     }
 }
 
-fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?*anyopaque) callconv(.C) void {
+fn onContextStateChangedCallback(context: *pa.Context, success: i32, userdata: ?*anyopaque) callconv(.C) void {
     //
     // TODO: Check the `success` parameter
     //
@@ -393,7 +366,7 @@ fn onContextStateChangedCallback(context: *pa_context, success: i32, userdata: ?
     }
 }
 
-fn streamReadCallback(pulse_stream: *pa_stream, bytes_available_count: u64, userdata: ?*anyopaque) callconv(.C) void {
+fn streamReadCallback(pulse_stream: *pa.Stream, bytes_available_count: u64, userdata: ?*anyopaque) callconv(.C) void {
     const stream = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
     assert(stream.state == .paused or stream.state == .running);
 
@@ -436,14 +409,14 @@ fn streamReadCallback(pulse_stream: *pa_stream, bytes_available_count: u64, user
     }
 }
 
-fn handleCardInfo(context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
+fn handleCardInfo(context: *pa.Context, info: *const pa.CardInfo, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
     _ = context;
     _ = userdata;
     if (eol > 0) return;
     std.log.info("Card: {s}", .{info.name});
 }
 
-fn handleSourceInfo(context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
+fn handleSourceInfo(context: *pa.Context, info: *const pa.SourceInfo, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
     _ = context;
     _ = userdata;
 
@@ -498,597 +471,9 @@ fn handleSourceInfo(context: *pa_context, info: *const pa_source_info, eol: i32,
     source_count += 1;
 }
 
-fn handleSinkInfo(context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
+fn handleSinkInfo(context: *pa.Context, info: *const pa.SinkInfo, eol: i32, userdata: ?*anyopaque) callconv(.C) void {
     _ = context;
     _ = userdata;
     if (eol > 0) return;
     std.log.info("Sink: {s} {s}", .{ info.name, info.description });
 }
-
-//
-// Pulse Audio bindings / definitions
-// TODO: Move to separate file
-//
-
-const pa_mainloop_api = opaque {};
-const pa_threaded_mainloop = opaque {};
-const pa_context = opaque {};
-const pa_stream = opaque {};
-const pa_proplist = opaque {};
-
-const ContextState = enum(i32) {
-    unconnected,
-    connecting,
-    authorizing,
-    setting_name,
-    ready,
-    failed,
-    terminated,
-};
-
-const ContextFlags = packed struct(i32) {
-    noautospawn: bool = false,
-    nofail: bool = false,
-    reserved_bit_2: bool = false,
-    reserved_bit_3: bool = false,
-    reserved_bit_4: bool = false,
-    reserved_bit_5: bool = false,
-    reserved_bit_6: bool = false,
-    reserved_bit_7: bool = false,
-    reserved_bit_8: bool = false,
-    reserved_bit_9: bool = false,
-    reserved_bit_10: bool = false,
-    reserved_bit_11: bool = false,
-    reserved_bit_12: bool = false,
-    reserved_bit_13: bool = false,
-    reserved_bit_14: bool = false,
-    reserved_bit_15: bool = false,
-    reserved_bit_16: bool = false,
-    reserved_bit_17: bool = false,
-    reserved_bit_18: bool = false,
-    reserved_bit_19: bool = false,
-    reserved_bit_20: bool = false,
-    reserved_bit_21: bool = false,
-    reserved_bit_22: bool = false,
-    reserved_bit_23: bool = false,
-    reserved_bit_24: bool = false,
-    reserved_bit_25: bool = false,
-    reserved_bit_26: bool = false,
-    reserved_bit_27: bool = false,
-    reserved_bit_28: bool = false,
-    reserved_bit_29: bool = false,
-    reserved_bit_30: bool = false,
-    reserved_bit_31: bool = false,
-};
-
-//
-// Threaded Loop
-//
-extern fn pa_threaded_mainloop_new() callconv(.C) ?*pa_threaded_mainloop;
-extern fn pa_threaded_mainloop_get_api(loop: *pa_threaded_mainloop) callconv(.C) ?*pa_mainloop_api;
-extern fn pa_threaded_mainloop_start(loop: *pa_threaded_mainloop) callconv(.C) i32;
-extern fn pa_threaded_mainloop_free(loop: *pa_threaded_mainloop) callconv(.C) void;
-extern fn pa_threaded_mainloop_stop(loop: *pa_threaded_mainloop) callconv(.C) void;
-extern fn pa_threaded_mainloop_unlock(loop: *pa_threaded_mainloop) callconv(.C) void;
-extern fn pa_threaded_mainloop_lock(loop: *pa_threaded_mainloop) callconv(.C) void;
-extern fn pa_threaded_mainloop_wait(loop: *pa_threaded_mainloop) callconv(.C) void;
-
-//
-// Context
-//
-
-const ContextSuccessFn = fn (context: *pa_context, success: i32, userdata: ?*anyopaque) callconv(.C) void;
-
-const pa_spawn_api = extern struct {
-    prefork: *const fn () callconv(.C) void,
-    postfork: *const fn () callconv(.C) void,
-    atfork: *const fn () callconv(.C) void,
-};
-const pa_operation = opaque {};
-
-const pa_sink_info_cb_t = fn (context: *pa_context, info: *const pa_sink_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void;
-const pa_source_info_cb_t = fn (context: *pa_context, info: *const pa_source_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void;
-const pa_card_info_cb_t = fn (context: *pa_context, info: *const pa_card_info, eol: i32, userdata: ?*anyopaque) callconv(.C) void;
-
-const pa_card_profile_info = extern struct {
-    name: [*:0]const u8,
-    description: [*:0]const u8,
-    n_sinks: u32,
-    n_sources: u32,
-    priority: u32,
-};
-
-const pa_card_profile_info2 = extern struct {
-    name: [*:0]const u8,
-    description: [*:0]const u8,
-    n_sinks: u32,
-    n_sources: u32,
-    priority: u32,
-    available: i32,
-};
-
-const pa_card_port_info = extern struct {
-    name: [*:0]const u8,
-    description: [*:0]const u8,
-    priority: u32,
-    available: i32,
-    direction: i32,
-    n_profiles: u32,
-    profiles: **pa_card_profile_info,
-    proplist: *pa_proplist,
-    latency_offest: u64,
-    profiles2: **pa_card_profile_info2,
-    availability_group: [*:0]const u8,
-    type: PortType,
-};
-
-const pa_card_info = extern struct {
-    index: u32,
-    name: [*:0]const u8,
-    owner_module: u32,
-    driver: [*:0]const u8,
-    n_profiles: u32,
-    profiles: [*]pa_card_profile_info,
-    active_profile: *pa_card_profile_info,
-    proplist: *pa_proplist,
-    n_ports: u32,
-    ports: [*]*pa_card_port_info,
-    profiles2: **pa_card_profile_info2,
-    active_profile2: *pa_card_profile_info2,
-};
-
-const PortType = enum(u32) {
-    unknown = 0,
-    aux,
-    speaker,
-    headphones,
-    line,
-    mic,
-    headset,
-    handset,
-    earpiece,
-    spdif,
-    hdmi,
-    tv,
-    radio,
-    video,
-    usb,
-    bluetooth,
-    portable,
-    handsfree,
-    car,
-    hifi,
-    phone,
-    network,
-    analog,
-};
-
-const PA_CHANNELS_MAX = 32;
-
-const pa_volume_t = u32;
-const pa_usec_t = u64;
-
-const pa_cvolume = extern struct {
-    channels: u8,
-    values: [PA_CHANNELS_MAX]pa_volume_t,
-};
-
-const pa_sink_flags_t = packed struct(u32) {
-    hw_volume_ctrl: bool = false,
-    latency: bool = false,
-    hardward: bool = false,
-    network: bool = false,
-    hw_mute_ctrl: bool = false,
-    decibel_volume: bool = false,
-    flat_volume: bool = false,
-    dynamic_latency: bool = false,
-    set_formats: bool = false,
-    reserved_bit_9: bool = false,
-    reserved_bit_10: bool = false,
-    reserved_bit_11: bool = false,
-    reserved_bit_12: bool = false,
-    reserved_bit_13: bool = false,
-    reserved_bit_14: bool = false,
-    reserved_bit_15: bool = false,
-    reserved_bit_16: bool = false,
-    reserved_bit_17: bool = false,
-    reserved_bit_18: bool = false,
-    reserved_bit_19: bool = false,
-    reserved_bit_20: bool = false,
-    reserved_bit_21: bool = false,
-    reserved_bit_22: bool = false,
-    reserved_bit_23: bool = false,
-    reserved_bit_24: bool = false,
-    reserved_bit_25: bool = false,
-    reserved_bit_26: bool = false,
-    reserved_bit_27: bool = false,
-    reserved_bit_28: bool = false,
-    reserved_bit_29: bool = false,
-    reserved_bit_30: bool = false,
-    reserved_bit_31: bool = false,
-};
-
-const pa_sink_state_t = enum(i32) {
-    invalid_state = -1,
-    running = 0,
-    idle = 1,
-    suspended = 2,
-};
-
-const pa_sink_port_info = extern struct {
-    name: [*:0]const u8,
-    description: [*:0]const u8,
-    priority: u32,
-    available: i32,
-    availability_group: ?[*:0]const u8,
-    type: u32,
-};
-
-const pa_source_port_info = extern struct {
-    name: [*:0]const u8,
-    description: [*:0]const u8,
-    priority: u32,
-    available: i32,
-    availability_group: ?[*:0]const u8,
-    type: PortType,
-};
-
-const pa_format_info = extern struct {
-    encoding: pa_encoding_t,
-    plist: *pa_proplist,
-};
-
-const pa_encoding_t = enum(i32) {
-    any = 0,
-    pcm = 1,
-    ac3_iec61937 = 2,
-    eac3_iec61937 = 3,
-    mpeg_iec61937 = 4,
-    dts_iec61937 = 5,
-    mpeg2_aac_iec61937 = 6,
-    truehd_ie61937 = 7,
-    dtshd_ie61937 = 8,
-    max = 9,
-    invalid = -1,
-};
-
-const pa_sink_info = extern struct {
-    name: [*:0]const u8,
-    index: u32,
-    description: [*:0]const u8,
-    sample_spec: pa_sample_spec,
-    channel_map: pa_channel_map,
-    owner_module: u32,
-    volume: pa_cvolume,
-    mute: i32,
-    monitor_source: u32,
-    monitor_source_name: [*:0]const u8,
-    latency: pa_usec_t,
-    driver: [*:0]const u8,
-    flags: pa_sink_flags_t,
-    proplist: *pa_proplist,
-    configured_latency: pa_usec_t,
-    base_volume: pa_volume_t,
-    state: pa_sink_state_t,
-    n_volume_steps: u32,
-    card: u32,
-    n_ports: u32,
-    ports: **pa_sink_port_info,
-    active_port: *pa_sink_port_info,
-    n_formats: u8,
-    formats: **pa_format_info,
-};
-
-const pa_source_flags_t = packed struct(u32) {
-    hw_volume_control: bool = false,
-    latency: bool = false,
-    hardware: bool = false,
-    network: bool = false,
-    hw_mute_ctrl: bool = false,
-    decibel_volume: bool = false,
-    dynamic_volume: bool = false,
-    dynamic_latency: bool = false,
-    reserved_bit_8: bool = false,
-    reserved_bit_9: bool = false,
-    reserved_bit_10: bool = false,
-    reserved_bit_11: bool = false,
-    reserved_bit_12: bool = false,
-    reserved_bit_13: bool = false,
-    reserved_bit_14: bool = false,
-    reserved_bit_15: bool = false,
-    reserved_bit_16: bool = false,
-    reserved_bit_17: bool = false,
-    reserved_bit_18: bool = false,
-    reserved_bit_19: bool = false,
-    reserved_bit_20: bool = false,
-    reserved_bit_21: bool = false,
-    reserved_bit_22: bool = false,
-    reserved_bit_23: bool = false,
-    reserved_bit_24: bool = false,
-    reserved_bit_25: bool = false,
-    reserved_bit_26: bool = false,
-    reserved_bit_27: bool = false,
-    reserved_bit_28: bool = false,
-    reserved_bit_29: bool = false,
-    reserved_bit_30: bool = false,
-    reserved_bit_31: bool = false,
-};
-
-const pa_source_state_t = enum(i32) {
-    invalid_state = -1,
-    running = 0,
-    idle = 1,
-    suspended = 2,
-};
-
-const pa_source_info = extern struct {
-    name: [*:0]const u8,
-    index: u32,
-    description: [*:0]const u8,
-    sample_spec: pa_sample_spec,
-    channel_map: pa_channel_map,
-    owner_module: u32,
-    volume: pa_cvolume,
-    mute: i32,
-    monitor_of_sink: u32,
-    monitor_of_sink_name: ?[*:0]const u8,
-    latency: pa_usec_t,
-    driver: [*:0]const u8,
-    flags: pa_source_flags_t,
-    proplist: *pa_proplist,
-
-    configured_latency: pa_usec_t,
-    base_volume: pa_volume_t,
-    state: pa_source_state_t,
-    n_volume_steps: u32,
-    card: u32,
-    n_ports: u32,
-    ports: [*]*pa_source_port_info,
-    active_port: ?*pa_source_port_info,
-    n_formats: u8,
-    formats: **pa_format_info,
-};
-
-extern fn pa_context_new(mainloop: *pa_mainloop_api, name: [*:0]const u8) callconv(.C) ?*pa_context;
-extern fn pa_context_new_with_proplist(
-    mainloop: *pa_mainloop_api,
-    name: [*:0]const u8,
-    proplist: *const pa_proplist,
-) callconv(.C) ?*pa_context;
-extern fn pa_context_connect(
-    context: *pa_context,
-    server: ?[*:0]const u8,
-    flags: ContextFlags,
-    api: ?*pa_spawn_api,
-) i32;
-extern fn pa_context_disconnect(context: *pa_context) callconv(.C) void;
-extern fn pa_context_unref(context: *pa_context) callconv(.C) void;
-extern fn pa_context_set_state_callback(
-    context: *pa_context,
-    state_callback: *const ContextSuccessFn,
-    userdata: ?*anyopaque,
-) callconv(.C) void;
-extern fn pa_context_get_state(context: *const pa_context) callconv(.C) ContextState;
-extern fn pa_context_get_sink_info_list(
-    context: *const pa_context,
-    callback: *const pa_sink_info_cb_t,
-    userdata: ?*anyopaque,
-) callconv(.C) *pa_operation;
-extern fn pa_context_get_source_info_list(
-    context: *const pa_context,
-    callback: *const pa_source_info_cb_t,
-    userdata: ?*anyopaque,
-) callconv(.C) *pa_operation;
-extern fn pa_context_get_card_info_list(
-    context: *const pa_context,
-    callback: *const pa_card_info_cb_t,
-    userdata: ?*anyopaque,
-) callconv(.C) *pa_operation;
-extern fn pa_context_get_source_info_by_index(
-    context: *const pa_context,
-    index: u32,
-    callback: *const pa_source_info_cb_t,
-    userdata: ?*anyopaque,
-) callconv(.C) *pa_operation;
-
-//
-// Stream
-//
-
-const StreamRequestFn = fn (stream: *pa_stream, bytes_available_count: u64, userdata: ?*anyopaque) callconv(.C) void;
-const StreamNotifyFn = fn (stream: *pa_stream, userdata: ?*anyopaque) callconv(.C) void;
-
-extern fn pa_stream_new(context: *pa_context, name: [*:0]const u8, sample_spec: *const SampleSpec, map: ?*const ChannelMap) ?*pa_stream;
-extern fn pa_stream_set_read_callback(stream: *pa_stream, callback: *const StreamRequestFn, userdata: ?*anyopaque) callconv(.C) void;
-extern fn pa_stream_peek(stream: *pa_stream, data: *?*const void, data_size_bytes: *u64) callconv(.C) i32;
-extern fn pa_stream_drop(stream: *pa_stream) callconv(.C) i32;
-extern fn pa_stream_get_state(stream: *pa_stream) callconv(.C) PulseStreamState;
-extern fn pa_stream_set_state_callback(stream: *pa_stream, callback: *const StreamNotifyFn, userdata: ?*anyopaque) callconv(.C) void;
-extern fn pa_stream_connect_record(stream: *pa_stream, device: ?[*:0]const u8, buffer_attributes: ?*const BufferAttr, flags: StreamFlags) callconv(.C) i32;
-extern fn pa_stream_unref(stream: *pa_stream) callconv(.C) void;
-extern fn pa_stream_get_sample_spec(stream: *pa_stream) callconv(.C) *const pa_sample_spec;
-extern fn pa_stream_get_channel_map(stream: *pa_stream) callconv(.C) *const pa_channel_map;
-extern fn pa_stream_get_device_name(stream: *pa_stream) callconv(.C) [*:0]const u8;
-extern fn pa_stream_get_device_index(stream: *pa_stream) callconv(.C) u32;
-
-const StreamFlags = packed struct(i32) {
-    start_corked: bool = false,
-    interpolate_timing: bool = false,
-    not_monotonic: bool = false,
-    auto_timing_update: bool = false,
-    no_remap_channels: bool = false,
-    no_remix_channels: bool = false,
-    fix_format: bool = false,
-    fix_rate: bool = false,
-    fix_channels: bool = false,
-    dont_move: bool = false,
-    variable_rate: bool = false,
-    peak_detect: bool = false,
-    start_muted: bool = false,
-    adjust_latency: bool = false,
-    early_requests: bool = false,
-    inhibit_auto_suspend: bool = false,
-    start_unmuted: bool = false,
-    fail_on_suspend: bool = false,
-    relative_volume: bool = false,
-    passthrough: bool = false,
-    reserved_bit_20: bool = false,
-    reserved_bit_21: bool = false,
-    reserved_bit_22: bool = false,
-    reserved_bit_23: bool = false,
-    reserved_bit_24: bool = false,
-    reserved_bit_25: bool = false,
-    reserved_bit_26: bool = false,
-    reserved_bit_27: bool = false,
-    reserved_bit_28: bool = false,
-    reserved_bit_29: bool = false,
-    reserved_bit_30: bool = false,
-    reserved_bit_31: bool = false,
-};
-
-const _sample_spec = SampleSpec{
-    .format = .s16le,
-    .rate = 44100,
-    .channels = 2,
-};
-
-// TODO: Rename when moved into it's own file (Was StreamState)
-const PulseStreamState = enum(i32) {
-    unconnected,
-    creating,
-    ready,
-    failed,
-    terminated,
-};
-
-const DynamicHandles = struct {
-    threaded_mainloop_new: *const @TypeOf(pa_threaded_mainloop_new),
-    threaded_mainloop_get_api: *const @TypeOf(pa_threaded_mainloop_get_api),
-    threaded_mainloop_start: *const @TypeOf(pa_threaded_mainloop_start),
-    threaded_mainloop_free: *const @TypeOf(pa_threaded_mainloop_free),
-    threaded_mainloop_stop: *const @TypeOf(pa_threaded_mainloop_stop),
-    threaded_mainloop_unlock: *const @TypeOf(pa_threaded_mainloop_unlock),
-    threaded_mainloop_lock: *const @TypeOf(pa_threaded_mainloop_lock),
-    threaded_mainloop_wait: *const @TypeOf(pa_threaded_mainloop_wait),
-
-    context_new: *const @TypeOf(pa_context_new),
-    context_new_with_proplist: *const @TypeOf(pa_context_new_with_proplist),
-    context_connect: *const @TypeOf(pa_context_connect),
-    context_disconnect: *const @TypeOf(pa_context_disconnect),
-    context_unref: *const @TypeOf(pa_context_unref),
-    context_set_state_callback: *const @TypeOf(pa_context_set_state_callback),
-    context_get_state: *const @TypeOf(pa_context_get_state),
-    context_get_sink_info_list: *const @TypeOf(pa_context_get_sink_info_list),
-    context_get_source_info_list: *const @TypeOf(pa_context_get_source_info_list),
-    context_get_card_info_list: *const @TypeOf(pa_context_get_card_info_list),
-    context_get_source_info_by_index: *const @TypeOf(pa_context_get_source_info_by_index),
-
-    stream_new: *const @TypeOf(pa_stream_new),
-    stream_set_read_callback: *const @TypeOf(pa_stream_set_read_callback),
-    stream_peek: *const @TypeOf(pa_stream_peek),
-    stream_drop: *const @TypeOf(pa_stream_drop),
-    stream_get_state: *const @TypeOf(pa_stream_get_state),
-    stream_set_state_callback: *const @TypeOf(pa_stream_set_state_callback),
-    stream_connect_record: *const @TypeOf(pa_stream_connect_record),
-    stream_unref: *const @TypeOf(pa_stream_unref),
-    stream_get_sample_spec: *const @TypeOf(pa_stream_get_sample_spec),
-    stream_get_channel_map: *const @TypeOf(pa_stream_get_channel_map),
-    stream_get_device_name: *const @TypeOf(pa_stream_get_device_name),
-    stream_get_device_index: *const @TypeOf(pa_stream_get_device_index),
-};
-
-pub const SampleFormat = enum(i32) {
-    u8,
-    alaw,
-    ulaw,
-    s16le,
-    s16be,
-    float32le,
-    float32be,
-    s32le,
-    s32be,
-    s24le,
-    s24be,
-    s24_32le,
-    s24_32be,
-    max,
-    invalid = -1,
-};
-
-pub const ChannelPosition = enum(i32) {
-    invalid = -1,
-    mono = 0,
-    front_left,
-    front_right,
-    front_center,
-    rear_center,
-    rear_left,
-    rear_right,
-    lfe,
-    front_left_of_center,
-    front_right_of_center,
-    side_left,
-    side_right,
-    aux0,
-    aux1,
-    aux2,
-    aux3,
-    aux4,
-    aux5,
-    aux6,
-    aux7,
-    aux8,
-    aux9,
-    aux10,
-    aux11,
-    aux12,
-    aux13,
-    aux14,
-    aux15,
-    aux16,
-    aux17,
-    aux18,
-    aux19,
-    aux20,
-    aux21,
-    aux22,
-    aux23,
-    aux24,
-    aux25,
-    aux26,
-    aux27,
-    aux28,
-    aux29,
-    aux30,
-    aux31,
-    top_center,
-    top_front_left,
-    top_front_right,
-    top_front_center,
-    top_rear_left,
-    top_rear_right,
-    top_rear_center,
-    max,
-};
-
-const channels_max = 32;
-pub const pa_channel_map = extern struct {
-    channels: u8,
-    map: [channels_max]ChannelPosition,
-};
-pub const ChannelMap = pa_channel_map;
-
-pub const pa_sample_spec = extern struct {
-    format: SampleFormat,
-    rate: u32,
-    channels: u8,
-};
-pub const SampleSpec = pa_sample_spec;
-
-pub const BufferAttr = extern struct {
-    max_length: u32,
-    tlength: u32,
-    prebuf: u32,
-    minreq: u32,
-    fragsize: u32,
-};
