@@ -111,6 +111,8 @@ var recording_frame_index_base: u64 = 0;
 
 var gpa: std.mem.Allocator = undefined;
 
+var audio_source_stream: audio_source.StreamHandle = undefined;
+
 //
 // TODO: This should probably be heap allocated
 //
@@ -163,7 +165,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     const buffer_capacity_samples: usize = @divExact(44100, 10) * 2;
     try model.source_audio_buffer.init(gpa, buffer_capacity_samples);
 
-    audio_source_interface = audio_source.createBestInterface(&onAudioSourceRead);
+    audio_source_interface = audio_source.bestInterface();
 
     audio_source_interface.init(
         &handleAudioSourceInitSuccess,
@@ -311,7 +313,7 @@ pub fn run() !void {
 }
 
 pub fn deinit() void {
-    audio_source_interface.close();
+    audio_source_interface.deinit();
 
     model.source_audio_buffer.deinit(gpa);
 
@@ -437,7 +439,9 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
 }
 
 // NOTE: This will be called on a separate thread
-pub fn onAudioSourceRead(pcm_buffer: []i16) void {
+pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16) void {
+    _ = stream;
+
     // NOTE: model_mutex is also protecting `last_audio_source_timestamp` here
     model_mutex.lock();
     defer model_mutex.unlock();
@@ -447,26 +451,34 @@ pub fn onAudioSourceRead(pcm_buffer: []i16) void {
 
 fn handleAudioSourceInitSuccess() void {
     std.log.info("audio input system initialized", .{});
-    audio_source_interface.open(
-        // devices[0].name,
+    audio_source_interface.listSources(gpa, handleSourceListReady);
+}
+
+fn handleSourceListReady(audio_sources: []audio_source.SourceInfo) void {
+    std.log.info("Audio devices found", .{});
+    for (audio_sources) |source| {
+        std.log.info("name: {s} desc: {s}", .{ source.name, source.description });
+    }
+    audio_source_interface.createStream(
         null,
-        &handleAudioSourceOpenSuccess,
-        &handleAudioSourceOpenFail,
+        &onAudioSamplesReady,
+        &handleAudioSourceCreateStreamSuccess,
+        &handleAudioSourceCreateStreamFail,
     ) catch |err| {
         std.log.err("audio_source: Failed to connect to device. Error: {}", .{err});
     };
-    // audio_source_interface.inputList(general_allocator, handleAudioDeviceInputsList);
 }
 
 fn handleAudioSourceInitFail(err: audio_source.InitError) void {
     std.log.err("Failed to initialize audio input system. Error: {}", .{err});
 }
 
-fn handleAudioSourceOpenSuccess() void {
+fn handleAudioSourceCreateStreamSuccess(stream: audio_source.StreamHandle) void {
+    audio_source_stream = stream;
     std.log.info("Audio input stream opened", .{});
 }
 
-fn handleAudioSourceOpenFail(err: audio_source.OpenError) void {
+fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
     std.log.err("Failed to open audio input device. Error: {}", .{err});
 }
 
