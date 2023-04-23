@@ -2,7 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
-const dbus = @import("../../dbus.zig");
+const dbus = @import("../../bindings/dbus/dbus.zig");
 
 const graphics = @import("../../graphics.zig");
 const screencapture = @import("../../screencapture.zig");
@@ -47,12 +47,26 @@ const SourceTypeFlags = packed struct(u32) {
     reserved: u29 = 0,
 };
 
+const PersistMode = enum(u32) {
+    default,
+    application,
+    until_revoked,
+};
+
+const CursorModeFlags = packed struct(u32) {
+    hidden: bool = false,
+    embedded: bool = false,
+    metadata: bool = false,
+    reserved: u29 = 0,
+};
+
 const StartResponse = struct {
     pipewire_node_id: u32,
     id: [*:0]const u8,
     position: [2]i32,
     dimensions: [2]i32,
     source_type: u32,
+    restore_token: ?[]const u8,
 };
 
 const SupportedPixelFormat = screencapture.SupportedPixelFormat;
@@ -634,6 +648,111 @@ fn setSource(
     }
 
     //
+    // Open Dict Entry [2] - persist_mode u
+    //
+    {
+        const option_types_label: [*:0]const u8 = "persist_mode";
+
+        var dict_entry_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
+            return error.WriteDictFail;
+
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+            return error.AppendBasicFail;
+
+        //
+        // Because entry in Dict is a variant, we can't use append_basic and instead have to open yet another
+        // container
+        //
+        var dict_variant_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "u", &dict_variant_iter) != 1)
+            return error.WriteDictFail;
+
+        const persist_mode: u32 = @enumToInt(PersistMode.until_revoked);
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @ptrCast(*const void, &persist_mode)) != 1)
+            return error.AppendBasicFail;
+
+        if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
+            return error.CloseContainerFail;
+
+        //
+        // Close Dict Entry
+        //
+        if (dbus.messageIterCloseContainer(&array_iter, &dict_entry_iter) != 1)
+            return error.CloseContainerFail;
+    }
+
+    //
+    // Open Dict Entry [3] - cursor_mode u
+    //
+    {
+        const option_types_label: [*:0]const u8 = "cursor_mode";
+
+        var dict_entry_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
+            return error.WriteDictFail;
+
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+            return error.AppendBasicFail;
+
+        //
+        // Because entry in Dict is a variant, we can't use append_basic and instead have to open yet another
+        // container
+        //
+        var dict_variant_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "u", &dict_variant_iter) != 1)
+            return error.WriteDictFail;
+
+        const cursor_flags: u32 = @bitCast(u32, CursorModeFlags{ .embedded = true });
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @ptrCast(*const void, &cursor_flags)) != 1)
+            return error.AppendBasicFail;
+
+        if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
+            return error.CloseContainerFail;
+
+        //
+        // Close Dict Entry
+        //
+        if (dbus.messageIterCloseContainer(&array_iter, &dict_entry_iter) != 1)
+            return error.CloseContainerFail;
+    }
+
+    //
+    // Open Dict Entry [4] - multiple b
+    //
+    {
+        const option_types_label: [*:0]const u8 = "multiple";
+
+        var dict_entry_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
+            return error.WriteDictFail;
+
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+            return error.AppendBasicFail;
+
+        //
+        // Because entry in Dict is a variant, we can't use append_basic and instead have to open yet another
+        // container
+        //
+        var dict_variant_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "b", &dict_variant_iter) != 1)
+            return error.WriteDictFail;
+
+        const allow_multiple: bool = false;
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @ptrCast(*const void, &allow_multiple)) != 1)
+            return error.AppendBasicFail;
+
+        if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
+            return error.CloseContainerFail;
+
+        //
+        // Close Dict Entry
+        //
+        if (dbus.messageIterCloseContainer(&array_iter, &dict_entry_iter) != 1)
+            return error.CloseContainerFail;
+    }
+
+    //
     // Close Array
     //
     if (dbus.messageIterCloseContainer(&root_iter, &array_iter) != 1)
@@ -1105,8 +1224,8 @@ pub fn init() !void {
 
             const response = dbus.connectionPopMessage(connection) orelse continue;
 
-            const response_path = dbus.messageGetPath(response);
-            _ = response_path;
+            // const response_path = dbus.messageGetPath(response);
+            // _ = response_path;
 
             const is_match = (1 == dbus.messageIsSignal(
                 response,
@@ -1130,8 +1249,8 @@ pub fn init() !void {
 
     dbus.busRemoveMatch(connection, start_stream_match_rule, null);
 
-    const start_response_signature = dbus.messageGetSignature(start_stream_response);
-    _ = start_response_signature;
+    // const start_response_signature = dbus.messageGetSignature(start_stream_response);
+    // _ = start_response_signature;
     const start_responses = try extractMessageStart(start_stream_response);
 
     const pipewire_fd = try openPipewireRemote(
@@ -1310,6 +1429,10 @@ fn teardownPipewire() void {
 fn extractMessageStart(
     start_stream_response: *dbus.Message,
 ) !StartResponse {
+
+    // const message_signature = dbus.messageGetSignature(start_stream_response);
+    // std.log.info("Signature: {s}", .{message_signature});
+
     var start_stream_response_iter: dbus.MessageIter = undefined;
     _ = dbus.messageIterInit(start_stream_response, &start_stream_response_iter);
 
@@ -1382,6 +1505,7 @@ fn extractMessageStart(
                 next_type = dbus.messageIterGetArgType(&array_dict_entry_iter);
                 if (next_type == c.DBUS_TYPE_STRING) {
                     dbus.messageIterGetBasic(&array_dict_entry_iter, @ptrCast(*void, &option_label));
+                    std.log.info("Ret label: {s}", .{option_label});
                     if (c.strncmp("size", option_label, 4) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
                         next_type = dbus.messageIterGetArgType(&array_dict_entry_iter);
