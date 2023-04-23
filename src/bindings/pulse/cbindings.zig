@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Keith Chambers
 
-const timeval = @import("std").os.timeval;
+const std = @import("std");
+const timeval = std.os.timeval;
 
 pub const pa_mainloop_api = opaque {};
 pub const pa_threaded_mainloop = opaque {};
@@ -183,6 +184,15 @@ pub extern fn pa_context_load_cookie_from_file(context: *pa_context, cookie_file
 //
 // def.h
 //
+
+pub const PA_INVALID_INDEX = std.math.maxInt(u32);
+
+
+pub const pa_port_available = enum(i32) {
+    unknown,
+    no,
+    yes,
+};
 
 pub const pa_buffer_attr = extern struct {
     max_length: u32,
@@ -540,7 +550,7 @@ pub const pa_source_port_info = extern struct {
     name: [*:0]const u8,
     description: [*:0]const u8,
     priority: u32,
-    available: i32,
+    available: pa_port_available,
     availability_group: ?[*:0]const u8,
     type: pa_device_port_type_t,
 };

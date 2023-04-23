@@ -439,6 +439,7 @@ fn handleSourceInfo(context: *pa.Context, info: *const pa.SourceInfo, eol: i32, 
     std.log.info("Name: {s}", .{info.description});
     std.log.info("State: {s}", .{@tagName(info.state)});
     std.log.info("Monitor: {s}", .{info.monitor_of_sink_name orelse "null"});
+    std.log.info("Is monitor? {s}", .{if (info.monitor_of_sink == pa.invalid_index) "false" else "true"});
 
     for (0..info.n_ports) |i| {
         const current_port = info.ports[i];
@@ -462,19 +463,29 @@ fn handleSourceInfo(context: *pa.Context, info: *const pa.SourceInfo, eol: i32, 
         .description = description,
     };
 
-    if (info.active_port) |active_port| {
-        if (active_port.*.type == .analog) {
-            source_buffer[source_count].source_type = .microphone;
-            std.log.info("Adding mic", .{});
+    source_buffer[source_count].source_type = .unknown;
+
+    choose_type: {
+        if (info.monitor_of_sink != pa.invalid_index) {
+            //
+            // If the audio source is a monitor for a sink, we assume it's monitoring
+            // desktop audio
+            //
+            source_buffer[source_count].source_type = .desktop;
+            std.log.info("Adding desktop output", .{});
+        } else if (info.active_port) |active_port| {
+            if (active_port.available == .no) {
+                std.log.info("Port not available", .{});
+                break :choose_type;
+            }
+            //
+            // Otherwise, check what type of audio source it is based on the port
+            //
+            if (active_port.*.type == .analog or active_port.*.type == .mic) {
+                source_buffer[source_count].source_type = .microphone;
+                std.log.info("Adding mic", .{});
+            }
         }
-    } else if (info.n_ports == 1) {
-        if (info.ports[0].*.type == .mic) {
-            source_buffer[source_count].source_type = .microphone;
-            std.log.info("Adding mic", .{});
-        }
-    } else if (info.monitor_of_sink_name != null) {
-        source_buffer[source_count].source_type = .desktop;
-        std.log.info("Adding desktop output", .{});
     }
 
     source_count += 1;

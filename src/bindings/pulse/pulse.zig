@@ -18,6 +18,8 @@ pub const StreamFlags = b.pa_stream_flags_t;
 pub const BufferAttr = b.pa_buffer_attr;
 pub const SampleSpec = b.pa_sample_spec;
 
+pub const invalid_index = b.PA_INVALID_INDEX;
+
 pub const SymbolList = struct {
     threaded_mainloop_new: bool = false,
     threaded_mainloop_get_api: bool = false,
