@@ -2,6 +2,8 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const assert = std.debug.assert;
+
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 
@@ -14,6 +16,8 @@ pub var multisampled_image_view: vk.ImageView = undefined;
 pub var multisampled_image_memory: vk.DeviceMemory = undefined;
 pub var antialias_sample_count: vk.SampleCountFlags = undefined;
 pub var pass: vk.RenderPass = undefined;
+
+pub var have_multisample: bool = false;
 
 const cache = struct {
     var multi_sampled_image_memory_index: u32 = 0;
@@ -35,6 +39,8 @@ pub fn init(
         // Ignore 32 and 64 bit options
         //
 
+        have_multisample = true;
+
         if (sample_counts.@"16_bit")
             break :blk .{ .@"16_bit" = true };
 
@@ -47,14 +53,21 @@ pub fn init(
         if (sample_counts.@"2_bit")
             break :blk .{ .@"2_bit" = true };
 
+        have_multisample = false;
+
         break :blk .{ .@"1_bit" = true };
     };
 
-    try createMultiSampledImage(swapchain_extent.width, swapchain_extent.height, multi_sampled_image_memory_index);
+    if (have_multisample) {
+        try createMultiSampledImage(swapchain_extent.width, swapchain_extent.height, multi_sampled_image_memory_index);
+    }
     pass = try createRenderPass(swapchain_format);
 }
 
 pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
+    if (!have_multisample)
+        return;
+
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
@@ -74,89 +87,143 @@ pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
 fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
+
+    const attachments: [2]vk.AttachmentDescription = if (have_multisample) .{
+        //
+        // [0] Multisampled Image
+        //
+        .{
+            .format = swapchain_format,
+            .samples = antialias_sample_count,
+            .load_op = .clear,
+            .store_op = .dont_care,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .color_attachment_optimal,
+            .flags = .{},
+        },
+        //
+        // [1] Swapchain
+        //
+        .{
+            .format = swapchain_format,
+            .samples = .{ .@"1_bit" = true },
+            .load_op = .dont_care,
+            .store_op = .store,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .present_src_khr,
+            .flags = .{},
+        },
+    } else .{
+        //
+        // [0] Swapchain
+        //
+        .{
+            .format = swapchain_format,
+            .samples = .{ .@"1_bit" = true },
+            .load_op = .clear,
+            .store_op = .store,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .present_src_khr,
+            .flags = .{},
+        },
+        undefined,
+    };
+
+    const subpasses: [1]vk.SubpassDescription = if (have_multisample) .{
+        .{
+            .pipeline_bind_point = .graphics,
+            .color_attachment_count = 1,
+            .p_color_attachments = &[1]vk.AttachmentReference{
+                vk.AttachmentReference{
+                    .attachment = 0, // multisampled
+                    .layout = .color_attachment_optimal,
+                },
+            },
+            .input_attachment_count = 0,
+            .p_input_attachments = undefined,
+            .p_resolve_attachments = &[1]vk.AttachmentReference{
+                vk.AttachmentReference{
+                    .attachment = 1, // swapchain
+                    .layout = .color_attachment_optimal,
+                },
+            },
+            .p_depth_stencil_attachment = null,
+            .preserve_attachment_count = 0,
+            .p_preserve_attachments = undefined,
+            .flags = .{},
+        },
+    } else .{
+        .{
+            .pipeline_bind_point = .graphics,
+            .color_attachment_count = 1,
+            .p_color_attachments = &[1]vk.AttachmentReference{
+                vk.AttachmentReference{
+                    .attachment = 0,
+                    .layout = .color_attachment_optimal,
+                },
+            },
+            .input_attachment_count = 0,
+            .p_input_attachments = undefined,
+            .p_resolve_attachments = null,
+            .p_depth_stencil_attachment = null,
+            .preserve_attachment_count = 0,
+            .p_preserve_attachments = undefined,
+            .flags = .{},
+        },
+    };
+
+    const dependencies: [2]vk.SubpassDependency = if (have_multisample) .{
+        .{
+            .src_subpass = vk.SUBPASS_EXTERNAL,
+            .dst_subpass = 0,
+            .src_stage_mask = .{ .bottom_of_pipe_bit = true },
+            .dst_stage_mask = .{ .color_attachment_output_bit = true },
+            .src_access_mask = .{ .memory_read_bit = true },
+            .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
+            .dependency_flags = .{ .by_region_bit = true },
+        },
+        .{
+            .src_subpass = 0,
+            .dst_subpass = vk.SUBPASS_EXTERNAL,
+            .src_stage_mask = .{ .color_attachment_output_bit = true },
+            .dst_stage_mask = .{ .bottom_of_pipe_bit = true },
+            .src_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
+            .dst_access_mask = .{ .memory_read_bit = true },
+            .dependency_flags = .{ .by_region_bit = true },
+        },
+    } else .{
+        .{
+            .src_subpass = vk.SUBPASS_EXTERNAL,
+            .dst_subpass = 0,
+            .src_stage_mask = .{ .color_attachment_output_bit = true },
+            .dst_stage_mask = .{ .color_attachment_output_bit = true },
+            .src_access_mask = .{},
+            .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
+            .dependency_flags = .{},
+        },
+        undefined,
+    };
+
     return try device_dispatch.createRenderPass(logical_device, &vk.RenderPassCreateInfo{
-        .attachment_count = 2,
-        .p_attachments = &[2]vk.AttachmentDescription{
-            //
-            // [0] Multisampled Image
-            //
-            .{
-                .format = swapchain_format,
-                .samples = antialias_sample_count,
-                .load_op = .clear,
-                .store_op = .dont_care,
-                .stencil_load_op = .dont_care,
-                .stencil_store_op = .dont_care,
-                .initial_layout = .undefined,
-                .final_layout = .color_attachment_optimal,
-                .flags = .{},
-            },
-            //
-            // [1] Swapchain
-            //
-            .{
-                .format = swapchain_format,
-                .samples = .{ .@"1_bit" = true },
-                .load_op = .dont_care,
-                .store_op = .store,
-                .stencil_load_op = .dont_care,
-                .stencil_store_op = .dont_care,
-                .initial_layout = .undefined,
-                .final_layout = .present_src_khr,
-                .flags = .{},
-            },
-        },
+        .attachment_count = if (have_multisample) 2 else 1,
+        .p_attachments = &attachments,
         .subpass_count = 1,
-        .p_subpasses = &[1]vk.SubpassDescription{
-            .{
-                .pipeline_bind_point = .graphics,
-                .color_attachment_count = 1,
-                .p_color_attachments = &[1]vk.AttachmentReference{
-                    vk.AttachmentReference{
-                        .attachment = 0, // multisampled
-                        .layout = .color_attachment_optimal,
-                    },
-                },
-                .input_attachment_count = 0,
-                .p_input_attachments = undefined,
-                .p_resolve_attachments = &[1]vk.AttachmentReference{
-                    vk.AttachmentReference{
-                        .attachment = 1, // swapchain
-                        .layout = .color_attachment_optimal,
-                    },
-                },
-                .p_depth_stencil_attachment = null,
-                .preserve_attachment_count = 0,
-                .p_preserve_attachments = undefined,
-                .flags = .{},
-            },
-        },
-        .dependency_count = 2,
-        .p_dependencies = &[2]vk.SubpassDependency{
-            .{
-                .src_subpass = vk.SUBPASS_EXTERNAL,
-                .dst_subpass = 0,
-                .src_stage_mask = .{ .bottom_of_pipe_bit = true },
-                .dst_stage_mask = .{ .color_attachment_output_bit = true },
-                .src_access_mask = .{ .memory_read_bit = true },
-                .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
-                .dependency_flags = .{ .by_region_bit = true },
-            },
-            .{
-                .src_subpass = 0,
-                .dst_subpass = vk.SUBPASS_EXTERNAL,
-                .src_stage_mask = .{ .color_attachment_output_bit = true },
-                .dst_stage_mask = .{ .bottom_of_pipe_bit = true },
-                .src_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
-                .dst_access_mask = .{ .memory_read_bit = true },
-                .dependency_flags = .{ .by_region_bit = true },
-            },
-        },
+        .p_subpasses = &subpasses,
+        .dependency_count = if (have_multisample) 2 else 1,
+        .p_dependencies = &dependencies,
         .flags = .{},
     }, null);
 }
 
 fn createMultiSampledImage(width: u32, height: u32, memory_heap_index: u32) !void {
+    assert(have_multisample);
+
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
     const image_create_info = vk.ImageCreateInfo{

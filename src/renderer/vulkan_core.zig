@@ -61,7 +61,6 @@ pub var graphics_present_queue_index: u32 = undefined;
 pub var command_pool: vk.CommandPool = undefined;
 pub var surface: vk.SurfaceKHR = undefined;
 
-//
 pub var mapped_device_memory: [*]u8 = undefined;
 
 //

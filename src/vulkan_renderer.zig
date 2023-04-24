@@ -400,8 +400,9 @@ pub fn faceWriter() graphics.FaceWriter {
 }
 
 pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
-    if (swapchain_extent.width == screen_dimensions.width and swapchain_extent.height == screen_dimensions.height)
+    if (swapchain_extent.width == screen_dimensions.width and swapchain_extent.height == screen_dimensions.height) {
         return;
+    }
 
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
@@ -410,8 +411,8 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
 
     _ = try device_dispatch.waitForFences(
         logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
+        max_frames_in_flight,
+        @ptrCast([*]const vk.Fence, inflight_fences.ptr),
         vk.TRUE,
         std.math.maxInt(u64),
     );
@@ -470,7 +471,7 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
     {
         var framebuffer_create_info = vk.FramebufferCreateInfo{
             .render_pass = render_pass.pass,
-            .attachment_count = 2,
+            .attachment_count = if (render_pass.have_multisample) 2 else 1,
             // We assign to `p_attachments` below in the loop
             .p_attachments = undefined,
             .width = screen_dimensions.width,
@@ -479,11 +480,12 @@ pub fn recreateSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
             .flags = .{},
         };
         var attachment_buffer = [2]vk.ImageView{ render_pass.multisampled_image_view, undefined };
+        var overwrite_index: usize = if (render_pass.have_multisample) 1 else 0;
         var i: u32 = 0;
         while (i < swapchain_image_views.len) : (i += 1) {
             // We reuse framebuffer_create_info for each framebuffer we create,
             // only updating the swapchain_image_view that is attached
-            attachment_buffer[1] = swapchain_image_views[i];
+            attachment_buffer[overwrite_index] = swapchain_image_views[i];
             framebuffer_create_info.p_attachments = &attachment_buffer;
             framebuffers[i] = try device_dispatch.createFramebuffer(logical_device, &framebuffer_create_info, null);
         }
@@ -522,15 +524,15 @@ pub fn recordRenderPass(
     // TODO: Audit
     _ = try device_dispatch.waitForFences(
         logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &inflight_fences[previous_frame]),
+        @intCast(u32, inflight_fences.len),
+        @ptrCast([*]const vk.Fence, inflight_fences.ptr),
         vk.TRUE,
         std.math.maxInt(u64),
     );
 
     try device_dispatch.resetCommandPool(logical_device, command_pool, .{});
 
-    const clear_color = graphics.RGBA(f32){ .r = 0.12, .g = 0.12, .b = 0.12, .a = 1.0 };
+    const clear_color = graphics.RGBA(f32){ .r = 0.14, .g = 0.14, .b = 0.14, .a = 1.0 };
     const clear_colors = [2]vk.ClearValue{
         .{
             .color = vk.ClearColorValue{
@@ -808,12 +810,6 @@ pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
         std.math.maxInt(u64),
     );
 
-    try device_dispatch.resetFences(
-        logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &inflight_fences[current_frame]),
-    );
-
     const acquire_image_result = try device_dispatch.acquireNextImageKHR(
         logical_device,
         swapchain,
@@ -855,6 +851,12 @@ pub fn renderFrame(screen_dimensions: geometry.Dimensions2D(u16)) !void {
         .signal_semaphore_count = 1,
         .p_signal_semaphores = &signal_semaphores,
     };
+
+    try device_dispatch.resetFences(
+        logical_device,
+        1,
+        @ptrCast([*]const vk.Fence, &inflight_fences[current_frame]),
+    );
 
     try device_dispatch.queueSubmit(
         vulkan_core.graphics_present_queue,
@@ -951,7 +953,7 @@ fn createFramebuffers(
     std.debug.assert(swapchain_image_views.len > 0);
     var framebuffer_create_info = vk.FramebufferCreateInfo{
         .render_pass = render_pass.pass,
-        .attachment_count = 2,
+        .attachment_count = if (render_pass.have_multisample) 2 else 1,
         .p_attachments = undefined,
         .width = screen_dimensions.width,
         .height = screen_dimensions.height,
@@ -961,11 +963,12 @@ fn createFramebuffers(
 
     framebuffers = try allocator.alloc(vk.Framebuffer, swapchain_image_views.len);
     var attachment_buffer = [2]vk.ImageView{ render_pass.multisampled_image_view, undefined };
+    var overwrite_index: usize = if (render_pass.have_multisample) 1 else 0;
     var i: u32 = 0;
     while (i < swapchain_image_views.len) : (i += 1) {
         // We reuse framebuffer_create_info for each framebuffer we create,
         // only updating the swapchain_image_view that is attached
-        attachment_buffer[1] = swapchain_image_views[i];
+        attachment_buffer[overwrite_index] = swapchain_image_views[i];
         framebuffer_create_info.p_attachments = &attachment_buffer;
         framebuffers[i] = try device_dispatch.createFramebuffer(logical_device, &framebuffer_create_info, null);
     }
