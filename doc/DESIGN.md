@@ -83,17 +83,33 @@ Only the principal workflows are included, but if you feel like a use-case isn't
     *XDG file chooser popup closes* \
     *All scenes from previous session are loaded* 
 
+### **4.** Play introduction video at beginning of recording
+
+1. Setup a scene
+2. Click **Add** button for Overlays \
+    *Add overlay popup appears*
+3. Select **Video Source** \
+    *XDG file chooser opens*
+4. Navigate and select video file to use as intro \
+    *XDG file chooser closes*
+5. Select *Play on start* checkbox
+6. Click **Add** button \
+    *Add overlay popup closes* \
+    *Overlay is listed in sidebar*
+7. Start recording with scene that has the overlay that was created \
+    *Video starts recording* \
+    *Video intro starts playing* \
+    *When video intro is finished, the overlay is deactivated and the scene is visible as normal*
+
 ## Misc Questions
 
+- Q: How to position, scale, etc visual sources? \
+A: Same as OBS, either click on the source in the preview, or in the sources side panel and move / scale it.
 
 
 TODO: 
 
-- [ ] Create "Add Source" popup dialog mockup
-- [ ] Create "Add Transition" popup dialog mockup
+- [ ] Add mockup for adding a non-pipewire source \
+    In this case Reel will have to list all available sources
 - [ ] Add workflows for taking screenshots
 - [ ] Add workflows for streaming
-
-### Contributors
-
-Your name here
