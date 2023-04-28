@@ -3,7 +3,7 @@ ___
 
 ⚠️ **Early development warning** ⚠️
 
-If you're interested in this project you probably want to checkout the [design document](doc/DESIGN.md).
+If you're interested in this project you probably want to checkout the [design document](doc/DESIGN.md) and/or join the [discord server](https://discord.gg/fumzzQa575).
 
 ## Goals
 
