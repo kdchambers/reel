@@ -274,8 +274,8 @@ pub fn draw(
             if (model.desktop_capture_frame) |frame|
                 break :blk frame.dimensions;
             break :blk .{
-                .width = 1080,
-                .height = 1920,
+                .width = 1920,
+                .height = 1080,
             };
         };
         const dimensions_pixels = geometry.Dimensions2D(f32){
@@ -352,18 +352,6 @@ pub fn draw(
                 renderer.video_stream_scaled_dimensions.height,
             });
         }
-
-        {
-            const placement = geometry.Coordinates2D(f32){
-                .x = preview_extent.x,
-                .y = preview_extent.y + (60.0 * screen_scale.vertical),
-            };
-            try ui_state.preview_display_selector.draw(
-                placement,
-                screen_scale,
-                pen,
-            );
-        }
     }
 
     {
@@ -375,7 +363,7 @@ pub fn draw(
         const radius_pixels: f32 = 10;
         const center_point = geometry.Coordinates2D(f32){
             .x = -1.0 + ((margin_left_pixels + radius_pixels) * screen_scale.horizontal),
-            .y = -1.0 + ((margin_top_pixels + radius_pixels) * screen_scale.vertical),
+            .y = window.top + ((margin_top_pixels + radius_pixels) * screen_scale.vertical),
         };
         const color = graphics.RGBA(f32).fromInt(50, 50, 50, 255);
         try ui_state.enable_webcam_checkbox.draw(
@@ -392,7 +380,7 @@ pub fn draw(
         const label_margin_left = 10;
         const label_extent = geometry.Extent2D(f32){
             .x = -1.0 + ((margin_left_pixels + (radius_pixels * 2.0) + label_margin_left) * screen_scale.horizontal),
-            .y = -1.0 + (((radius_pixels * 2.0) + margin_top_pixels) * screen_scale.vertical),
+            .y = window.top + (((radius_pixels * 2.0) + margin_top_pixels) * screen_scale.vertical),
             .width = (label_text_dimensions.width + 5.0) * screen_scale.horizontal,
             .height = (radius_pixels * 2.0) * screen_scale.vertical,
         };
@@ -437,36 +425,35 @@ pub fn draw(
             ui_state.audio_source_spectogram.min_cutoff_db = -7.0;
             ui_state.audio_source_spectogram.max_cutoff_db = -2.0;
 
-            if (model.audio_streams.len != 0) {
+            const default_freq_bins = [1]f32{-9.0} ** 64;
+            const frequency_bins: []const f32 = blk: {
+                if (model.audio_streams.len == 0)
+                    break :blk default_freq_bins[0..];
+
                 const audio_buffer = model.audio_streams[0].sample_buffer;
                 const sample_range = audio_buffer.sampleRange();
                 const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
-                if (sample_range.count >= samples_per_frame) {
-                    const sample_offset: usize = sample_range.count - samples_per_frame;
-                    const sample_index = sample_range.base_sample + sample_offset;
-                    var sample_buffer: [samples_per_frame]f32 = undefined;
-                    const samples = audio_buffer.samplesCopyIfRequired(
-                        sample_index,
-                        samples_per_frame,
-                        &sample_buffer,
-                    );
 
-                    const audio_power_spectrum = audio.samplesToPowerSpectrum(samples);
-                    const mel_scaled_bins = audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
-                    try ui_state.audio_source_spectogram.draw(
-                        mel_scaled_bins[3..],
-                        spectrogram_region.toExtent(),
-                        screen_scale,
-                    );
-                } else {}
-            } else {
-                const mel_scaled_bins_buffer = [1]f32{-9.0} ** 64;
-                try ui_state.audio_source_spectogram.draw(
-                    mel_scaled_bins_buffer[3..],
-                    spectrogram_region.toExtent(),
-                    screen_scale,
+                if (sample_range.count < samples_per_frame)
+                    break :blk default_freq_bins[0..];
+
+                const sample_offset: usize = sample_range.count - samples_per_frame;
+                const sample_index = sample_range.base_sample + sample_offset;
+                var sample_buffer: [samples_per_frame]f32 = undefined;
+                const samples = audio_buffer.samplesCopyIfRequired(
+                    sample_index,
+                    samples_per_frame,
+                    &sample_buffer,
                 );
-            }
+                const audio_power_spectrum = audio.samplesToPowerSpectrum(samples);
+                break :blk audio.powerSpectrumToMelScale(audio_power_spectrum, 64);
+            };
+
+            try ui_state.audio_source_spectogram.draw(
+                frequency_bins[3..],
+                spectrogram_region.toExtent(),
+                screen_scale,
+            );
 
             {
                 var volume_bar_region: Region = .{};
