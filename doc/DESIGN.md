@@ -11,10 +11,10 @@ The following Figma file contains the mockups of the application and should be u
 
 TODO: 
 
-- [] Create "Add Source" popup dialog mockup
-- [] Create "Add Transition" popup dialog mockup
-- [] Add workflows for taking screenshots
-- [] Add workflows for streaming
+- [ ] Create "Add Source" popup dialog mockup
+- [ ] Create "Add Transition" popup dialog mockup
+- [ ] Add workflows for taking screenshots
+- [ ] Add workflows for streaming
 
 ## Workflows
 
