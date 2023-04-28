@@ -7,12 +7,7 @@ Only the principal workflows are included, but if you feel like a use-case isn't
 
 [Reel Figma Design Doc](https://www.figma.com/file/zYHC4GER4ew08WQE67Bfix/Reel?node-id=0%3A1&t=IMQdfPE67a4a7zUS-1)
 
-TODO: 
-
-- [ ] Create "Add Source" popup dialog mockup
-- [ ] Create "Add Transition" popup dialog mockup
-- [ ] Add workflows for taking screenshots
-- [ ] Add workflows for streaming
+![background](https://user-images.githubusercontent.com/14359115/235041741-7221924b-9b85-4c1d-a19c-7109e78d0064.svg)
 
 ## Workflows
 
@@ -83,3 +78,9 @@ TODO:
     *XDG file chooser popup closes* \
     *All scenes from previous session are loaded* 
 
+TODO: 
+
+- [ ] Create "Add Source" popup dialog mockup
+- [ ] Create "Add Transition" popup dialog mockup
+- [ ] Add workflows for taking screenshots
+- [ ] Add workflows for streaming
