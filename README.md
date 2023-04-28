@@ -3,6 +3,8 @@ ___
 
 ⚠️ **Early development warning** ⚠️
 
+If you're interested in this project you probably want to checkout the [design document](doc/DESIGN.md).
+
 ## Goals
 
 - Visually beautiful, responsive and efficient
