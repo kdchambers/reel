@@ -14,22 +14,27 @@ Only the principal workflows are included, but if you feel like a use-case isn't
 ### **1.** Setup a recording with 2 scenes
 
 1. Click the **Add** icon under **Sources** \
-    *Add sources dialog appears*
-2. Select a Desktop Screencapture source and apply desired settings
-3. Click **Add** \
+    *Source type selector appears*
+2. Select "Video" \
+    *Pipewire desktop selector appears*
+3. Select Window or Desktop source to add \
+    *Pipewire desktop selector closes*
+4. Apply desired settings to source
+5. Click **Add** \
     *Add sources dialog closes* \
     *The source is listed in **Sources** sections with provided label*
-4. Repeat for other sources that you wish to add (Microphone, Desktop audio loopback, etc)
-5. Click the **Add** icon next to the **Scene Selector** \
+6. Repeat for other sources that you wish to add (Microphone, Desktop audio loopback, etc)
+7. Click the **Add** icon next to the **Scene Selector** \
     *Create scene dialog opens*
-6. Type in the name of the Scene and click **Add** \
+8. Type in the name of the Scene and click **Add** \
     *Create scene dialog closes* \
     *Scene Selector displays name of Scene*
-7. Add desired sources as specified above
-8. Click on the **Record** tab
-9. Specify desired settings for the recording
-10. Click the **Record** button \
+9. Add desired sources as specified above
+10. Click on the **Record** tab
+11. Specify desired settings for the recording
+12. Click the **Record** button \
     *Video recording begins*
+    *Record button text changes to Stop*
 
 
 ### **2.** Transition between scenes using keyboard shortcut
@@ -78,9 +83,17 @@ Only the principal workflows are included, but if you feel like a use-case isn't
     *XDG file chooser popup closes* \
     *All scenes from previous session are loaded* 
 
+## Misc Questions
+
+
+
 TODO: 
 
 - [ ] Create "Add Source" popup dialog mockup
 - [ ] Create "Add Transition" popup dialog mockup
 - [ ] Add workflows for taking screenshots
 - [ ] Add workflows for streaming
+
+### Contributors
+
+Your name here
