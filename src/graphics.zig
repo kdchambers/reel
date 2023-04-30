@@ -248,6 +248,12 @@ pub fn generateQuad(
             .{ .x = extent.x + extent.width, .y = extent.y },                 // Bottom Right
             .{ .x = extent.x,                .y = extent.y },                 // Bottom Left
         },
+        .bottom_right => [_]VertexType{
+            .{ .x = extent.x - extent.width, .y = extent.y - extent.height }, // Top Left
+            .{ .x = extent.x,                .y = extent.y - extent.height }, // Top Right
+            .{ .x = extent.x,                .y = extent.y },                 // Bottom Right
+            .{ .x = extent.x - extent.width, .y = extent.y },                 // Bottom Left
+        },
         .center => [_]VertexType{
             .{ .x = extent.x - (extent.width / 2.0), .y = extent.y - (extent.height / 2.0) }, // Top Left
             .{ .x = extent.x + (extent.width / 2.0), .y = extent.y - (extent.height / 2.0) }, // Top Right
