@@ -4,7 +4,7 @@
 const std = @import("std");
 
 pub const backend_pulse = @import("audio_source/pulse.zig");
-// pub const backend_pipewire = @import("audio_source/pipewire.zig");
+pub const backend_pipewire = @import("audio_source/pipewire.zig");
 
 const Backend = enum {
     alsa,
@@ -18,8 +18,7 @@ pub const InitFn = fn (
     failureCallback: *const InitFailCallbackFn,
 ) InitError!void;
 
-// pub const InitError = backend_pulse.InitErrors || backend_pipewire.InitErrors || error{Unknown};
-pub const InitError = backend_pulse.InitErrors || error{Unknown};
+pub const InitError = backend_pulse.InitErrors || backend_pipewire.InitErrors || error{Unknown};
 
 pub const InitSuccessCallbackFn = fn () void;
 pub const InitFailCallbackFn = fn (err: InitError) void;
@@ -41,8 +40,7 @@ pub const CreateStreamFn = fn (
     failureCallback: *const CreateStreamFailCallbackFn,
 ) CreateStreamError!void;
 
-// pub const CreateStreamError = backend_pulse.CreateStreamError || backend_pipewire.CreateStreamError || error{Unknown};
-pub const CreateStreamError = backend_pulse.CreateStreamError || error{Unknown};
+pub const CreateStreamError = backend_pulse.CreateStreamError || backend_pipewire.CreateStreamError || error{Unknown};
 
 pub const SamplesReadyCallbackFn = fn (stream: StreamHandle, samples: []i16) void;
 pub const CreateStreamSuccessCallbackFn = fn (stream: StreamHandle) void;
@@ -93,8 +91,8 @@ pub const StreamState = enum {
 
 // TODO: Support more backends
 pub fn bestInterface() Interface {
-    // if (backend_pipewire.isSupported())
-    //     return backend_pipewire.createInterface(on_read_sample_callback);
+    if (backend_pipewire.isSupported())
+        return backend_pipewire.interface();
     if (backend_pulse.isSupported())
         return backend_pulse.interface();
     //
@@ -105,10 +103,10 @@ pub fn bestInterface() Interface {
 
 pub fn availableBackends(backend_buffer: *[4]Backend) []Backend {
     var backend_count: u32 = 0;
-    // if (backend_pipewire.isSupported()) {
-    //     backend_buffer[backend_count] = .pipewire;
-    //     backend_count += 1;
-    // }
+    if (backend_pipewire.isSupported()) {
+        backend_buffer[backend_count] = .pipewire;
+        backend_count += 1;
+    }
     if (backend_pulse.isSupported()) {
         backend_buffer[backend_count] = .pulseaudio;
         backend_count += 1;
