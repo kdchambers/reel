@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Keith Chambers
 
+const geometry = @import("../../geometry.zig");
 const widgets = @import("widgets.zig");
 const Model = @import("../../Model.zig");
 const VideoFormat = Model.VideoFormat;
@@ -41,6 +42,15 @@ pub const RegionAnchors = struct {
 
     pub inline fn height(self: @This()) f32 {
         return @fabs(self.top - self.bottom);
+    }
+
+    pub inline fn toExtent(self: @This()) geometry.Extent2D(f32) {
+        return .{
+            .x = self.left,
+            .y = self.bottom,
+            .width = self.right - self.left,
+            .height = self.bottom - self.top,
+        };
     }
 };
 
