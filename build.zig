@@ -64,8 +64,10 @@ pub fn build(b: *Build) void {
     const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml");
     exe.addModule("vulkan", gen.getModule());
 
-    const zmath_module = zmath.Package.build(b, .{});
-    exe.addModule("zmath", zmath_module.zmath);
+    const zmath_pkg = zmath.package(b, target, optimize, .{
+        .options = .{ .enable_cross_platform_determinism = false },
+    });
+    zmath_pkg.link(exe);
 
     const shaders_module = b.createModule(.{
         .source_file = .{ .path = "shaders/shaders.zig" },
