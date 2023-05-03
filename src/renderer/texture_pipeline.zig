@@ -243,7 +243,7 @@ pub fn createUnscaledImage(memory_index: u32) !void {
     }
 
     memory_map = @ptrCast([*]Pixel, mapped_memory_opt.?)[0..texture_pixel_count];
-    std.mem.set(Pixel, memory_map, .{ .r = 0, .g = 0, .b = 0, .a = 255 });
+    @memset(memory_map, Pixel{ .r = 0, .g = 0, .b = 0, .a = 255 });
 
     //
     // Transition from preinitialized to general

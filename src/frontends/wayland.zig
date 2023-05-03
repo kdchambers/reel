@@ -44,7 +44,8 @@ const ScaleFactor2D = geometry.ScaleFactor2D;
 
 const fontana = @import("fontana");
 const Atlas = fontana.Atlas;
-const Font = fontana.Font(.{
+
+pub const Font = fontana.Font(.{
     .backend = .freetype_harfbuzz,
     .type_overrides = .{
         .Extent2DPixel = Extent2D(u32),
@@ -246,7 +247,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .b = 0.0,
         .a = 0.0,
     };
-    std.mem.set(graphics.RGBA(f32), pixels, clear_pixel);
+    @memset(pixels, clear_pixel);
     pixels[(512 * 512) - 1] = .{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 };
 
     font_texture.pixels = pixels.ptr;
@@ -385,9 +386,8 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                 var dst_index: usize = 0;
                 while (y < src_height) : (y += 1) {
                     @memcpy(
-                        @ptrCast([*]u8, &video_frame.pixels[dst_index]),
-                        @ptrCast([*]const u8, &src_pixels[src_index]),
-                        src_width * @sizeOf(graphics.RGBA(u8)),
+                        video_frame.pixels[dst_index .. dst_index + src_width],
+                        src_pixels[src_index .. src_index + src_width],
                     );
                     src_index += src_width;
                     dst_index += video_frame.width;

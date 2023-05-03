@@ -80,7 +80,10 @@ pub fn init(
     );
 
     var staging_buffer_memory_map = @ptrCast([*]u8, (try device_dispatch.mapMemory(logical_device, staging_memory, 0, staging_memory_requirements.size, .{})).?);
-    @memcpy(staging_buffer_memory_map, @ptrCast([*]u8, static_texture.pixels), staging_buffer_size);
+    @memcpy(
+        staging_buffer_memory_map[0..staging_buffer_size],
+        @ptrCast([*]u8, static_texture.pixels)[0..staging_buffer_size],
+    );
 
     {
         const image_create_info = vk.ImageCreateInfo{

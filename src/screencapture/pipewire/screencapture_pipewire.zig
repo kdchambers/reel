@@ -1061,9 +1061,8 @@ pub fn init() !void {
     }
 
     @memcpy(
-        &session_handle_buffer,
-        session_handle_ref,
-        session_handle_len,
+        session_handle_buffer[0..session_handle_len],
+        session_handle_ref[0..session_handle_len],
     );
     const session_handle: [*:0]const u8 = session_handle_buffer[0..session_handle_len :0];
     std.debug.assert(std.mem.indexOfSentinel(u8, 0, session_handle) == session_handle_len);

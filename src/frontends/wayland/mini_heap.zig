@@ -85,10 +85,11 @@ pub fn Cluster(comptime Type: type) type {
         }
 
         pub inline fn setZero(self: @This()) void {
+            const start_index: usize = self.base_index.index;
+            const end_index: usize = start_index + (@sizeOf(Type) * @intCast(usize, self.capacity));
             @memset(
-                @ptrCast([*]u8, &heap_memory[self.base_index.index]),
+                @ptrCast([*]u8, &heap_memory[start_index..end_index]),
                 0,
-                @sizeOf(Type) * @intCast(usize, self.capacity),
             );
         }
 
@@ -200,14 +201,10 @@ pub const WriteOptions = struct {
 
 pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime options: WriteOptions) SliceIndex(Type) {
     const type_size = @sizeOf(Type);
-    if (!options.check_alignment) {
+    if (comptime !options.check_alignment) {
         std.debug.assert(@alignOf(Type) == heap_alignment);
         const bytes_count = type_size * slice.len;
-        @memcpy(
-            @ptrCast([*]u8, &heap_memory[heap_index]),
-            @ptrCast([*]const u8, slice.ptr),
-            bytes_count,
-        );
+        @memcpy(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..slice.len], slice);
         const result_index = heap_index;
         heap_index += bytes_count;
         return result_index;
@@ -217,11 +214,7 @@ pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime opti
     const allocation_size = type_size * slice.len;
     // TODO: This is a hefty calculation for this function
     const alignment_padding: u16 = @intCast(u16, @mod(heap_alignment - @mod(allocation_size, heap_alignment), heap_alignment));
-    @memcpy(
-        @ptrCast([*]u8, &heap_memory[heap_index]),
-        @ptrCast([*]const u8, slice.ptr),
-        allocation_size,
-    );
+    @memcpy(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..slice.len], slice);
     const result_index = heap_index;
     heap_index += @intCast(u16, type_size * slice.len) + alignment_padding;
     std.debug.assert(heap_index % heap_alignment == 0);
