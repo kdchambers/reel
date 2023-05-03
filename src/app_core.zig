@@ -319,10 +319,12 @@ pub fn run() !void {
     }
 
     const application_end = std.time.nanoTimestamp();
-    const screencapture_duration_ns = @intCast(u64, application_end - screencapture_start.?);
-    const screencapture_duration_seconds: f64 = @intToFloat(f64, screencapture_duration_ns) / @as(f64, std.time.ns_per_s);
-    const screencapture_fps = @intToFloat(f64, frame_index) / screencapture_duration_seconds;
-    std.log.info("Display FPS: {d:.2}", .{screencapture_fps});
+    if (screencapture_start) |start| {
+        const screencapture_duration_ns = @intCast(u64, application_end - start);
+        const screencapture_duration_seconds: f64 = @intToFloat(f64, screencapture_duration_ns) / @as(f64, std.time.ns_per_s);
+        const screencapture_fps = @intToFloat(f64, frame_index) / screencapture_duration_seconds;
+        std.log.info("Display FPS: {d:.2}", .{screencapture_fps});
+    }
 }
 
 pub fn deinit() void {
