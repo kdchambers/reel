@@ -11,10 +11,16 @@ const geometry = @import("../geometry.zig");
 
 const vulkan_core = @import("vulkan_core.zig");
 
+pub var antialias_sample_count: vk.SampleCountFlags = undefined;
+
 pub var multisampled_image: vk.Image = undefined;
 pub var multisampled_image_view: vk.ImageView = undefined;
 pub var multisampled_image_memory: vk.DeviceMemory = undefined;
-pub var antialias_sample_count: vk.SampleCountFlags = undefined;
+
+pub var depth_image: vk.Image = undefined;
+pub var depth_image_view: vk.ImageView = undefined;
+pub var depth_image_memory: vk.DeviceMemory = undefined;
+
 pub var pass: vk.RenderPass = undefined;
 
 pub var have_multisample: bool = false;
@@ -65,11 +71,20 @@ pub fn init(
 }
 
 pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
-    if (!have_multisample)
-        return;
-
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
+
+    device_dispatch.destroyImage(logical_device, depth_image, null);
+    device_dispatch.destroyImageView(logical_device, depth_image_view, null);
+
+    try createDepthImage(
+        screen_dimensions.width,
+        screen_dimensions.height,
+        cache.multi_sampled_image_memory_index,
+    );
+
+    if (!have_multisample)
+        return;
 
     device_dispatch.destroyImage(logical_device, multisampled_image, null);
     device_dispatch.destroyImageView(logical_device, multisampled_image_view, null);
@@ -88,7 +103,11 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
-    const attachments: [2]vk.AttachmentDescription = if (have_multisample) .{
+    //
+    // TODO: If you reorder these so that multisampled image is last, then all you need to do is
+    //       change the length of the array based on have_multisample
+    //
+    const attachments: [3]vk.AttachmentDescription = if (have_multisample) .{
         //
         // [0] Multisampled Image
         //
@@ -117,6 +136,20 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .final_layout = .present_src_khr,
             .flags = .{},
         },
+        //
+        // [2] Depth Buffer
+        //
+        .{
+            .format = .d32_sfloat,
+            .samples = @"1_bit",
+            .load_op = .clear,
+            .store_op = .store,
+            .stencil_load_op = .clear,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .depth_stencil_attachment_optimal,
+            .flags = .{},
+        },
     } else .{
         //
         // [0] Swapchain
@@ -132,7 +165,26 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .final_layout = .present_src_khr,
             .flags = .{},
         },
+        //
+        // [1] Depth Buffer
+        //
+        .{
+            .format = .d32_sfloat,
+            .samples = @"1_bit",
+            .load_op = .clear,
+            .store_op = .store,
+            .stencil_load_op = .clear,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .depth_stencil_attachment_optimal,
+            .flags = .{},
+        },
         undefined,
+    };
+
+    const depth_attachment_ref = vk.AttachmentReference{
+        .attachment = if (have_multisample) 2 else 1,
+        .layout = .optimal,
     };
 
     const subpasses: [1]vk.SubpassDescription = if (have_multisample) .{
@@ -153,7 +205,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
                     .layout = .color_attachment_optimal,
                 },
             },
-            .p_depth_stencil_attachment = null,
+            .p_depth_stencil_attachment = &depth_attachment_ref,
             .preserve_attachment_count = 0,
             .p_preserve_attachments = undefined,
             .flags = .{},
@@ -171,23 +223,36 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .input_attachment_count = 0,
             .p_input_attachments = undefined,
             .p_resolve_attachments = null,
-            .p_depth_stencil_attachment = null,
+            .p_depth_stencil_attachment = &depth_attachment_ref,
             .preserve_attachment_count = 0,
             .p_preserve_attachments = undefined,
             .flags = .{},
         },
     };
 
+    // TODO: Audit
     const dependencies: [2]vk.SubpassDependency = if (have_multisample) .{
+        // Swapchain
         .{
             .src_subpass = vk.SUBPASS_EXTERNAL,
             .dst_subpass = 0,
-            .src_stage_mask = .{ .bottom_of_pipe_bit = true },
+            .src_stage_mask = .{ .color_attachment_output_bit = true },
             .dst_stage_mask = .{ .color_attachment_output_bit = true },
-            .src_access_mask = .{ .memory_read_bit = true },
+            .src_access_mask = .{},
             .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
-            .dependency_flags = .{ .by_region_bit = true },
+            .dependency_flags = .{},
         },
+        // Depth buffer
+        .{
+            .src_subpass = vk.SUBPASS_EXTERNAL,
+            .dst_subpass = 0,
+            .src_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
+            .dst_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
+            .src_access_mask = .{},
+            .dst_access_mask = .{ .depth_stencil_attachment_write_bit = true },
+            .dependency_flags = .{},
+        },
+        // Multisample image
         .{
             .src_subpass = 0,
             .dst_subpass = vk.SUBPASS_EXTERNAL,
@@ -198,6 +263,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .dependency_flags = .{ .by_region_bit = true },
         },
     } else .{
+        // Swapchain
         .{
             .src_subpass = vk.SUBPASS_EXTERNAL,
             .dst_subpass = 0,
@@ -207,15 +273,25 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
             .dependency_flags = .{},
         },
+        // Depth buffer
+        .{
+            .src_subpass = vk.SUBPASS_EXTERNAL,
+            .dst_subpass = 0,
+            .src_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
+            .dst_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
+            .src_access_mask = .{},
+            .dst_access_mask = .{ .depth_stencil_attachment_write_bit = true },
+            .dependency_flags = .{},
+        },
         undefined,
     };
 
     return try device_dispatch.createRenderPass(logical_device, &vk.RenderPassCreateInfo{
-        .attachment_count = if (have_multisample) 2 else 1,
+        .attachment_count = if (have_multisample) 3 else 2,
         .p_attachments = &attachments,
         .subpass_count = 1,
         .p_subpasses = &subpasses,
-        .dependency_count = if (have_multisample) 2 else 1,
+        .dependency_count = if (have_multisample) 3 else 2,
         .p_dependencies = &dependencies,
         .flags = .{},
     }, null);
@@ -263,6 +339,55 @@ fn createMultiSampledImage(width: u32, height: u32, memory_heap_index: u32) !voi
         .format = .b8g8r8a8_unorm,
         .subresource_range = .{
             .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+    }, null);
+}
+
+fn createDepthImage(width: u32, height: u32, memory_heap_index: u32) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+    const image_create_info = vk.ImageCreateInfo{
+        .flags = .{},
+        .image_type = .@"2d",
+        .format = .d32_sfloat,
+        .tiling = .optimal,
+        .extent = vk.Extent3D{
+            .width = width,
+            .height = height,
+            .depth = 1,
+        },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .initial_layout = .undefined,
+        .usage = .{ .transient_attachment_bit = true, .depth_stencil_attachment_bit = true },
+        .samples = @"1_bit",
+        .sharing_mode = .exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+    };
+    depth_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+
+    const depth_image_requirements = device_dispatch.getImageMemoryRequirements(logical_device, depth_image);
+
+    depth_image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
+        .allocation_size = depth_image_requirements.size,
+        .memory_type_index = memory_heap_index,
+    }, null);
+
+    try device_dispatch.bindImageMemory(logical_device, depth_image, depth_image_memory, 0);
+
+    depth_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
+        .flags = .{},
+        .image = depth_image,
+        .view_type = .@"2d_array",
+        .format = .d32_sfloat,
+        .subresource_range = .{
+            .aspect_mask = .{ .depth_bit = true },
             .base_mip_level = 0,
             .level_count = 1,
             .base_array_layer = 0,
