@@ -887,3 +887,236 @@ pub fn drawBox(
     border_quads[2] = quadColored(extent_top, border_color, .bottom_left);
     border_quads[3] = quadColored(extent_bottom, border_color, .bottom_left);
 }
+
+pub const VertexAllocatorOptions = struct {
+    supported_geometry: struct {
+        triangle: bool,
+        quad: bool,
+        triangle_fan: bool,
+    },
+    index_buffer: bool,
+    arena_creation: bool,
+};
+
+pub fn VertexAllocator(comptime VertexType: type, comptime options: VertexAllocatorOptions) type {
+    return struct {
+        const vertices_per_quad = if (options.index_buffer) 4 else 6;
+
+        pub const TriangleFace = [3]VertexType;
+        pub const QuadFace = [vertices_per_quad]VertexType;
+
+        vertices: []VertexType,
+        indices: if (options.index_buffer) []u16 else void,
+        vertices_used: u16,
+        indices_used: if (options.index_buffer) u16 else void,
+
+        // This allows the creation of arenas where vertices_used doesn't
+        // correspond the to next vertex index
+        vertex_offset: if (options.arena_creation) u16 else void,
+
+        pub const init = if (options.index_buffer) initWithIndices else initWithoutIndices;
+
+        fn initWithIndices(vertex_buffer: []GenericVertex, index_buffer: []u16) @This() {
+            return .{
+                .vertices = vertex_buffer,
+                .indices = index_buffer,
+                .vertices_used = 0,
+                .indices_used = 0,
+                .vertex_offset = 0,
+            };
+        }
+
+        fn initWithoutIndices(vertex_buffer: []GenericVertex) @This() {
+            return .{
+                .vertices = vertex_buffer,
+                .vertices_used = 0,
+                .vertex_offset = 0,
+            };
+        }
+
+        pub fn create(self: *@This(), comptime Type: type) !*Type {
+            if (comptime Type == QuadFace) {
+                assert(options.supported_geometry.quad);
+                return self.createQuadFace();
+            }
+
+            if (comptime Type == TriangleFace) {
+                assert(options.supported_geometry.triangle);
+                return self.createTriangleFace();
+            }
+            @compileError("No other types supported");
+        }
+
+        pub fn createArena(self: *@This(), vertex_count: usize) @This() {
+            if (comptime options.arena_creation) {
+                const vertex_start = self.vertices_used;
+                const vertex_end = vertex_start + vertex_count;
+
+                const index_count = vertex_count + @divExact(vertex_count, 2);
+                const index_start = self.indices_used;
+                const index_end = index_start + index_count;
+
+                self.vertices_used += @intCast(u16, vertex_count);
+                self.indices_used += @intCast(u16, index_count);
+                return .{
+                    .vertices = self.vertices[vertex_start..vertex_end],
+                    .indices = self.indices[index_start..index_end],
+                    .vertices_used = 0,
+                    .indices_used = 0,
+                    .vertex_offset = vertex_start,
+                };
+            } else @compileError("VertexAllocator not created with `arena_creation feature enabled`");
+            unreachable;
+        }
+
+        pub fn allocate(self: *@This(), comptime Type: type, amount: u32) ![]Type {
+            if (comptime Type == QuadFace) {
+                assert(options.supported_geometry.quad);
+                return self.allocateQuadFaces(amount);
+            }
+
+            if (comptime Type == TriangleFace) {
+                assert(options.supported_geometry.triangle);
+                return self.allocateTriangleFace(amount);
+            }
+
+            @compileError("No other types supported");
+        }
+
+        pub inline fn reset(self: *@This()) void {
+            self.vertices_used = 0;
+            if (comptime options.index_buffer)
+                self.indices_used = 0;
+        }
+
+        inline fn createQuadFace(self: *@This()) !*QuadFace {
+            const vertices_used = self.vertices_used;
+            if ((vertices_used + vertices_per_quad) > self.vertices.len)
+                return error.OutOfSpace;
+
+            if (comptime options.index_buffer) {
+                const indices_used = self.indices_used;
+                if (indices_used + 6 > self.indices.len)
+                    return error.OutOfSpace;
+
+                const vertex_index_base = vertices_used + self.vertex_offset;
+
+                self.indices[indices_used + 0] = vertex_index_base + 0; // Top left
+                self.indices[indices_used + 1] = vertex_index_base + 1; // Top right
+                self.indices[indices_used + 2] = vertex_index_base + 2; // Bottom right
+                self.indices[indices_used + 3] = vertex_index_base + 0; // Top left
+                self.indices[indices_used + 4] = vertex_index_base + 2; // Bottom right
+                self.indices[indices_used + 5] = vertex_index_base + 3; // Bottom left
+
+                self.vertices_used += vertices_per_quad;
+                self.indices_used += 6;
+
+                return @ptrCast(*QuadFace, &self.vertices[vertices_used]);
+            } else {
+                self.vertices_used += vertices_per_quad;
+                return @ptrCast(*QuadFace, &self.vertices[vertices_used]);
+            }
+            unreachable;
+        }
+
+        inline fn allocateQuadFaces(self: *@This(), amount: u32) ![]QuadFace {
+            const vertices_used = self.vertices_used;
+            const vertices_required = vertices_per_quad * amount;
+            if ((vertices_used + vertices_required) > self.vertices.len)
+                return error.OutOfSpace;
+
+            if (comptime options.index_buffer) {
+                assert(vertices_per_quad == 4);
+
+                const indices_used = self.indices_used;
+                const indices_required = 6 * amount;
+                if (indices_used + indices_required > self.indices.len)
+                    return error.OutOfSpace;
+
+                var j: usize = 0;
+                var vertex_index = vertices_used + self.vertex_offset;
+                while (j < amount) : (j += 1) {
+                    const i = indices_used + (j * 6);
+                    self.indices[i + 0] = vertex_index + 0; // Top left
+                    self.indices[i + 1] = vertex_index + 1; // Top right
+                    self.indices[i + 2] = vertex_index + 2; // Bottom right
+                    self.indices[i + 3] = vertex_index + 0; // Top left
+                    self.indices[i + 4] = vertex_index + 2; // Bottom right
+                    self.indices[i + 5] = vertex_index + 3; // Bottom left
+                    vertex_index += 4;
+                }
+
+                self.vertices_used += @intCast(u16, vertices_per_quad * amount);
+                self.indices_used += @intCast(u16, 6 * amount);
+
+                return @ptrCast([*]QuadFace, &self.vertices[vertices_used])[0..amount];
+            } else {
+                assert(vertices_per_quad == 6);
+                self.vertices_used += vertices_per_quad * amount;
+                return @ptrCast([*]QuadFace, &self.vertices[vertices_used][0..amount]);
+            }
+            unreachable;
+        }
+
+        inline fn allocateTriangleFace(self: *@This(), amount: u32) !*TriangleFace {
+            const vertices_used = self.vertices_used;
+            const vertices_required = 3 * amount;
+
+            if (vertices_used + vertices_required > self.vertices.len)
+                return error.OutOfSpace;
+
+            if (comptime options.index_buffer) {
+                const indices_used = self.indices_used;
+                const indices_required = 3 * amount;
+
+                if (indices_used + indices_required > self.indices.len)
+                    return error.OutOfSpace;
+
+                var j: usize = 0;
+                var vertex_index = vertices_used + self.vertex_offset;
+                while (j < amount) : (j += 1) {
+                    const i = indices_used + (j * 3);
+                    self.indices[i + 0] = vertex_index + 0;
+                    self.indices[i + 1] = vertex_index + 1;
+                    self.indices[i + 2] = vertex_index + 2;
+                    vertex_index += 3;
+                }
+
+                self.vertex_used += 3 * amount;
+                self.indices_used += 3 * amount;
+
+                return @ptrCast([*]TriangleFace, &self.vertices[vertices_used])[0..amount];
+            } else {
+                self.vertex_used += 3 * amount;
+                return @ptrCast([*]TriangleFace, &self.vertices[vertices_used])[0..amount];
+            }
+            unreachable;
+        }
+
+        inline fn createTriangleFace(self: *@This()) !*TriangleFace {
+            const vertices_used = self.vertices_used;
+            if (vertices_used + 3 > self.vertices.len)
+                return error.OutOfSpace;
+
+            if (comptime options.index_buffer) {
+                const indices_used = self.indices_used;
+
+                if (indices_used + 3 > self.indices.len)
+                    return error.OutOfSpace;
+
+                const vertex_index: u16 = vertices_used + self.vertex_offset;
+                self.indices[indices_used + 0] = vertex_index + 0;
+                self.indices[indices_used + 1] = vertex_index + 1;
+                self.indices[indices_used + 2] = vertex_index + 2;
+
+                self.vertices_used += 3;
+                self.indices_used += 3;
+
+                return @ptrCast(*TriangleFace, &self.vertices[vertices_used]);
+            } else {
+                self.vertices_used += 3;
+                return @ptrCast(*TriangleFace, &self.vertices[vertices_used]);
+            }
+        }
+    };
+}
