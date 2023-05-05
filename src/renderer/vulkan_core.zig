@@ -61,12 +61,6 @@ pub var graphics_present_queue_index: u32 = undefined;
 pub var command_pool: vk.CommandPool = undefined;
 pub var surface: vk.SurfaceKHR = undefined;
 
-pub var mapped_device_memory: [*]u8 = undefined;
-
-//
-// Public Interface
-//
-
 pub fn init(wayland_display: *vk.wl_display, wayland_surface: *vk.wl_surface) !void {
     if (clib.dlopen("libvulkan.so.1", clib.RTLD_NOW)) |vulkan_loader| {
         const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
