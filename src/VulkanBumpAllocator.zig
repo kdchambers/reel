@@ -12,20 +12,19 @@ memory_index: u32 = 0,
 memory: vk.DeviceMemory,
 mapped_memory: [*]u8,
 
-pub inline fn init(memory_index: u32, size_bytes: u32) !@This() {
-    var this = @This(){
+pub fn init(self: *@This(), memory_index: u32, size_bytes: u32) !void {
+    self.* = .{
         .used = 0,
         .capacity = size_bytes,
         .memory_index = memory_index,
         .memory = undefined,
         .mapped_memory = undefined,
     };
-    this.memory = try vulkan_core.device_dispatch.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
+    self.memory = try vulkan_core.device_dispatch.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = size_bytes,
         .memory_type_index = memory_index,
     }, null);
-    this.mapped_memory = @ptrCast([*]u8, (try vulkan_core.device_dispatch.mapMemory(vulkan_core.logical_device, this.memory, 0, size_bytes, .{})).?);
-    return this;
+    self.mapped_memory = @ptrCast([*]u8, (try vulkan_core.device_dispatch.mapMemory(vulkan_core.logical_device, self.memory, 0, size_bytes, .{})).?);
 }
 
 pub inline fn allocate(self: *@This(), size_bytes: u64, alignment: u64) !u64 {
@@ -38,4 +37,12 @@ pub inline fn allocate(self: *@This(), size_bytes: u64, alignment: u64) !u64 {
     const result = self.used + offset;
     self.used += bytes_required;
     return result;
+}
+
+pub inline fn toSlice(self: @This(), comptime Type: type, offset: u64, count: u64) []Type {
+    return @ptrCast([*]Type, @alignCast(@alignOf(Type), &self.mapped_memory[offset]))[0..count];
+}
+
+pub inline fn mappedBytes(self: @This(), offset: u64, size: u64) []u8 {
+    return self.mapped_memory[offset .. offset + size];
 }
