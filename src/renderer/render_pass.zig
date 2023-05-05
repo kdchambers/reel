@@ -27,7 +27,7 @@ pub var pass: vk.RenderPass = undefined;
 
 pub var have_multisample: bool = false;
 
-var current_swapchain_dimensions: Dimensions2D(u32) = undefined;
+var buffer_size_pixels: u32 = 0;
 
 const cache = struct {
     var multi_sampled_image_memory_index: u32 = 0;
@@ -39,7 +39,7 @@ pub fn init(
     multi_sampled_image_memory_index: u32,
 ) !void {
     cache.multi_sampled_image_memory_index = multi_sampled_image_memory_index;
-    current_swapchain_dimensions = swapchain_dimensions;
+    buffer_size_pixels = swapchain_dimensions.width * swapchain_dimensions.height;
 
     antialias_sample_count = blk: {
         const physical_device_properties = vulkan_core.instance_dispatch.getPhysicalDeviceProperties(vulkan_core.physical_device);
@@ -85,14 +85,13 @@ pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u32)) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
-    const old_pixel_count: u32 = (current_swapchain_dimensions.width * current_swapchain_dimensions.height);
     const new_pixel_count: u32 = (screen_dimensions.width * screen_dimensions.height);
-
-    const reallocate: bool = new_pixel_count > old_pixel_count;
+    const reallocate: bool = new_pixel_count > buffer_size_pixels;
 
     device_dispatch.destroyImage(logical_device, depth_image, null);
     device_dispatch.destroyImageView(logical_device, depth_image_view, null);
     if (reallocate) {
+        buffer_size_pixels = new_pixel_count;
         device_dispatch.freeMemory(logical_device, depth_image_memory, null);
         try createDepthImage(
             screen_dimensions.width,
