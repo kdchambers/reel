@@ -8,33 +8,38 @@ const builtin = @import("builtin");
 const vk = @import("vulkan");
 
 const geometry = @import("../geometry.zig");
+const Dimensions2D = geometry.Dimensions2D;
+const Extent2D = geometry.Extent2D;
 
 const vulkan_core = @import("vulkan_core.zig");
 
 pub var antialias_sample_count: vk.SampleCountFlags = undefined;
 
-pub var multisampled_image: vk.Image = undefined;
+var multisampled_image: vk.Image = undefined;
 pub var multisampled_image_view: vk.ImageView = undefined;
-pub var multisampled_image_memory: vk.DeviceMemory = undefined;
+var multisampled_image_memory: vk.DeviceMemory = undefined;
 
-pub var depth_image: vk.Image = undefined;
+var depth_image: vk.Image = undefined;
 pub var depth_image_view: vk.ImageView = undefined;
-pub var depth_image_memory: vk.DeviceMemory = undefined;
+var depth_image_memory: vk.DeviceMemory = undefined;
 
 pub var pass: vk.RenderPass = undefined;
 
 pub var have_multisample: bool = false;
+
+var current_swapchain_dimensions: Dimensions2D(u32) = undefined;
 
 const cache = struct {
     var multi_sampled_image_memory_index: u32 = 0;
 };
 
 pub fn init(
-    swapchain_extent: vk.Extent2D,
+    swapchain_dimensions: Dimensions2D(u32),
     swapchain_format: vk.Format,
     multi_sampled_image_memory_index: u32,
 ) !void {
     cache.multi_sampled_image_memory_index = multi_sampled_image_memory_index;
+    current_swapchain_dimensions = swapchain_dimensions;
 
     antialias_sample_count = blk: {
         const physical_device_properties = vulkan_core.instance_dispatch.getPhysicalDeviceProperties(vulkan_core.physical_device);
@@ -64,39 +69,123 @@ pub fn init(
         break :blk .{ .@"1_bit" = true };
     };
 
+    try createDepthImage(
+        swapchain_dimensions.width,
+        swapchain_dimensions.height,
+        cache.multi_sampled_image_memory_index,
+    );
+
     if (have_multisample) {
-        try createMultiSampledImage(swapchain_extent.width, swapchain_extent.height, multi_sampled_image_memory_index);
+        try createMultiSampledImage(swapchain_dimensions, multi_sampled_image_memory_index);
     }
     pass = try createRenderPass(swapchain_format);
 }
 
-pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u16)) !void {
+pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u32)) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
+    const old_pixel_count: u32 = (current_swapchain_dimensions.width * current_swapchain_dimensions.height);
+    const new_pixel_count: u32 = (screen_dimensions.width * screen_dimensions.height);
+
+    const reallocate: bool = new_pixel_count > old_pixel_count;
+
     device_dispatch.destroyImage(logical_device, depth_image, null);
     device_dispatch.destroyImageView(logical_device, depth_image_view, null);
-
-    try createDepthImage(
-        screen_dimensions.width,
-        screen_dimensions.height,
-        cache.multi_sampled_image_memory_index,
-    );
+    if (reallocate) {
+        device_dispatch.freeMemory(logical_device, depth_image_memory, null);
+        try createDepthImage(
+            screen_dimensions.width,
+            screen_dimensions.height,
+            cache.multi_sampled_image_memory_index,
+        );
+    } else {
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = .d32_sfloat,
+            .tiling = .optimal,
+            .extent = vk.Extent3D{
+                .width = screen_dimensions.width,
+                .height = screen_dimensions.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = .undefined,
+            .usage = .{ .transient_attachment_bit = true, .depth_stencil_attachment_bit = true },
+            .samples = antialias_sample_count,
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+        depth_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+        try device_dispatch.bindImageMemory(logical_device, depth_image, depth_image_memory, 0);
+        depth_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
+            .flags = .{},
+            .image = depth_image,
+            .view_type = .@"2d_array",
+            .format = .d32_sfloat,
+            .subresource_range = .{
+                .aspect_mask = .{ .depth_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+            .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+        }, null);
+    }
 
     if (!have_multisample)
         return;
 
     device_dispatch.destroyImage(logical_device, multisampled_image, null);
     device_dispatch.destroyImageView(logical_device, multisampled_image_view, null);
-    //
-    // TODO: See can you reuse the memory
-    //
-    device_dispatch.freeMemory(logical_device, multisampled_image_memory, null);
-    try createMultiSampledImage(
-        screen_dimensions.width,
-        screen_dimensions.height,
-        cache.multi_sampled_image_memory_index,
-    );
+
+    if (reallocate) {
+        device_dispatch.freeMemory(logical_device, multisampled_image_memory, null);
+        try createMultiSampledImage(
+            screen_dimensions,
+            cache.multi_sampled_image_memory_index,
+        );
+    } else {
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = .b8g8r8a8_unorm,
+            .tiling = .optimal,
+            .extent = vk.Extent3D{
+                .width = screen_dimensions.width,
+                .height = screen_dimensions.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = .undefined,
+            .usage = .{ .transient_attachment_bit = true, .color_attachment_bit = true },
+            .samples = antialias_sample_count,
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+        multisampled_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+        try device_dispatch.bindImageMemory(logical_device, multisampled_image, multisampled_image_memory, 0);
+        multisampled_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
+            .flags = .{},
+            .image = multisampled_image,
+            .view_type = .@"2d_array",
+            .format = .b8g8r8a8_unorm,
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+            .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+        }, null);
+    }
 }
 
 fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
@@ -109,21 +198,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
     //
     const attachments: [3]vk.AttachmentDescription = if (have_multisample) .{
         //
-        // [0] Multisampled Image
-        //
-        .{
-            .format = swapchain_format,
-            .samples = antialias_sample_count,
-            .load_op = .clear,
-            .store_op = .dont_care,
-            .stencil_load_op = .dont_care,
-            .stencil_store_op = .dont_care,
-            .initial_layout = .undefined,
-            .final_layout = .color_attachment_optimal,
-            .flags = .{},
-        },
-        //
-        // [1] Swapchain
+        // [0] Swapchain
         //
         .{
             .format = swapchain_format,
@@ -137,17 +212,31 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .flags = .{},
         },
         //
-        // [2] Depth Buffer
+        // [1] Depth Buffer
         //
         .{
             .format = .d32_sfloat,
-            .samples = @"1_bit",
+            .samples = antialias_sample_count,
             .load_op = .clear,
-            .store_op = .store,
-            .stencil_load_op = .clear,
+            .store_op = .dont_care,
+            .stencil_load_op = .dont_care,
             .stencil_store_op = .dont_care,
             .initial_layout = .undefined,
             .final_layout = .depth_stencil_attachment_optimal,
+            .flags = .{},
+        },
+        //
+        // [2] Multisampled Image
+        //
+        .{
+            .format = swapchain_format,
+            .samples = antialias_sample_count,
+            .load_op = .clear,
+            .store_op = .dont_care,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .undefined,
+            .final_layout = .color_attachment_optimal,
             .flags = .{},
         },
     } else .{
@@ -170,10 +259,10 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
         //
         .{
             .format = .d32_sfloat,
-            .samples = @"1_bit",
+            .samples = .{ .@"1_bit" = true },
             .load_op = .clear,
             .store_op = .store,
-            .stencil_load_op = .clear,
+            .stencil_load_op = .dont_care,
             .stencil_store_op = .dont_care,
             .initial_layout = .undefined,
             .final_layout = .depth_stencil_attachment_optimal,
@@ -183,8 +272,8 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
     };
 
     const depth_attachment_ref = vk.AttachmentReference{
-        .attachment = if (have_multisample) 2 else 1,
-        .layout = .optimal,
+        .attachment = 1,
+        .layout = .depth_stencil_read_only_optimal,
     };
 
     const subpasses: [1]vk.SubpassDescription = if (have_multisample) .{
@@ -193,7 +282,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .color_attachment_count = 1,
             .p_color_attachments = &[1]vk.AttachmentReference{
                 vk.AttachmentReference{
-                    .attachment = 0, // multisampled
+                    .attachment = 2, // multisampled
                     .layout = .color_attachment_optimal,
                 },
             },
@@ -201,7 +290,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .p_input_attachments = undefined,
             .p_resolve_attachments = &[1]vk.AttachmentReference{
                 vk.AttachmentReference{
-                    .attachment = 1, // swapchain
+                    .attachment = 0, // swapchain
                     .layout = .color_attachment_optimal,
                 },
             },
@@ -230,8 +319,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
         },
     };
 
-    // TODO: Audit
-    const dependencies: [2]vk.SubpassDependency = if (have_multisample) .{
+    const dependencies: [3]vk.SubpassDependency = .{
         // Swapchain
         .{
             .src_subpass = vk.SUBPASS_EXTERNAL,
@@ -246,10 +334,10 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
         .{
             .src_subpass = vk.SUBPASS_EXTERNAL,
             .dst_subpass = 0,
-            .src_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
+            .src_stage_mask = .{ .top_of_pipe_bit = true },
             .dst_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
             .src_access_mask = .{},
-            .dst_access_mask = .{ .depth_stencil_attachment_write_bit = true },
+            .dst_access_mask = .{ .depth_stencil_attachment_write_bit = true, .depth_stencil_attachment_read_bit = true },
             .dependency_flags = .{},
         },
         // Multisample image
@@ -262,28 +350,6 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
             .dst_access_mask = .{ .memory_read_bit = true },
             .dependency_flags = .{ .by_region_bit = true },
         },
-    } else .{
-        // Swapchain
-        .{
-            .src_subpass = vk.SUBPASS_EXTERNAL,
-            .dst_subpass = 0,
-            .src_stage_mask = .{ .color_attachment_output_bit = true },
-            .dst_stage_mask = .{ .color_attachment_output_bit = true },
-            .src_access_mask = .{},
-            .dst_access_mask = .{ .color_attachment_read_bit = true, .color_attachment_write_bit = true },
-            .dependency_flags = .{},
-        },
-        // Depth buffer
-        .{
-            .src_subpass = vk.SUBPASS_EXTERNAL,
-            .dst_subpass = 0,
-            .src_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
-            .dst_stage_mask = .{ .early_fragment_tests_bit = true, .late_fragment_tests_bit = true },
-            .src_access_mask = .{},
-            .dst_access_mask = .{ .depth_stencil_attachment_write_bit = true },
-            .dependency_flags = .{},
-        },
-        undefined,
     };
 
     return try device_dispatch.createRenderPass(logical_device, &vk.RenderPassCreateInfo{
@@ -297,7 +363,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
     }, null);
 }
 
-fn createMultiSampledImage(width: u32, height: u32, memory_heap_index: u32) !void {
+fn createMultiSampledImage(swapchain_dimensions: Dimensions2D(u32), memory_heap_index: u32) !void {
     assert(have_multisample);
 
     const device_dispatch = vulkan_core.device_dispatch;
@@ -308,8 +374,8 @@ fn createMultiSampledImage(width: u32, height: u32, memory_heap_index: u32) !voi
         .format = .b8g8r8a8_unorm,
         .tiling = .optimal,
         .extent = vk.Extent3D{
-            .width = width,
-            .height = height,
+            .width = swapchain_dimensions.width,
+            .height = swapchain_dimensions.height,
             .depth = 1,
         },
         .mip_levels = 1,
@@ -364,8 +430,8 @@ fn createDepthImage(width: u32, height: u32, memory_heap_index: u32) !void {
         .mip_levels = 1,
         .array_layers = 1,
         .initial_layout = .undefined,
-        .usage = .{ .transient_attachment_bit = true, .depth_stencil_attachment_bit = true },
-        .samples = @"1_bit",
+        .usage = .{ .depth_stencil_attachment_bit = true },
+        .samples = antialias_sample_count,
         .sharing_mode = .exclusive,
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
