@@ -30,6 +30,16 @@ pub fn Extent2D(comptime BaseType: type) type {
     };
 }
 
+pub fn Extent3D(comptime BaseType: type) type {
+    return extern struct {
+        x: BaseType,
+        y: BaseType,
+        z: BaseType = 0.8,
+        height: BaseType,
+        width: BaseType,
+    };
+}
+
 pub fn ScaleFactor2D(comptime BaseType: type) type {
     return struct {
         horizontal: BaseType,
