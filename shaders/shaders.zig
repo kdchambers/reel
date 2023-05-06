@@ -10,6 +10,12 @@ const color_vertex_shader_path = "color.vert.spv";
 pub const color_fragment_spv align(4) = @embedFile(color_fragment_shader_path);
 pub const color_vertex_spv align(4) = @embedFile(color_vertex_shader_path);
 
+const icon_fragment_shader_path = "icon.frag.spv";
+const icon_vertex_shader_path = "icon.vert.spv";
+
+pub const icon_fragment_spv align(4) = @embedFile(icon_fragment_shader_path);
+pub const icon_vertex_spv align(4) = @embedFile(icon_vertex_shader_path);
+
 const texture_fragment_shader_path = "texture.frag.spv";
 const texture_vertex_shader_path = "texture.vert.spv";
 
