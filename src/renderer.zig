@@ -32,8 +32,23 @@ const required_gpu_memory: usize = calcRequiredGpuMemory();
 // Draw API
 //
 
+pub const VertexRange = color_pipeline.VertexRange; // TODO: move
+
+pub const quadSlice = color_pipeline.quadSlice;
+pub const quad = color_pipeline.quad;
+pub const vertexSlice = color_pipeline.vertexSlice;
+pub const nextVertexIndex = color_pipeline.nextVertexIndex;
+
+pub const drawTriangle = color_pipeline.drawTriangle;
 pub const drawQuad = color_pipeline.drawQuad;
+pub const overwriteQuad = color_pipeline.overwriteQuad;
+pub const drawRoundedRect = color_pipeline.drawRoundedRect;
+pub const drawCircle = color_pipeline.drawCircle;
+pub const drawArc = color_pipeline.drawArc;
+
 pub const drawIcon = icon_pipeline.drawIcon;
+pub const overwriteIcon = icon_pipeline.overwriteIcon;
+pub const reserveIcons = icon_pipeline.reserveIcons;
 
 const max_frames_in_flight = 2;
 
