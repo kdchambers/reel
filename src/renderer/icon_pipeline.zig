@@ -63,6 +63,48 @@ pub fn resetVertexBuffer() void {
     indices_used = 0;
 }
 
+pub inline fn reserveIcons(quad_count: u16) u16 {
+    const vertex_index = vertices_used;
+    const null_vertex = Vertex{
+        .x = -2.0,
+        .y = -2.0,
+        .z = -2.0,
+        .u = 0.0,
+        .v = 0.0,
+        .color = RGBA(u8).transparent,
+    };
+    const vertex_count: u16 = quad_count * 4;
+    @memset(vertices_buffer[vertex_index .. vertex_index + vertex_count], null_vertex);
+    for (0..quad_count) |_| {
+        writeQuadIndices(vertices_used);
+        vertices_used += 4;
+    }
+    return vertex_index;
+}
+
+pub inline fn overwriteIcon(
+    vertex_index: u16,
+    extent: Extent3D(f32),
+    texture_extent: Extent2D(f32),
+    color: RGBA(u8),
+    comptime anchor_point: graphics.AnchorPoint,
+) void {
+    var quad = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    graphics.writeQuad(Vertex, extent, anchor_point, quad);
+    quad[0].color = color;
+    quad[1].color = color;
+    quad[2].color = color;
+    quad[3].color = color;
+    quad[0].u = texture_extent.x;
+    quad[0].v = texture_extent.y;
+    quad[1].u = texture_extent.x + texture_extent.width;
+    quad[1].v = texture_extent.y;
+    quad[2].u = texture_extent.x + texture_extent.width;
+    quad[2].v = texture_extent.y + texture_extent.height;
+    quad[3].u = texture_extent.x;
+    quad[3].v = texture_extent.y + texture_extent.height;
+}
+
 pub fn drawIcon(
     extent: Extent3D(f32),
     texture_extent: Extent2D(f32),
