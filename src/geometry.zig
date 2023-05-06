@@ -8,6 +8,14 @@ pub fn Coordinates2D(comptime BaseType: type) type {
     };
 }
 
+pub fn Coordinates3D(comptime BaseType: type) type {
+    return extern struct {
+        x: BaseType,
+        y: BaseType,
+        z: BaseType = 0.8,
+    };
+}
+
 pub fn Dimensions2D(comptime BaseType: type) type {
     return extern struct {
         height: BaseType,
@@ -37,6 +45,15 @@ pub fn Extent3D(comptime BaseType: type) type {
         z: BaseType = 0.8,
         height: BaseType,
         width: BaseType,
+
+        pub inline fn to2D(self: @This()) Extent2D(BaseType) {
+            return .{
+                .x = self.x,
+                .y = self.y,
+                .width = self.width,
+                .height = self.height,
+            };
+        }
     };
 }
 
@@ -44,5 +61,12 @@ pub fn ScaleFactor2D(comptime BaseType: type) type {
     return struct {
         horizontal: BaseType,
         vertical: BaseType,
+    };
+}
+
+pub fn Radius2D(comptime Type: type) type {
+    return struct {
+        h: Type,
+        v: Type,
     };
 }
