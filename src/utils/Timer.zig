@@ -19,3 +19,8 @@ pub fn now() @This() {
         .start_timestamp = std.time.nanoTimestamp(),
     };
 }
+
+pub fn durationLog(self: @This(), comptime label: []const u8) void {
+    const duration_timestamp = self.duration();
+    std.log.info("Completed \"{s}\" in {}", .{label, std.fmt.fmtDuration(duration_timestamp)});
+}
