@@ -59,6 +59,10 @@ pub const drawIcon = icon_pipeline.drawIcon;
 pub const overwriteIcon = icon_pipeline.overwriteIcon;
 pub const reserveIcons = icon_pipeline.reserveIcons;
 
+pub const writeStreamFrame = video_pipeline.writeStreamFrame;
+pub const drawVideoFrame = video_pipeline.drawVideoFrame;
+pub const createStream = video_pipeline.createStream;
+
 const max_frames_in_flight = 2;
 
 var current_frame: u32 = 0;
@@ -142,6 +146,7 @@ pub inline fn init(
         swapchain_dimensions,
         swapchain_image_count,
         &cpu_memory_allocator,
+        gpu_memory_index,
     );
 }
 
