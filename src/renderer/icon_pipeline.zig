@@ -131,6 +131,8 @@ pub fn drawIcon(
 }
 
 inline fn writeQuadIndices(vertex_offset: u16) void {
+    assert(vertex_offset < vertices_buffer.len);
+    assert(indices_used < (indices_buffer.len - 6));
     indices_buffer[indices_used + 0] = vertex_offset + 0; // Top left
     indices_buffer[indices_used + 1] = vertex_offset + 1; // Top right
     indices_buffer[indices_used + 2] = vertex_offset + 2; // Bottom right
@@ -868,7 +870,7 @@ fn createGraphicsPipeline(
 
     const depth_options = vk.PipelineDepthStencilStateCreateInfo{
         .depth_test_enable = vk.TRUE,
-        .depth_write_enable = vk.FALSE,
+        .depth_write_enable = vk.TRUE,
         .depth_compare_op = .less_or_equal,
         .depth_bounds_test_enable = vk.FALSE,
         .min_depth_bounds = 0.0,

@@ -568,7 +568,7 @@ fn createGraphicsPipeline(
 
     const depth_options = vk.PipelineDepthStencilStateCreateInfo{
         .depth_test_enable = vk.TRUE,
-        .depth_write_enable = vk.FALSE,
+        .depth_write_enable = vk.TRUE,
         .depth_compare_op = .less_or_equal,
         .depth_bounds_test_enable = vk.FALSE,
         .min_depth_bounds = 0.0,
