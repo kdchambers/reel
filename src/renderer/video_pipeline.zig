@@ -42,6 +42,8 @@ var descriptor_pool: vk.DescriptorPool = undefined;
 
 var descriptor_count: u32 = 0;
 
+var command_pool: vk.CommandPool = undefined;
+
 var sampler: vk.Sampler = undefined;
 
 var pipeline_layout: vk.PipelineLayout = undefined;
@@ -67,6 +69,7 @@ var stream_count: u32 = 0;
 var stream_buffer: [max_stream_count]Stream = undefined;
 
 var cpu_memory_index: u32 = std.math.maxInt(u32);
+var gpu_memory_index: u32 = std.math.maxInt(u32);
 
 const DrawContext = struct {
     screen_dimensions: Dimensions2D(u16),
@@ -77,15 +80,18 @@ const DrawContext = struct {
 var draw_context_buffer: [max_draw_count]DrawContext = undefined;
 
 const Stream = struct {
-    source_dimensions: Dimensions2D(f32),
+    dimensions: Dimensions2D(u32),
     mapped_memory: []u8,
     memory: vk.DeviceMemory,
-    source_image: vk.Image,
+    image: vk.Image,
     image_view: vk.ImageView,
     scale_context: ?struct {
+        command_buffer: vk.CommandBuffer,
+        fence: vk.Fence,
+        semaphore: vk.Semaphore,
         source_format: vk.Format,
-        scaled_image: vk.Image,
-        scaled_dimensions: Dimensions2D(u16),
+        source_image: vk.Image,
+        source_dimensions: Dimensions2D(u32),
     },
 };
 
@@ -93,11 +99,183 @@ pub const SupportedImageFormat = enum {
     rgba,
 };
 
-pub inline fn writeStreamFrame(stream_index: u32, pixels: []u8) !void {
+pub inline fn writeStreamFrame(stream_index: u32, pixels: []const u8) !void {
     assert(stream_count > stream_index);
     const stream_ptr: *Stream = &stream_buffer[stream_index];
-    const expected_pixel_count: usize = stream_ptr.source_dimensions.width * stream_ptr.source_dimensions.height;
-    assert(expected_pixel_count == pixels.len);
+
+    if (stream_ptr.scale_context) |scale_context| {
+        const device_dispatch = vulkan_core.device_dispatch;
+        const logical_device = vulkan_core.logical_device;
+
+        const expected_size: usize = scale_context.source_dimensions.width * scale_context.source_dimensions.height * 4;
+        assert(expected_size == pixels.len);
+
+        const wait_fence_result = try device_dispatch.waitForFences(
+            logical_device,
+            1,
+            &[1]vk.Fence{scale_context.fence},
+            vk.TRUE,
+            std.math.maxInt(u64),
+        );
+        assert(wait_fence_result == .success);
+
+        try device_dispatch.resetFences(
+            logical_device,
+            1,
+            @ptrCast([*]const vk.Fence, &scale_context.fence),
+        );
+
+        try device_dispatch.resetCommandBuffer(scale_context.command_buffer, .{});
+
+        try device_dispatch.beginCommandBuffer(scale_context.command_buffer, &vk.CommandBufferBeginInfo{
+            .flags = .{},
+            .p_inheritance_info = null,
+        });
+
+        const subresource_layers = vk.ImageSubresourceLayers{
+            .aspect_mask = .{ .color_bit = true },
+            .layer_count = 1,
+            .mip_level = 0,
+            .base_array_layer = 0,
+        };
+
+        var src_region_offsets = [2]vk.Offset3D{
+            .{ .x = 0, .y = 0, .z = 0 },
+            .{
+                .x = @intCast(i32, scale_context.source_dimensions.width),
+                .y = @intCast(i32, scale_context.source_dimensions.height),
+                .z = 1,
+            },
+        };
+        const dst_region_offsets = [2]vk.Offset3D{
+            .{ .x = 0, .y = 0, .z = 0 },
+            .{
+                .x = @intCast(i32, stream_ptr.dimensions.width),
+                .y = @intCast(i32, stream_ptr.dimensions.height),
+                .z = 1,
+            },
+        };
+
+        const regions = [_]vk.ImageBlit{.{
+            .src_subresource = subresource_layers,
+            .src_offsets = src_region_offsets,
+            .dst_subresource = subresource_layers,
+            .dst_offsets = dst_region_offsets,
+        }};
+
+        device_dispatch.cmdBlitImage(
+            scale_context.command_buffer,
+            scale_context.source_image,
+            .transfer_src_optimal,
+            stream_ptr.image,
+            .transfer_dst_optimal,
+            1,
+            &regions,
+            .linear,
+        );
+
+        {
+            const barrier = [_]vk.ImageMemoryBarrier{
+                .{
+                    .src_access_mask = .{},
+                    .dst_access_mask = .{ .shader_read_bit = true },
+                    .old_layout = .transfer_dst_optimal,
+                    .new_layout = .shader_read_only_optimal,
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .image = stream_ptr.image,
+                    .subresource_range = .{
+                        .aspect_mask = .{ .color_bit = true },
+                        .base_mip_level = 0,
+                        .level_count = 1,
+                        .base_array_layer = 0,
+                        .layer_count = 1,
+                    },
+                },
+            };
+
+            //
+            // Transfer will produce the data, and in this case we nothing in the pipeline depends on it
+            //
+            const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
+            const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
+            const dependency_flags = vk.DependencyFlags{};
+            device_dispatch.cmdPipelineBarrier(
+                scale_context.command_buffer,
+                src_stage,
+                dst_stage,
+                dependency_flags,
+                0,
+                undefined,
+                0,
+                undefined,
+                1,
+                &barrier,
+            );
+        }
+
+        {
+            const barrier = [_]vk.ImageMemoryBarrier{
+                .{
+                    .src_access_mask = .{ .shader_read_bit = true },
+                    .dst_access_mask = .{},
+                    .old_layout = .shader_read_only_optimal,
+                    .new_layout = .transfer_dst_optimal,
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .image = stream_ptr.image,
+                    .subresource_range = .{
+                        .aspect_mask = .{ .color_bit = true },
+                        .base_mip_level = 0,
+                        .level_count = 1,
+                        .base_array_layer = 0,
+                        .layer_count = 1,
+                    },
+                },
+            };
+
+            //
+            // Transfer will produce the data, and in this case we nothing in the pipeline depends on it
+            //
+            const src_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
+            const dst_stage = vk.PipelineStageFlags{ .bottom_of_pipe_bit = true };
+            const dependency_flags = vk.DependencyFlags{};
+            device_dispatch.cmdPipelineBarrier(
+                scale_context.command_buffer,
+                src_stage,
+                dst_stage,
+                dependency_flags,
+                0,
+                undefined,
+                0,
+                undefined,
+                1,
+                &barrier,
+            );
+        }
+
+        try device_dispatch.endCommandBuffer(scale_context.command_buffer);
+
+        const submit_command_infos = [_]vk.SubmitInfo{.{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = null,
+            .p_wait_dst_stage_mask = undefined,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &scale_context.command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+            // .signal_semaphore_count = 1,
+            // .p_signal_semaphores = &[1]vk.Semaphore{scale_context.semaphore},
+        }};
+
+        try device_dispatch.queueSubmit(
+            vulkan_core.graphics_present_queue,
+            1,
+            &submit_command_infos,
+            scale_context.fence,
+        );
+    }
+
     @memcpy(stream_ptr.mapped_memory, pixels);
 }
 
@@ -114,96 +292,242 @@ pub inline fn drawVideoFrame(stream: u32, placement: Coordinates3D(f32), dimensi
 
 pub fn createStream(
     supported_image_format: SupportedImageFormat,
-    source_dimensions: Dimensions2D(f32),
-    scaled_dimensions: Dimensions2D(f32),
+    source_dimensions: Dimensions2D(u32),
+    scaled_dimensions: Dimensions2D(u32),
     // max_scaled_dimensions: Dimensions2D(f32),
 ) !u32 {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
     const stream_index: u32 = stream_count;
+    assert(stream_index == 0);
     const stream_ptr: *Stream = &stream_buffer[stream_index];
+    stream_ptr.scale_context = null;
 
-    const scaling_required = (source_dimensions.width == scaled_dimensions.width and source_dimensions.height == scaled_dimensions.height);
-    assert(!scaling_required);
+    const scaling_required = !(source_dimensions.width == scaled_dimensions.width and source_dimensions.height == scaled_dimensions.height);
+    assert(scaling_required);
 
     const image_format = switch (supported_image_format) {
         .rgba => vk.Format.r8g8b8a8_unorm,
     };
 
-    //
-    // If scaling is required, this image will be used
-    //
-    // const image_usage: vk.ImageUsageFlags = if (scaling_required) .{ .transfer_src_bit = true } else .{ .sampled_bit = true };
-
-    const pixel_count = source_dimensions.width * source_dimensions.height;
-    const bytes_per_pixel = 4;
-    const image_size_bytes: usize = pixel_count * bytes_per_pixel;
-    const image_create_info = vk.ImageCreateInfo{
-        .flags = .{},
-        .image_type = .@"2d",
-        .format = image_format,
-        .tiling = .linear,
-        .extent = vk.Extent3D{
-            .width = source_dimensions.width,
-            .height = source_dimensions.height,
-            .depth = 1,
-        },
-        .mip_levels = 1,
-        .array_layers = 1,
-        .initial_layout = .preinitialized,
-        .usage = .{ .sampled_bit = true },
-        .samples = .{ .@"1_bit" = true },
-        .sharing_mode = .exclusive,
-        .queue_family_index_count = 0,
-        .p_queue_family_indices = undefined,
-    };
-    stream_ptr.source_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
     {
-        const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, stream_ptr.source_image);
+        const image_usage: vk.ImageUsageFlags = if (scaling_required) .{ .transfer_dst_bit = true, .sampled_bit = true } else .{ .sampled_bit = true };
+        const image_initial_layout: vk.ImageLayout = if (scaling_required) .undefined else .preinitialized;
+        const memory_index: u32 = if (scaling_required) gpu_memory_index else cpu_memory_index;
+        const tiling: vk.ImageTiling = if (scaling_required) .optimal else .linear;
+
+        const pixel_count = scaled_dimensions.width * scaled_dimensions.height;
+        const bytes_per_pixel = 4;
+        const image_size_bytes: usize = pixel_count * bytes_per_pixel;
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = image_format,
+            .tiling = tiling,
+            .extent = vk.Extent3D{
+                .width = scaled_dimensions.width,
+                .height = scaled_dimensions.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = image_initial_layout,
+            .usage = image_usage,
+            .samples = .{ .@"1_bit" = true },
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+        stream_ptr.image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+        const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, stream_ptr.image);
         stream_ptr.memory = try vulkan_core.device_dispatch.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
+            .allocation_size = memory_requirements.size,
+            .memory_type_index = memory_index,
+        }, null);
+
+        //
+        // If scaling is required, we want to map the non-scaled memory
+        //
+        if (!scaling_required)
+            stream_ptr.mapped_memory = @ptrCast([*]u8, (try device_dispatch.mapMemory(logical_device, stream_ptr.memory, 0, image_size_bytes, .{})).?)[0 .. pixel_count * 4];
+
+        try device_dispatch.bindImageMemory(logical_device, stream_ptr.image, stream_ptr.memory, 0);
+        stream_ptr.image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
+            .flags = .{},
+            .image = stream_ptr.image,
+            .view_type = .@"2d_array",
+            .format = .r8g8b8a8_unorm,
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+            .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+        }, null);
+
+        if (scaling_required) {}
+    }
+
+    if (scaling_required) {
+        //
+        // Create the source image that will be converted into scaled image
+        //
+        const pixel_count = source_dimensions.width * source_dimensions.height;
+        const bytes_per_pixel = 4;
+        const image_size_bytes: usize = pixel_count * bytes_per_pixel;
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = image_format,
+            .tiling = .linear,
+            .extent = vk.Extent3D{
+                .width = source_dimensions.width,
+                .height = source_dimensions.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = .preinitialized,
+            .usage = .{ .transfer_src_bit = true },
+            .samples = .{ .@"1_bit" = true },
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+        const source_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+        const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, source_image);
+        const source_memory = try vulkan_core.device_dispatch.allocateMemory(vulkan_core.logical_device, &vk.MemoryAllocateInfo{
             .allocation_size = memory_requirements.size,
             .memory_type_index = cpu_memory_index,
         }, null);
-        stream_ptr.mapped_memory = @ptrCast([*]u8, (try vulkan_core.device_dispatch.mapMemory(vulkan_core.logical_device, stream_ptr.memory, 0, image_size_bytes, .{})).?);
-    }
+        stream_ptr.mapped_memory = @ptrCast([*]u8, (try device_dispatch.mapMemory(logical_device, source_memory, 0, image_size_bytes, .{})).?)[0 .. pixel_count * 4];
+        try device_dispatch.bindImageMemory(logical_device, source_image, source_memory, 0);
 
-    try device_dispatch.bindImageMemory(logical_device, stream_ptr.source_image, stream_ptr.mapped_memory, 0);
-    stream_ptr.image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
-        .flags = .{},
-        .image = stream_ptr.source_image,
-        .view_type = .@"2d_array",
-        .format = .r8g8b8a8_unorm,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = 1,
-            .base_array_layer = 0,
-            .layer_count = 1,
-        },
-        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-    }, null);
+        var command_buffer: vk.CommandBuffer = undefined;
+        const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+            .command_pool = command_pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        try device_dispatch.allocateCommandBuffers(
+            vulkan_core.logical_device,
+            &command_buffer_allocate_info,
+            @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        );
+
+        //
+        // Semaphore to ensure render pass (On a seperate submission) won't execute until this is complete
+        //
+        const semaphore_create_info = vk.SemaphoreCreateInfo{ .flags = .{} };
+        const blit_semaphore = try device_dispatch.createSemaphore(logical_device, &semaphore_create_info, null);
+
+        //
+        // Fence to make sure we can reset the command buffer, this should only be required if `writeStreamFrame`
+        // isn't interleaved with `renderFrame`. This is because, as explained above, a frame won't be rendered
+        // until the semaphore is signaled.
+        //
+        const fence_create_info = vk.FenceCreateInfo{ .flags = .{} };
+        const blit_fence = try device_dispatch.createFence(logical_device, &fence_create_info, null);
+
+        stream_ptr.scale_context = .{
+            .command_buffer = command_buffer,
+            .fence = blit_fence,
+            .semaphore = blit_semaphore,
+            .source_image = source_image,
+            .source_format = image_format,
+            .source_dimensions = source_dimensions,
+        };
+
+        try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+            .flags = .{},
+            .p_inheritance_info = null,
+        });
+
+        const image_barriers = [_]vk.ImageMemoryBarrier{
+            .{
+                .src_access_mask = .{ .transfer_write_bit = true },
+                .dst_access_mask = .{},
+                .old_layout = .preinitialized,
+                .new_layout = .transfer_src_optimal,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = source_image,
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            },
+            .{
+                .src_access_mask = .{ .transfer_write_bit = true },
+                .dst_access_mask = .{},
+                .old_layout = .undefined,
+                .new_layout = .transfer_dst_optimal,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = stream_ptr.image,
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            },
+        };
+
+        {
+            //
+            // Transfer will produce the data, and in this case we nothing in the pipeline depends on it
+            //
+            const src_stage = vk.PipelineStageFlags{ .transfer_bit = true };
+            const dst_stage = vk.PipelineStageFlags{ .bottom_of_pipe_bit = true };
+            const dependency_flags = vk.DependencyFlags{};
+            device_dispatch.cmdPipelineBarrier(
+                command_buffer,
+                src_stage,
+                dst_stage,
+                dependency_flags,
+                0,
+                undefined,
+                0,
+                undefined,
+                image_barriers.len,
+                &image_barriers,
+            );
+        }
+
+        try device_dispatch.endCommandBuffer(command_buffer);
+
+        const submit_command_infos = [_]vk.SubmitInfo{.{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+            .p_wait_dst_stage_mask = undefined,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+        }};
+
+        try device_dispatch.queueSubmit(
+            vulkan_core.graphics_present_queue,
+            1,
+            &submit_command_infos,
+            blit_fence,
+        );
+    }
 
     stream_count += 1;
     errdefer stream_count -= 1;
 
     try createDescriptorSets(device_dispatch, logical_device, descriptor_count);
-}
 
-pub fn awaitBlitCommands() void {
-    //
-    // TODO: Error handling
-    //
-    const timer = Timer.now();
-    _ = try vulkan_core.device_dispatch.waitForFences(
-        vulkan_core.logical_device,
-        fence_count,
-        &fence_buffer,
-        vk.TRUE,
-        std.math.maxInt(u64),
-    );
-    const duration = timer.duration();
-    assert(duration < (1 * std.time.ns_per_ms));
+    return stream_index;
 }
 
 pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dimensions: Dimensions2D(u32)) !void {
@@ -301,11 +625,20 @@ pub fn init(
     viewport_dimensions: Dimensions2D(u32),
     swapchain_image_count: u32,
     cpu_memory_allocator: *VulkanAllocator,
+    gpu_memory: u32,
 ) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
+    command_pool = try device_dispatch.createCommandPool(logical_device, &vk.CommandPoolCreateInfo{
+        .queue_family_index = vulkan_core.graphics_present_queue_index,
+        .flags = .{ .reset_command_buffer_bit = true },
+    }, null);
+
     descriptor_count = swapchain_image_count;
+
+    cpu_memory_index = cpu_memory_allocator.memory_index;
+    gpu_memory_index = gpu_memory;
 
     const vertex_buffer_create_info = vk.BufferCreateInfo{
         .size = vertex_buffer_capacity * @sizeOf(Vertex),
@@ -387,166 +720,6 @@ pub fn init(
     try createDescriptorPool(device_dispatch, logical_device, swapchain_image_count);
     try createGraphicsPipeline(device_dispatch, logical_device, viewport_dimensions);
 }
-
-// pub fn createUnscaledImage(memory_index: u32) !void {
-//     const device_dispatch = vulkan_core.device_dispatch;
-//     const logical_device = vulkan_core.logical_device;
-//     const queue = vulkan_core.graphics_present_queue;
-
-//     // TODO:
-//     const unscaled_image_dimensions = geometry.Dimensions2D(u32){
-//         .width = 2000,
-//         .height = 1100,
-//     };
-
-//     const texture_pixel_count = @intCast(usize, unscaled_image_dimensions.width) * unscaled_image_dimensions.height;
-//     const texture_size_bytes: usize = texture_pixel_count * @sizeOf(Pixel);
-
-//     {
-//         const image_create_info = vk.ImageCreateInfo{
-//             .flags = .{},
-//             .image_type = .@"2d",
-//             .format = .r8g8b8a8_unorm,
-//             .tiling = .linear,
-//             .extent = vk.Extent3D{
-//                 .width = unscaled_image_dimensions.width,
-//                 .height = unscaled_image_dimensions.height,
-//                 .depth = 1,
-//             },
-//             .mip_levels = 1,
-//             .array_layers = 1,
-//             .initial_layout = .preinitialized,
-//             .usage = .{ .transfer_src_bit = true },
-//             .samples = .{ .@"1_bit" = true },
-//             .sharing_mode = .exclusive,
-//             .queue_family_index_count = 0,
-//             .p_queue_family_indices = undefined,
-//         };
-
-//         unscaled_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
-//     }
-
-//     const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, unscaled_image);
-//     var memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
-//         .allocation_size = memory_requirements.size,
-//         .memory_type_index = memory_index,
-//     }, null);
-
-//     try device_dispatch.bindImageMemory(logical_device, unscaled_image, memory, 0);
-//     const mapped_memory_opt = (try device_dispatch.mapMemory(
-//         logical_device,
-//         memory,
-//         0,
-//         texture_size_bytes,
-//         .{},
-//     ));
-
-//     if (mapped_memory_opt == null) {
-//         std.log.err("renderer: Failed to map shader memory", .{});
-//         return error.MapMemoryFail;
-//     }
-
-//     memory_map = @ptrCast([*]Pixel, mapped_memory_opt.?)[0..texture_pixel_count];
-//     @memset(memory_map, Pixel{ .r = 0, .g = 0, .b = 0, .a = 255 });
-
-//     //
-//     // Transition from preinitialized to general
-//     //
-//     const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-//         .command_pool = vulkan_core.command_pool,
-//         .level = .primary,
-//         .command_buffer_count = 1,
-//     };
-
-//     var command_buffer: vk.CommandBuffer = undefined;
-//     try device_dispatch.allocateCommandBuffers(
-//         logical_device,
-//         &command_buffer_allocate_info,
-//         @ptrCast([*]vk.CommandBuffer, &command_buffer),
-//     );
-
-//     try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
-//         .flags = .{ .one_time_submit_bit = true },
-//         .p_inheritance_info = null,
-//     });
-
-//     const barrier = [_]vk.ImageMemoryBarrier{
-//         .{
-//             .src_access_mask = .{},
-//             .dst_access_mask = .{},
-//             .old_layout = .preinitialized,
-//             .new_layout = .general,
-//             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-//             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-//             .image = unscaled_image,
-//             .subresource_range = .{
-//                 .aspect_mask = .{ .color_bit = true },
-//                 .base_mip_level = 0,
-//                 .level_count = 1,
-//                 .base_array_layer = 0,
-//                 .layer_count = 1,
-//             },
-//         },
-//     };
-
-//     {
-//         const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
-//         const dst_stage = vk.PipelineStageFlags{ .bottom_of_pipe_bit = true };
-//         const dependency_flags = vk.DependencyFlags{};
-//         device_dispatch.cmdPipelineBarrier(
-//             command_buffer,
-//             src_stage,
-//             dst_stage,
-//             dependency_flags,
-//             0,
-//             undefined,
-//             0,
-//             undefined,
-//             1,
-//             &barrier,
-//         );
-//     }
-
-//     try device_dispatch.endCommandBuffer(command_buffer);
-
-//     const submit_command_infos = [_]vk.SubmitInfo{.{
-//         .wait_semaphore_count = 0,
-//         .p_wait_semaphores = undefined,
-//         .p_wait_dst_stage_mask = undefined,
-//         .command_buffer_count = 1,
-//         .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-//         .signal_semaphore_count = 0,
-//         .p_signal_semaphores = undefined,
-//     }};
-
-//     const fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{} }, null);
-
-//     try device_dispatch.queueSubmit(
-//         queue,
-//         1,
-//         &submit_command_infos,
-//         fence,
-//     );
-
-//     //
-//     // TODO: Check return
-//     //
-//     _ = try device_dispatch.waitForFences(
-//         logical_device,
-//         1,
-//         @ptrCast([*]const vk.Fence, &fence),
-//         vk.TRUE,
-//         std.time.ns_per_s * 4,
-//     );
-
-//     device_dispatch.destroyFence(logical_device, fence, null);
-//     device_dispatch.freeCommandBuffers(
-//         logical_device,
-//         vulkan_core.command_pool,
-//         1,
-//         @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-//     );
-// }
 
 fn createDescriptorPool(
     device_dispatch: vulkan_config.DeviceDispatch,
@@ -660,107 +833,6 @@ fn createDescriptorSets(
         device_dispatch.updateDescriptorSets(logical_device, 1, &write_descriptor_set, 0, undefined);
     }
 }
-
-// fn layoutToOptimal(
-//     device_dispatch: vulkan_config.DeviceDispatch,
-//     logical_device: vk.Device,
-//     queue: vk.Queue,
-// ) !void {
-//     const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
-//         .command_pool = vulkan_core.command_pool,
-//         .level = .primary,
-//         .command_buffer_count = 1,
-//     };
-
-//     var command_buffer: vk.CommandBuffer = undefined;
-//     try device_dispatch.allocateCommandBuffers(
-//         logical_device,
-//         &command_buffer_allocate_info,
-//         @ptrCast([*]vk.CommandBuffer, &command_buffer),
-//     );
-
-//     try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
-//         .flags = .{ .one_time_submit_bit = true },
-//         .p_inheritance_info = null,
-//     });
-
-//     const barrier = [_]vk.ImageMemoryBarrier{
-//         .{
-//             .src_access_mask = .{},
-//             .dst_access_mask = .{ .shader_read_bit = true },
-//             .old_layout = .preinitialized,
-//             .new_layout = .general,
-//             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-//             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-//             .image = texture_image,
-//             .subresource_range = .{
-//                 .aspect_mask = .{ .color_bit = true },
-//                 .base_mip_level = 0,
-//                 .level_count = 1,
-//                 .base_array_layer = 0,
-//                 .layer_count = 1,
-//             },
-//         },
-//     };
-
-//     {
-//         const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
-//         const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
-//         const dependency_flags = vk.DependencyFlags{};
-//         device_dispatch.cmdPipelineBarrier(
-//             command_buffer,
-//             src_stage,
-//             dst_stage,
-//             dependency_flags,
-//             0,
-//             undefined,
-//             0,
-//             undefined,
-//             1,
-//             &barrier,
-//         );
-//     }
-
-//     try device_dispatch.endCommandBuffer(command_buffer);
-
-//     const submit_command_infos = [_]vk.SubmitInfo{.{
-//         .wait_semaphore_count = 0,
-//         .p_wait_semaphores = undefined,
-//         .p_wait_dst_stage_mask = undefined,
-//         .command_buffer_count = 1,
-//         .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-//         .signal_semaphore_count = 0,
-//         .p_signal_semaphores = undefined,
-//     }};
-
-//     const fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{} }, null);
-
-//     try device_dispatch.queueSubmit(
-//         queue,
-//         1,
-//         &submit_command_infos,
-//         fence,
-//     );
-
-//     //
-//     // TODO: Check return
-//     //
-//     _ = try device_dispatch.waitForFences(
-//         logical_device,
-//         1,
-//         @ptrCast([*]const vk.Fence, &fence),
-//         vk.TRUE,
-//         std.time.ns_per_s * 4,
-//     );
-
-//     device_dispatch.destroyFence(logical_device, fence, null);
-//     device_dispatch.freeCommandBuffers(
-//         logical_device,
-//         vulkan_core.command_pool,
-//         1,
-//         @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-//     );
-// }
 
 fn createGraphicsPipeline(
     device_dispatch: vulkan_config.DeviceDispatch,
