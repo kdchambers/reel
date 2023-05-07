@@ -199,7 +199,6 @@ pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dim
 
 pub fn init(
     options: InitOptions,
-    graphics_present_queue: vk.Queue,
     swapchain_image_count: u32,
     cpu_memory_allocator: *VulkanAllocator,
     gpu_memory_allocator: *VulkanAllocator,
@@ -208,6 +207,7 @@ pub fn init(
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
     const command_pool = vulkan_core.command_pool;
+    const graphics_present_queue = vulkan_core.graphics_present_queue;
 
     const initial_viewport_dimensions = options.viewport_dimensions;
 
