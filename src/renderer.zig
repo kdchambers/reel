@@ -16,6 +16,7 @@ const vk = @import("vulkan");
 
 const color_pipeline = @import("renderer/color_pipeline.zig");
 const icon_pipeline = @import("renderer/icon_pipeline.zig");
+const video_pipeline = @import("renderer/video_pipeline.zig");
 
 const render_pass = @import("renderer/render_pass.zig");
 const vulkan_core = @import("renderer/vulkan_core.zig");
@@ -131,11 +132,16 @@ pub inline fn init(
             .index_buffer_capacity = icon_index_buffer_capacity,
             .viewport_dimensions = swapchain_dimensions,
         },
-        vulkan_core.graphics_present_queue,
         swapchain_image_count,
         &cpu_memory_allocator,
         &gpu_memory_allocator,
         icon_texture,
+    );
+
+    try video_pipeline.init(
+        swapchain_dimensions,
+        swapchain_image_count,
+        &cpu_memory_allocator,
     );
 }
 
@@ -304,6 +310,12 @@ pub fn recordDrawCommands() !void {
         );
 
         try icon_pipeline.recordDrawCommands(
+            command_buffer,
+            i,
+            swapchain_dimensions,
+        );
+
+        try video_pipeline.recordDrawCommands(
             command_buffer,
             i,
             swapchain_dimensions,
@@ -539,6 +551,8 @@ fn calcRequiredCpuMemory() usize {
         bytes += icon_vertex_buffer_capacity * @sizeOf(icon_pipeline.Vertex);
         bytes += icon_index_buffer_capacity * @sizeOf(u16);
         bytes += 512 * 512; // staging buffer
+
+        bytes += video_pipeline.requiredCpuMemory();
 
         bytes += color_vertex_buffer_capacity * @sizeOf(color_pipeline.Vertex);
         bytes += color_index_buffer_capacity * @sizeOf(u16);
