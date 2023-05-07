@@ -25,6 +25,14 @@ const VulkanAllocator = @import("VulkanBumpAllocator.zig");
 pub const Surface = opaque {};
 pub const Display = opaque {};
 
+const icon_quad_capacity = 512;
+const icon_vertex_buffer_capacity = icon_quad_capacity * 4;
+const icon_index_buffer_capacity = icon_quad_capacity * 6;
+
+const color_quad_capacity = 126;
+const color_vertex_buffer_capacity = color_quad_capacity * 5;
+const color_index_buffer_capacity = color_quad_capacity * 6;
+
 const required_cpu_memory: usize = calcRequiredCpuMemory();
 const required_gpu_memory: usize = calcRequiredGpuMemory();
 
@@ -109,12 +117,20 @@ pub inline fn init(
     try setupFramebuffers();
 
     try color_pipeline.init(
-        .{ .vertex_buffer_capacity = 100, .index_buffer_capacity = 120, .viewport_dimensions = swapchain_dimensions },
+        .{
+            .vertex_buffer_capacity = color_vertex_buffer_capacity,
+            .index_buffer_capacity = color_index_buffer_capacity,
+            .viewport_dimensions = swapchain_dimensions,
+        },
         &cpu_memory_allocator,
     );
 
     try icon_pipeline.init(
-        .{ .vertex_buffer_capacity = 100, .index_buffer_capacity = 120, .viewport_dimensions = swapchain_dimensions },
+        .{
+            .vertex_buffer_capacity = icon_vertex_buffer_capacity,
+            .index_buffer_capacity = icon_index_buffer_capacity,
+            .viewport_dimensions = swapchain_dimensions,
+        },
         vulkan_core.graphics_present_queue,
         swapchain_image_count,
         &cpu_memory_allocator,
@@ -519,12 +535,14 @@ fn getSwapchainImageCount() !u32 {
 fn calcRequiredCpuMemory() usize {
     return comptime blk: {
         var bytes: comptime_int = 0;
-        bytes += 100 * @sizeOf(icon_pipeline.Vertex);
-        bytes += 120 * @sizeOf(u16);
+
+        bytes += icon_vertex_buffer_capacity * @sizeOf(icon_pipeline.Vertex);
+        bytes += icon_index_buffer_capacity * @sizeOf(u16);
         bytes += 512 * 512; // staging buffer
 
-        bytes += 100 * @sizeOf(color_pipeline.Vertex);
-        bytes += 120 * @sizeOf(u16);
+        bytes += color_vertex_buffer_capacity * @sizeOf(color_pipeline.Vertex);
+        bytes += color_index_buffer_capacity * @sizeOf(u16);
+
         break :blk bytes;
     };
 }
