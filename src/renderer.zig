@@ -61,7 +61,9 @@ pub const reserveIcons = icon_pipeline.reserveIcons;
 
 pub const writeStreamFrame = video_pipeline.writeStreamFrame;
 pub const drawVideoFrame = video_pipeline.drawVideoFrame;
+pub const addVideoSource = video_pipeline.addVideoSource;
 pub const createStream = video_pipeline.createStream;
+pub const resizeCanvas = video_pipeline.resizeCanvas;
 
 const max_frames_in_flight = 2;
 
@@ -146,7 +148,6 @@ pub inline fn init(
         swapchain_dimensions,
         swapchain_image_count,
         &cpu_memory_allocator,
-        gpu_memory_index,
     );
 }
 
@@ -160,6 +161,7 @@ pub inline fn deinit() void {
 pub fn resetVertexBuffers() void {
     color_pipeline.resetVertexBuffer();
     icon_pipeline.resetVertexBuffer();
+    video_pipeline.resetVertexBuffer();
 }
 
 fn setupSynchronization() !void {
@@ -296,9 +298,7 @@ pub fn recordDrawCommands() !void {
             .p_inheritance_info = null,
         });
 
-        //
-        // Do image blitting here
-        //
+        try video_pipeline.recordBlitCommand(command_buffer);
 
         device_dispatch.cmdBeginRenderPass(command_buffer, &vk.RenderPassBeginInfo{
             .render_pass = render_pass.pass,
