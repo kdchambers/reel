@@ -16,10 +16,16 @@ const geometry = @import("../geometry.zig");
 const Extent2D = geometry.Extent2D;
 const Extent3D = geometry.Extent3D;
 const Dimensions2D = geometry.Dimensions2D;
+const Coordinates2D = geometry.Coordinates2D;
+const ScaleFactor2D = geometry.ScaleFactor2D;
 
 const graphics = @import("../graphics.zig");
 const RGBA = graphics.RGBA;
 const TextureGreyscale = graphics.TextureGreyscale;
+const TextWriterInterface = graphics.TextWriterInterface;
+const BufferTextWriterInterface = graphics.BufferTextWriterInterface;
+
+const renderer = @import("../renderer.zig");
 
 var descriptor_set_layout_buffer: [8]vk.DescriptorSetLayout = undefined;
 var descriptor_set_buffer: [8]vk.DescriptorSet = undefined;
@@ -52,6 +58,72 @@ pub const Vertex = extern struct {
     color: RGBA(u8),
 };
 
+const fontana = @import("fontana");
+const Atlas = fontana.Atlas;
+
+pub const Font = fontana.Font(.{
+    .backend = .freetype_harfbuzz,
+    .type_overrides = .{
+        .Extent2DPixel = Extent2D(u32),
+        .Extent2DNative = Extent2D(f32),
+        .Coordinates2DNative = Coordinates2D(f32),
+        .Scale2D = ScaleFactor2D(f32),
+    },
+});
+
+var texture_atlas: Atlas = undefined;
+var font: Font = undefined;
+
+const pen_options = fontana.PenOptions{
+    .pixel_format = .r8,
+    .PixelType = u8,
+};
+pub var pen: Font.PenConfig(pen_options) = undefined;
+
+const asset_path_font = "assets/Roboto-Regular.ttf";
+const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
+
+fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
+    font = blk: {
+        const file_handle = std.fs.cwd().openFile(asset_path_font, .{ .mode = .read_only }) catch return error.FontInitFail;
+        defer file_handle.close();
+        const max_size_bytes = 10 * 1024 * 1024;
+        const font_file_bytes = file_handle.readToEndAlloc(allocator, max_size_bytes) catch return error.FontInitFail;
+        break :blk Font.construct(font_file_bytes) catch |err| {
+            std.log.err("Failed to initialize font. Error: {}", .{err});
+            return error.FontInitFail;
+        };
+    };
+    errdefer font.deinit(allocator);
+
+    texture_atlas = Atlas.init(allocator, 512) catch return error.TextureAtlasInitFail;
+    errdefer texture_atlas.deinit(allocator);
+
+    var font_texture: graphics.TextureGreyscale = undefined;
+    font_texture.width = 512;
+    font_texture.height = 512;
+    font_texture.pixels = try allocator.alloc(u8, font_texture.width * font_texture.height);
+    @memset(font_texture.pixels, 0);
+
+    {
+        const points_per_pixel = 100;
+        const font_point_size: f64 = 14.0;
+        pen = font.createPen(
+            pen_options,
+            allocator,
+            font_point_size,
+            points_per_pixel,
+            atlas_codepoints,
+            font_texture.width,
+            font_texture.pixels.ptr,
+            &texture_atlas,
+        ) catch return error.FontPenInitFail;
+    }
+    errdefer pen.deinit(allocator);
+
+    return font_texture;
+}
+
 const InitOptions = struct {
     vertex_buffer_capacity: u32,
     index_buffer_capacity: u32,
@@ -63,7 +135,7 @@ pub fn resetVertexBuffer() void {
     indices_used = 0;
 }
 
-pub inline fn reserveIcons(quad_count: u16) u16 {
+pub inline fn reserveGreyscale(quad_count: u16) u16 {
     const vertex_index = vertices_used;
     const null_vertex = Vertex{
         .x = -2.0,
@@ -82,7 +154,7 @@ pub inline fn reserveIcons(quad_count: u16) u16 {
     return vertex_index;
 }
 
-pub inline fn overwriteIcon(
+pub inline fn overwriteGreyscale(
     vertex_index: u16,
     extent: Extent3D(f32),
     texture_extent: Extent2D(f32),
@@ -105,7 +177,90 @@ pub inline fn overwriteIcon(
     quad[3].v = texture_extent.y + texture_extent.height;
 }
 
-pub fn drawIcon(
+const Pen = struct {
+    font: u16,
+    size: u16,
+};
+
+pub fn Bounds(comptime Type: type) type {
+    return struct {
+        min: Type,
+        max: Type,
+    };
+}
+
+pub const HorizontalAnchor = enum { left, right, middle };
+pub const VerticalAnchor = enum { top, bottom, middle };
+
+const DrawTextResult = struct {
+    written_extent: Extent2D(f32),
+    vertex_start: u16,
+    vertex_count: u16,
+};
+
+const PenSize = enum {
+    small,
+    medium,
+    large,
+};
+
+pub fn overwriteText(
+    vertex_range: renderer.VertexRange,
+    text: []const u8,
+    extent: Extent3D(f32),
+    screen_scale: ScaleFactor2D(f32),
+    pen_size: PenSize,
+    color: RGBA(u8),
+    horizontal_anchor: HorizontalAnchor,
+    vertical_anchor: VerticalAnchor,
+) DrawTextResult {
+    //
+    // TODO: Clear vertex range
+    //
+    assert(pen_size == .small);
+    var text_writer_interface = BufferTextWriterInterface{
+        .color = color,
+        .vertex_start = vertex_range.start,
+        .capacity = vertex_range.count,
+    };
+    if (horizontal_anchor == .middle and vertical_anchor == .middle) {
+        pen.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable;
+    } else unreachable;
+
+    return .{
+        .written_extent = extent.to2D(),
+        .vertex_start = 0,
+        .vertex_count = 0,
+    };
+}
+
+pub fn drawText(
+    text: []const u8,
+    extent: Extent3D(f32),
+    screen_scale: ScaleFactor2D(f32),
+    pen_size: PenSize,
+    color: RGBA(u8),
+    horizontal_anchor: HorizontalAnchor,
+    vertical_anchor: VerticalAnchor,
+) DrawTextResult {
+    assert(pen_size == .small);
+    var text_writer_interface = TextWriterInterface{ .color = color };
+    if (horizontal_anchor == .middle and vertical_anchor == .middle) {
+        pen.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable;
+    } else unreachable;
+
+    return .{
+        .written_extent = extent.to2D(),
+        .vertex_start = 0,
+        .vertex_count = 0,
+    };
+}
+
+pub const Icon = enum {
+    close_small,
+};
+
+pub fn drawGreyscale(
     extent: Extent3D(f32),
     texture_extent: Extent2D(f32),
     color: RGBA(u8),
@@ -202,7 +357,7 @@ pub fn init(
     swapchain_image_count: u32,
     cpu_memory_allocator: *VulkanAllocator,
     gpu_memory_allocator: *VulkanAllocator,
-    static_texture: TextureGreyscale,
+    allocator: std.mem.Allocator,
 ) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
@@ -210,6 +365,8 @@ pub fn init(
     const graphics_present_queue = vulkan_core.graphics_present_queue;
 
     const initial_viewport_dimensions = options.viewport_dimensions;
+
+    const static_texture = try loadTexture(allocator);
 
     //
     // Create staging buffer for static texture

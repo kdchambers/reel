@@ -56,8 +56,11 @@ pub const drawCircle = color_pipeline.drawCircle;
 pub const drawArc = color_pipeline.drawArc;
 
 pub const drawIcon = icon_pipeline.drawIcon;
-pub const overwriteIcon = icon_pipeline.overwriteIcon;
-pub const reserveIcons = icon_pipeline.reserveIcons;
+pub const drawGreyscale = icon_pipeline.drawGreyscale;
+pub const drawText = icon_pipeline.drawText;
+pub const overwriteText = icon_pipeline.overwriteText;
+pub const overwriteGreyscale = icon_pipeline.overwriteGreyscale;
+pub const reserveGreyscale = icon_pipeline.reserveGreyscale;
 
 pub const writeStreamFrame = video_pipeline.writeStreamFrame;
 pub const drawVideoFrame = video_pipeline.drawVideoFrame;
@@ -100,7 +103,6 @@ pub inline fn init(
     wayland_display: *Display,
     wayland_surface: *Surface,
     dimensions: Dimensions2D(u32),
-    icon_texture: TextureGreyscale,
 ) !void {
     swapchain_dimensions = dimensions;
     allocator = ally;
@@ -141,7 +143,7 @@ pub inline fn init(
         swapchain_image_count,
         &cpu_memory_allocator,
         &gpu_memory_allocator,
-        icon_texture,
+        allocator,
     );
 
     try video_pipeline.init(
