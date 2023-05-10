@@ -54,6 +54,7 @@ pub const overwriteQuad = color_pipeline.overwriteQuad;
 pub const drawRoundedRect = color_pipeline.drawRoundedRect;
 pub const drawCircle = color_pipeline.drawCircle;
 pub const drawArc = color_pipeline.drawArc;
+pub const updateQuadColor = color_pipeline.updateQuadColor;
 
 pub const drawIcon = icon_pipeline.drawIcon;
 pub const drawGreyscale = icon_pipeline.drawGreyscale;

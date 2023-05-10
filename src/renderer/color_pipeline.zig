@@ -70,6 +70,14 @@ pub inline fn vertexSlice(vertex_index: u32, count: u32) []Vertex {
     return vertices_buffer[vertex_index .. vertex_index + count];
 }
 
+pub inline fn updateQuadColor(vertex_index: u32, color: RGBA(u8)) void {
+    const quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    quad_ptr[0].color = color;
+    quad_ptr[1].color = color;
+    quad_ptr[2].color = color;
+    quad_ptr[3].color = color;
+}
+
 pub inline fn drawQuad(extent: Extent3D(f32), color: RGBA(u8), comptime anchor_point: graphics.AnchorPoint) u16 {
     const vertex_index = vertices_used;
     var quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
