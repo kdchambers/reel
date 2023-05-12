@@ -17,6 +17,7 @@ const Extent2D = geometry.Extent2D;
 const Extent3D = geometry.Extent3D;
 const Dimensions2D = geometry.Dimensions2D;
 const Coordinates2D = geometry.Coordinates2D;
+const Coordinates3D = geometry.Coordinates3D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 
 const graphics = @import("../graphics.zig");
@@ -25,6 +26,7 @@ const TextureGreyscale = graphics.TextureGreyscale;
 const TextWriterInterface = graphics.TextWriterInterface;
 const BufferTextWriterInterface = graphics.BufferTextWriterInterface;
 
+const zigimg = @import("zigimg");
 const renderer = @import("../renderer.zig");
 
 var descriptor_set_layout_buffer: [8]vk.DescriptorSetLayout = undefined;
@@ -58,6 +60,23 @@ pub const Vertex = extern struct {
     color: RGBA(u8),
 };
 
+pub const Icon = enum {
+    add_32px,
+    add_circle_24px,
+    help_32px,
+    settings_32px,
+};
+
+const icon_directory_path = "assets/icons/";
+const icon_path_list = [_][]const u8{
+    icon_directory_path ++ "add_32px.png",
+    icon_directory_path ++ "add_circle_24px.png",
+    icon_directory_path ++ "help_32px.png",
+    icon_directory_path ++ "settings_32px.png",
+};
+
+var icon_extent_list: [icon_path_list.len]Extent2D(u32) = undefined;
+
 const fontana = @import("fontana");
 const Atlas = fontana.Atlas;
 
@@ -80,7 +99,8 @@ const pen_options = fontana.PenOptions{
 };
 pub var pen: Font.PenConfig(pen_options) = undefined;
 
-const asset_path_font = "assets/Roboto-Regular.ttf";
+// const asset_path_font = "assets/Roboto-Regular.ttf";
+const asset_path_font = "assets/Lato-Regular.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 
 fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
@@ -107,7 +127,7 @@ fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
 
     {
         const points_per_pixel = 100;
-        const font_point_size: f64 = 14.0;
+        const font_point_size: f64 = 12.0;
         pen = font.createPen(
             pen_options,
             allocator,
@@ -120,6 +140,30 @@ fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
         ) catch return error.FontPenInitFail;
     }
     errdefer pen.deinit(allocator);
+
+    for (icon_path_list, 0..) |icon_path, i| {
+        var image = zigimg.Image.fromFilePath(allocator, icon_path) catch return error.LoadAssetFail;
+        defer image.deinit();
+        assert(image.pixelFormat() == .rgba32);
+        assert(image.width == 32 or image.width == 24);
+        assert(image.height == 32 or image.height == 24);
+
+        icon_extent_list[i] = texture_atlas.reserve(
+            Extent2D(u32),
+            allocator,
+            @intCast(u32, image.width),
+            @intCast(u32, image.height),
+        ) catch return error.LoadAssetFail;
+
+        const dst_region = icon_extent_list[i];
+        for (dst_region.y..dst_region.y + dst_region.height, 0..dst_region.height) |dst_y, src_y| {
+            for (dst_region.x..dst_region.x + dst_region.width, 0..dst_region.width) |dst_x, src_x| {
+                const dst_index: usize = (dst_y * font_texture.width) + dst_x;
+                const src_index: usize = (src_y * image.width) + src_x;
+                font_texture.pixels[dst_index] = image.pixels.rgba32[src_index].a;
+            }
+        }
+    }
 
     return font_texture;
 }
@@ -152,6 +196,14 @@ pub inline fn reserveGreyscale(quad_count: u16) u16 {
         vertices_used += 4;
     }
     return vertex_index;
+}
+
+pub inline fn updateIconColor(vertex_index: u16, color: RGBA(u8)) void {
+    var quad = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    quad[0].color = color;
+    quad[1].color = color;
+    quad[2].color = color;
+    quad[3].color = color;
 }
 
 pub inline fn overwriteGreyscale(
@@ -234,6 +286,51 @@ pub fn overwriteText(
     };
 }
 
+pub fn drawIcon(
+    placement: Coordinates3D(f32),
+    icon: Icon,
+    screen_scale: ScaleFactor2D(f32),
+    color: RGBA(u8),
+    comptime anchor_point: graphics.AnchorPoint,
+) u16 {
+    const size: f32 = switch (icon) {
+        .add_circle_24px => 24.0,
+        else => 32.0,
+    };
+    const extent = Extent3D(f32){
+        .x = placement.x,
+        .y = placement.y,
+        .z = placement.z,
+        .width = size * screen_scale.horizontal,
+        .height = size * screen_scale.vertical,
+    };
+    const texture_extent_pixels = icon_extent_list[@enumToInt(icon)];
+    const texture_extent = Extent2D(f32){
+        .x = @intToFloat(f32, texture_extent_pixels.x),
+        .y = @intToFloat(f32, texture_extent_pixels.y),
+        .width = @intToFloat(f32, texture_extent_pixels.width),
+        .height = @intToFloat(f32, texture_extent_pixels.height),
+    };
+    return drawGreyscale(extent, texture_extent, color, anchor_point);
+}
+
+pub fn debugDrawTexture(placement: Coordinates3D(f32), screen_scale: ScaleFactor2D(f32), comptime anchor_point: graphics.AnchorPoint) void {
+    const extent = Extent3D(f32){
+        .x = placement.x,
+        .y = placement.y,
+        .z = placement.z,
+        .width = 512.0 * screen_scale.horizontal,
+        .height = 512.0 * screen_scale.vertical,
+    };
+    const texture_extent = Extent2D(f32){
+        .x = 0,
+        .y = 0,
+        .width = 512,
+        .height = 512,
+    };
+    _ = drawGreyscale(extent, texture_extent, RGBA(u8).white, anchor_point);
+}
+
 pub fn drawText(
     text: []const u8,
     extent: Extent3D(f32),
@@ -244,7 +341,7 @@ pub fn drawText(
     vertical_anchor: VerticalAnchor,
 ) DrawTextResult {
     assert(pen_size == .small);
-    var text_writer_interface = TextWriterInterface{ .color = color };
+    var text_writer_interface = TextWriterInterface{ .color = color, .z = extent.z };
     if (horizontal_anchor == .middle and vertical_anchor == .middle) {
         pen.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable;
     } else unreachable;
@@ -256,16 +353,13 @@ pub fn drawText(
     };
 }
 
-pub const Icon = enum {
-    close_small,
-};
-
 pub fn drawGreyscale(
     extent: Extent3D(f32),
     texture_extent: Extent2D(f32),
     color: RGBA(u8),
     comptime anchor_point: graphics.AnchorPoint,
-) *[4]Vertex {
+) u16 {
+    var vertex_index: u16 = vertices_used;
     var quad = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
     graphics.writeQuad(Vertex, extent, anchor_point, quad);
     quad[0].color = color;
@@ -282,7 +376,7 @@ pub fn drawGreyscale(
     quad[3].v = texture_extent.y + texture_extent.height;
     writeQuadIndices(vertices_used);
     vertices_used += 4;
-    return quad;
+    return vertex_index;
 }
 
 inline fn writeQuadIndices(vertex_offset: u16) void {

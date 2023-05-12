@@ -56,12 +56,16 @@ pub const drawCircle = color_pipeline.drawCircle;
 pub const drawArc = color_pipeline.drawArc;
 pub const updateQuadColor = color_pipeline.updateQuadColor;
 
+pub const Icon = icon_pipeline.Icon;
+
 pub const drawIcon = icon_pipeline.drawIcon;
 pub const drawGreyscale = icon_pipeline.drawGreyscale;
 pub const drawText = icon_pipeline.drawText;
 pub const overwriteText = icon_pipeline.overwriteText;
 pub const overwriteGreyscale = icon_pipeline.overwriteGreyscale;
 pub const reserveGreyscale = icon_pipeline.reserveGreyscale;
+pub const updateIconColor = icon_pipeline.updateIconColor;
+pub const debugDrawTexture = icon_pipeline.debugDrawTexture;
 
 pub const writeStreamFrame = video_pipeline.writeStreamFrame;
 pub const drawVideoFrame = video_pipeline.drawVideoFrame;
@@ -283,7 +287,7 @@ pub fn recordDrawCommands() !void {
 
     try device_dispatch.resetCommandPool(logical_device, command_pool, .{});
 
-    const clear_color = graphics.RGBA(f32){ .r = 0.14, .g = 0.14, .b = 0.14, .a = 1.0 };
+    const clear_color = graphics.RGBA(f32).fromInt(28, 30, 35, 255);
     const clear_colors = [3]vk.ClearValue{
         .{ .color = .{ .float_32 = @bitCast([4]f32, clear_color) } },
         .{ .depth_stencil = .{ .depth = 1.0, .stencil = 0 } },
