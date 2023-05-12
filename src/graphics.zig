@@ -236,7 +236,7 @@ pub const TextWriterInterface = struct {
         };
 
         const renderer = @import("renderer.zig");
-        _ = renderer.drawIcon(
+        _ = renderer.drawGreyscale(
             truncated_extent,
             texture_extent,
             self.color,
@@ -280,7 +280,7 @@ pub const BufferTextWriterInterface = struct {
         };
 
         const renderer = @import("renderer.zig");
-        _ = renderer.overwriteIcon(
+        _ = renderer.overwriteGreyscale(
             self.vertex_start + (self.used * 4),
             truncated_extent,
             texture_extent,

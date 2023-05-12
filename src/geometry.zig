@@ -35,6 +35,16 @@ pub fn Extent2D(comptime BaseType: type) type {
             const end_y = self.y + self.height;
             return (point.x >= self.x and point.y >= self.y and point.x <= end_x and point.y <= end_y);
         }
+
+        pub inline fn to3D(self: @This(), z: f32) Extent3D(BaseType) {
+            return .{
+                .x = self.x,
+                .y = self.y,
+                .z = z,
+                .width = self.width,
+                .height = self.height,
+            };
+        }
     };
 }
 
