@@ -16,7 +16,7 @@ const IndexAligned = mini_heap.IndexAligned;
 const MouseEventEntry = packed struct(u32) {
     hover_enabled: bool,
     hover_active: bool,
-    extent: mini_heap.IndexAligned(geometry.Extent2D(f32)),
+    extent: mini_heap.IndexAligned(geometry.Extent3D(f32)),
     state: mini_heap.Index(HoverZoneState),
 };
 
@@ -154,15 +154,15 @@ pub const MouseEventOptions = packed struct(u32) {
 
 pub fn bindStateToMouseEvent(
     state_index: Index(HoverZoneState),
-    extent: geometry.Extent2D(f32),
-    old_extent_index: *Index(geometry.Extent2D(f32)),
+    extent: geometry.Extent3D(f32),
+    old_extent_index: *Index(geometry.Extent3D(f32)),
     options: MouseEventOptions,
 ) void {
     //
     // There's no extent to modify, just write a new value and return
     //
     if (old_extent_index.isNull()) {
-        const extent_index = mini_heap.write(geometry.Extent2D(f32), &extent);
+        const extent_index = mini_heap.write(geometry.Extent3D(f32), &extent);
         const event = MouseEventEntry{
             .extent = extent_index.toIndexAligned(),
             .state = state_index,
@@ -207,7 +207,7 @@ pub fn clearBlockingEvents() void {
 }
 
 pub fn addBlockingMouseEvents(
-    extent_indices: []Index(geometry.Extent2D(f32)),
+    extent_indices: []Index(geometry.Extent3D(f32)),
     enable_hover: bool,
     start_active: bool,
     out_indices: []Index(HoverZoneState),
@@ -227,11 +227,11 @@ pub fn addBlockingMouseEvents(
 }
 
 pub fn addMouseEvent(
-    extent: geometry.Extent2D(f32),
+    extent: geometry.Extent3D(f32),
     enable_hover: bool,
     start_active: bool,
 ) Index(HoverZoneState) {
-    const extent_index = mini_heap.write(geometry.Extent2D(f32), &extent);
+    const extent_index = mini_heap.write(geometry.Extent3D(f32), &extent);
     const state_index = state_cluster_buffer.reserve();
     const event = MouseEventEntry{
         .extent = extent_index.toIndexAligned(),
@@ -255,7 +255,7 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) MouseMo
         for (blocking_events_buffer[0..blocking_events_count]) |*entry| {
             if (!entry.hover_enabled)
                 return result;
-            const extent: geometry.Extent2D(f32) = entry.extent.get();
+            const extent: geometry.Extent3D(f32) = entry.extent.get();
             const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
                 position.y <= extent.y and position.y >= (extent.y - extent.height));
             if (is_within_extent and !entry.hover_active) {
@@ -284,7 +284,7 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) MouseMo
         while (cluster_i < cluster.len) : (cluster_i += 1) {
             const entry = cluster.atPtr(cluster_i);
             if (entry.hover_enabled) {
-                const extent: geometry.Extent2D(f32) = entry.extent.get();
+                const extent: geometry.Extent3D(f32) = entry.extent.get();
                 const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
                     position.y <= extent.y and position.y >= (extent.y - extent.height));
                 if (is_within_extent and !entry.hover_active) {
@@ -311,7 +311,7 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) MouseMo
 pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: MouseButton, button_action: wl.Pointer.ButtonState) void {
     if (blocking_events_count > 0) {
         for (blocking_events_buffer[0..blocking_events_count]) |entry| {
-            const extent: geometry.Extent2D(f32) = entry.extent.get();
+            const extent: geometry.Extent3D(f32) = entry.extent.get();
             const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
                 position.y <= extent.y and position.y >= (extent.y - extent.height));
 
@@ -351,7 +351,7 @@ pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: Mo
         var cluster_i: u8 = 0;
         while (cluster_i < cluster.len) : (cluster_i += 1) {
             const entry = cluster.atPtr(cluster_i);
-            const extent: geometry.Extent2D(f32) = entry.extent.get();
+            const extent: geometry.Extent3D(f32) = entry.extent.get();
             const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
                 position.y <= extent.y and position.y >= (extent.y - extent.height));
 
