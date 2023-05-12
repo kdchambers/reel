@@ -35,39 +35,26 @@ pub fn addOnFrameCallback(callback: *const FrameTickCallbackFn) void {
     frame_listener_callbacks_count += 1;
 }
 
-const layout_medium = @import("wayland/layouts/desktop_medium.zig");
+const layout_1920x1080 = @import("wayland/layouts/1920x1080.zig");
 
 const geometry = @import("../geometry.zig");
 const Extent2D = geometry.Extent2D;
+const Extent3D = geometry.Extent3D;
 const Coordinates2D = geometry.Coordinates2D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
-
-const fontana = @import("fontana");
-const Atlas = fontana.Atlas;
-
-pub const Font = fontana.Font(.{
-    .backend = .freetype_harfbuzz,
-    .type_overrides = .{
-        .Extent2DPixel = Extent2D(u32),
-        .Extent2DNative = Extent2D(f32),
-        .Coordinates2DNative = Coordinates2D(f32),
-        .Scale2D = ScaleFactor2D(f32),
-    },
-});
 
 const event_system = @import("wayland/event_system.zig");
 const audio = @import("../audio_source.zig");
 
 const graphics = @import("../graphics.zig");
-const RGBA = graphics.RGBA(f32);
-const RGB = graphics.RGB(f32);
-const QuadFace = graphics.QuadFace;
-const FaceWriter = graphics.FaceWriter;
+const RGBA = graphics.RGBA(u8);
+const RGB = graphics.RGB(u8);
 
-const renderer = @import("../vulkan_renderer.zig");
+const renderer = @import("../renderer.zig");
 
 const widgets = @import("wayland/widgets.zig");
 const Button = widgets.Button;
+const IconButton = widgets.IconButton;
 const CloseButton = widgets.CloseButton;
 const Checkbox = widgets.Checkbox;
 const Dropdown = widgets.Dropdown;
@@ -134,8 +121,6 @@ pub const ButtonClicked = enum(u16) {
 
 const decoration_height_pixels = 30.0;
 
-pub var face_writer: FaceWriter = undefined;
-
 var is_draw_required: bool = true;
 var is_render_requested: bool = true;
 
@@ -146,32 +131,23 @@ var is_render_requested: bool = true;
 ///   4. Number of vertices to be drawn has changed
 var is_record_requested: bool = true;
 
-var record_button_color_normal = RGBA{ .r = 0.2, .g = 0.2, .b = 0.2, .a = 1.0 };
-var record_button_color_hover = RGBA{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
+var record_button_color_normal = RGBA{ .r = 15, .g = 15, .b = 15 };
+var record_button_color_hover = RGBA{ .r = 25, .g = 25, .b = 25 };
 
-var texture_atlas: Atlas = undefined;
-var font: Font = undefined;
-
-const pen_options = fontana.PenOptions{
-    .pixel_format = .r32g32b32a32,
-    .PixelType = RGBA,
-};
-pub var pen: Font.PenConfig(pen_options) = undefined;
-
-const asset_path_font = "assets/Roboto-Regular.ttf";
-const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 const window_title = "reel";
 
 var gpu_texture_mutex: std.Thread.Mutex = undefined;
 
 pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
 
+var mouse_click_coordinates: ?geometry.Coordinates2D(f64) = null;
+
 const initial_screen_dimensions = struct {
     const width = 1280;
     const height = 840;
 };
 
-pub var screen_dimensions: geometry.Dimensions2D(u16) = .{
+pub var screen_dimensions: geometry.Dimensions2D(u32) = .{
     .width = initial_screen_dimensions.width,
     .height = initial_screen_dimensions.height,
 };
@@ -186,7 +162,7 @@ pub var frame_index: u32 = 0;
 
 pub var is_mouse_in_screen: bool = true;
 
-var framebuffer_resized: bool = true;
+var framebuffer_resized: bool = false;
 
 pub var button_clicked: ButtonClicked = .none;
 pub var button_state: wl.Pointer.ButtonState = undefined;
@@ -207,6 +183,7 @@ pub const InitError = error{
     AudioInputInitFail,
     TextureAtlasInitFail,
     OutOfMemory,
+    LoadAssetFail,
 };
 
 pub const UpdateError = error{ VulkanRendererRenderFrameFail, UserInterfaceDrawFail };
@@ -214,59 +191,12 @@ pub const UpdateError = error{ VulkanRendererRenderFrameFail, UserInterfaceDrawF
 var last_recording_state: Model.RecordingContext.State = .idle;
 var last_preview_frame: u64 = 0;
 
-var font_texture: renderer.Texture = undefined;
-
 pub fn init(allocator: std.mem.Allocator) !void {
     allocator_ref = allocator;
 
     ui_state.window_decoration_requested = true;
 
     initWaylandClient() catch return error.WaylandClientInitFail;
-
-    font = blk: {
-        const file_handle = std.fs.cwd().openFile(asset_path_font, .{ .mode = .read_only }) catch return error.FontInitFail;
-        defer file_handle.close();
-        const max_size_bytes = 10 * 1024 * 1024;
-        const font_file_bytes = file_handle.readToEndAlloc(allocator, max_size_bytes) catch return error.FontInitFail;
-        break :blk Font.construct(font_file_bytes) catch |err| {
-            std.log.err("Failed to initialize font. Error: {}", .{err});
-            return error.FontInitFail;
-        };
-    };
-    errdefer font.deinit(allocator);
-
-    texture_atlas = Atlas.init(allocator, 512) catch return error.TextureAtlasInitFail;
-    errdefer texture_atlas.deinit(allocator);
-
-    font_texture.width = 512;
-    font_texture.height = 512;
-    const pixels = try allocator.alloc(graphics.RGBA(f32), font_texture.width * font_texture.height);
-    const clear_pixel = graphics.RGBA(f32){
-        .r = 0.0,
-        .g = 0.0,
-        .b = 0.0,
-        .a = 0.0,
-    };
-    @memset(pixels, clear_pixel);
-    pixels[(512 * 512) - 1] = .{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 };
-
-    font_texture.pixels = pixels.ptr;
-
-    {
-        const points_per_pixel = 100;
-        const font_point_size: f64 = 12.0;
-        pen = font.createPen(
-            pen_options,
-            allocator,
-            font_point_size,
-            points_per_pixel,
-            atlas_codepoints,
-            font_texture.width,
-            font_texture.pixels,
-            &texture_atlas,
-        ) catch return error.FontPenInitFail;
-    }
-    errdefer pen.deinit(allocator);
 
     event_system.init() catch |err| {
         std.log.err("Failed to initialize the event system. Error: {}", .{err});
@@ -277,20 +207,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
         allocator,
         @ptrCast(*renderer.Display, wayland_core.display),
         @ptrCast(*renderer.Surface, surface),
-        font_texture,
         screen_dimensions,
     ) catch return error.VulkanRendererInitFail;
-    errdefer renderer.deinit(allocator);
-
-    face_writer = renderer.faceWriter();
-
-    widgets.init(
-        &face_writer,
-        face_writer.vertices,
-        &mouse_coordinates,
-        &screen_dimensions,
-        &is_mouse_in_screen,
-    );
+    errdefer renderer.deinit();
 
     ui_state.window_region.left = -1.0;
     ui_state.window_region.right = 1.0;
@@ -311,20 +230,33 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_quality.labels = &UIState.quality_labels;
     ui_state.record_quality.selected_index = 0;
 
-    ui_state.enable_webcam_checkbox = try Checkbox.create();
+    ui_state.open_settings_button = IconButton.create();
+    ui_state.open_settings_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
+    ui_state.open_settings_button.on_hover_icon_color = RGBA.white;
+    ui_state.open_settings_button.background_color = RGBA.transparent;
+    ui_state.open_settings_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+    ui_state.open_settings_button.icon = .settings_32px;
 
-    const display_label_list = wayland_core.display_list.items;
-    ui_state.preview_display_selector = Selector.create(display_label_list);
+    ui_state.open_add_button = IconButton.create();
+    ui_state.open_add_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
+    ui_state.open_add_button.on_hover_icon_color = RGBA.white;
+    ui_state.open_add_button.background_color = RGBA.transparent;
+    ui_state.open_add_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+    ui_state.open_add_button.icon = .add_32px;
+
+    ui_state.add_source_button = IconButton.create();
+    ui_state.add_source_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
+    ui_state.add_source_button.on_hover_icon_color = RGBA.white;
+    ui_state.add_source_button.background_color = RGBA.transparent;
+    ui_state.add_source_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+    ui_state.add_source_button.icon = .add_circle_24px;
+
+    ui_state.add_source_menu_open = false;
 
     ui_state.action_tab = TabbedSection.create(
         &UIState.tab_headings,
-        graphics.RGB(f32).fromInt(150, 35, 57),
+        RGB{ .r = 150, .g = 35, .b = 57 },
     );
-
-    if (ui_state.window_decoration_requested) {
-        ui_state.close_button = CloseButton.create();
-        ui_state.close_button.on_hover_color = graphics.RGBA(f32).fromInt(170, 170, 170, 255);
-    }
 
     //
     // TODO: Don't hardcode bin count
@@ -351,13 +283,13 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         is_draw_required = true;
     }
 
-    if (ui_state.window_decoration_requested) {
-        const widget_update = ui_state.close_button.update();
-        if (widget_update.left_clicked)
-            is_shutdown_requested = true;
-        if (widget_update.color_changed)
-            is_render_requested = true;
-    }
+    // if (ui_state.window_decoration_requested) {
+    //     const widget_update = ui_state.close_button.update();
+    //     if (widget_update.left_clicked)
+    //         is_shutdown_requested = true;
+    //     if (widget_update.color_changed)
+    //         is_render_requested = true;
+    // }
 
     if (is_shutdown_requested) {
         request_encoder.write(.core_shutdown) catch unreachable;
@@ -366,47 +298,41 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
     if (framebuffer_resized) {
         framebuffer_resized = false;
-        renderer.recreateSwapchain(screen_dimensions) catch |err| {
+        renderer.resizeSwapchain(screen_dimensions) catch |err| {
             std.log.err("Failed to recreate swapchain. Error: {}", .{err});
         };
         is_draw_required = true;
     }
 
-    if (model.desktop_capture_frame) |captured_frame| {
-        const pixel_buffer: [*]const graphics.RGBA(u8) = if (model.combined_frame) |*frame| frame.ptr else captured_frame.pixels;
-        renderer.video_stream_enabled = true;
-        if (last_preview_frame != captured_frame.index) {
-            var video_frame = renderer.videoFrame();
-            {
-                const src_width = captured_frame.dimensions.width;
-                const src_height = captured_frame.dimensions.height;
-                var src_pixels = pixel_buffer;
-                var y: usize = 0;
-                var src_index: usize = 0;
-                var dst_index: usize = 0;
-                while (y < src_height) : (y += 1) {
-                    @memcpy(
-                        video_frame.pixels[dst_index .. dst_index + src_width],
-                        src_pixels[src_index .. src_index + src_width],
-                    );
-                    src_index += src_width;
-                    dst_index += video_frame.width;
-                }
-            }
-
-            if (last_preview_frame == 0) {
-                is_draw_required = true;
-            }
-            last_preview_frame = captured_frame.index;
+    {
+        const result = ui_state.open_settings_button.update();
+        if (result.clicked)
+            std.log.info("Settings button clicked", .{});
+        if (result.modified)
             is_render_requested = true;
-        }
     }
 
     {
-        const widget_update = ui_state.preview_display_selector.update();
-        if (widget_update.color_changed or widget_update.index_changed) {
-            is_render_requested = true;
+        const result = ui_state.open_add_button.update();
+        if (result.clicked) {
+            ui_state.sidebar_state = switch (ui_state.sidebar_state) {
+                .add_menu_open => .closed,
+                else => .add_menu_open,
+            };
+            is_draw_required = true;
         }
+        if (result.modified)
+            is_render_requested = true;
+    }
+
+    {
+        const result = ui_state.add_source_button.update();
+        if (result.clicked) {
+            ui_state.add_source_menu_open = !ui_state.add_source_menu_open;
+            is_draw_required = true;
+        }
+        if (result.modified)
+            is_render_requested = true;
     }
 
     if (ui_state.action_tab.active_index == 0) {
@@ -562,13 +488,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         }
     }
 
-    if (ui_state.enable_webcam_checkbox.clicked()) {
-        if (model.webcam_stream.enabled())
-            request_encoder.write(.webcam_disable) catch unreachable
-        else
-            request_encoder.write(.webcam_enable) catch unreachable;
-    }
-
     const action_tab_update = ui_state.action_tab.update();
     if (action_tab_update.tab_changed) {
         _ = ui_state.record_button.state();
@@ -644,72 +563,58 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
 
     if (is_draw_required) {
         is_draw_required = false;
+        renderer.resetVertexBuffers();
 
-        face_writer.reset();
+        // if (ui_state.window_decoration_requested) {
+        //     //
+        //     // We just reset the face_writer so a failure shouldn't really be possible
+        //     // NOTE: This will modify ui_state.window_region to make sure we don't
+        //     //       draw over the window decoration
+        //     //
+        //     drawWindowDecoration() catch unreachable;
+        // }
 
-        if (ui_state.window_decoration_requested) {
-            //
-            // We just reset the face_writer so a failure shouldn't really be possible
-            // NOTE: This will modify ui_state.window_region to make sure we don't
-            //       draw over the window decoration
-            //
-            drawWindowDecoration() catch unreachable;
-        }
+        // {
+        //     const screen_extent: Extent3D(f32) = .{
+        //         .x = -0.4,
+        //         .y = 0.0,
+        //         .z = 0.0,
+        //         .width = 48.0 * screen_scale.horizontal,
+        //         .height = 48.0 * screen_scale.vertical,
+        //     };
+        //     const texture_extent: Extent2D(f32) = .{
+        //         .x = @intToFloat(f32, icons.close.x),
+        //         .y = @intToFloat(f32, icons.close.y),
+        //         .width = @intToFloat(f32, icons.close.width),
+        //         .height = @intToFloat(f32, icons.close.height),
+        //     };
+        //     _ = renderer.drawIcon(screen_extent, texture_extent, RGBA.white, .bottom_left);
+        // }
 
         //
         // Switch here based on screen dimensions
         //
-        layout_medium.draw(
+        layout_1920x1080.draw(
             model,
             &ui_state,
             screen_scale,
-            &pen,
-            &face_writer,
-        ) catch return error.UserInterfaceDrawFail;
+        ) catch |err| {
+            std.log.info("Failed to draw ui. Error: {}", .{err});
+            return error.UserInterfaceDrawFail;
+        };
 
         is_record_requested = true;
     } else {
-        layout_medium.update(
+        layout_1920x1080.update(
             model,
             &ui_state,
             screen_scale,
-            &pen,
-            &face_writer,
         ) catch return error.UserInterfaceDrawFail;
-
-        //
-        // Redraw not required, but update widgets
-        //
-        if (model.audio_streams.len != 0) {
-            const audio_buffer = model.audio_streams[0].sample_buffer;
-            const sample_range = audio_buffer.sampleRange();
-            const samples_per_frame = @floatToInt(usize, @divTrunc(44100.0, 1000.0 / 64.0));
-            if (sample_range.count >= samples_per_frame) {
-                const sample_offset: usize = sample_range.count - samples_per_frame;
-                const sample_index = sample_range.base_sample + sample_offset;
-                var sample_buffer: [samples_per_frame]f32 = undefined;
-                const samples = audio_buffer.samplesCopyIfRequired(
-                    sample_index,
-                    samples_per_frame,
-                    &sample_buffer,
-                );
-                const audio_power_spectrum = audio_utils.samplesToPowerSpectrum(samples);
-                const mel_scaled_bins = audio_utils.powerSpectrumToMelScale(audio_power_spectrum, 64);
-                ui_state.audio_source_spectogram.update(mel_scaled_bins[3..], screen_scale) catch unreachable;
-                const volume_dbs = audio_utils.powerSpectrumToVolumeDb(audio_power_spectrum);
-                ui_state.audio_volume_level.setDecibelLevel(volume_dbs);
-            }
-
-            is_render_requested = true;
-        }
     }
 
     if (is_record_requested) {
         is_record_requested = false;
-        assert(face_writer.indices_used > 0);
-        renderer.recordRenderPass(face_writer.indices_used, screen_dimensions) catch |err| {
-            std.log.err("app: Failed to record renderpass command buffers: Error: {}", .{err});
-        };
+        renderer.recordDrawCommands() catch return error.UserInterfaceDrawFail;
         is_render_requested = true;
     }
 
@@ -721,10 +626,12 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
             gpu_texture_mutex.lock();
             defer gpu_texture_mutex.unlock();
 
-            renderer.renderFrame(screen_dimensions) catch
+            renderer.renderFrame() catch
                 return error.VulkanRendererRenderFrameFail;
         }
     }
+
+    mouse_click_coordinates = null;
 
     return request_encoder.toRequestBuffer();
 }
@@ -733,41 +640,41 @@ pub fn deinit() void {
     std.log.info("wayland deinit", .{});
 }
 
-fn drawWindowDecoration() !void {
-    const height: f32 = decoration_height_pixels * screen_scale.vertical;
-    {
-        const background_color = RGB.fromInt(200, 200, 200);
-        const extent = geometry.Extent2D(f32){
-            .x = -1.0,
-            .y = -1.0,
-            .width = 2.0,
-            .height = height,
-        };
-        (try face_writer.create(QuadFace)).* = graphics.quadColored(
-            extent,
-            background_color.toRGBA(),
-            .top_left,
-        );
-    }
+// fn drawWindowDecoration() !void {
+//     const height: f32 = decoration_height_pixels * screen_scale.vertical;
+//     {
+//         const background_color = RGB.fromInt(200, 200, 200);
+//         const extent = geometry.Extent2D(f32){
+//             .x = -1.0,
+//             .y = -1.0,
+//             .width = 2.0,
+//             .height = height,
+//         };
+//         (try face_writer.create(QuadFace)).* = graphics.quadColored(
+//             extent,
+//             background_color.toRGBA(),
+//             .top_left,
+//         );
+//     }
 
-    {
-        const size_pixels: f32 = 28.0;
-        const offset_pixels: f32 = (decoration_height_pixels - size_pixels) / 2.0;
-        const h_offset: f32 = offset_pixels * screen_scale.horizontal;
-        const v_offset: f32 = offset_pixels * screen_scale.vertical;
-        const cross_width = (size_pixels * screen_scale.horizontal) - (h_offset * 2.0);
-        const cross_height = (size_pixels * screen_scale.vertical) - (v_offset * 2.0);
-        const extent = geometry.Extent2D(f32){
-            .x = 1.0 - (cross_width + (h_offset * 2.0)),
-            .y = -1.0 + (cross_height + v_offset),
-            .width = cross_width - h_offset,
-            .height = cross_height - v_offset,
-        };
-        try ui_state.close_button.draw(extent, screen_scale);
-    }
+//     {
+//         const size_pixels: f32 = 28.0;
+//         const offset_pixels: f32 = (decoration_height_pixels - size_pixels) / 2.0;
+//         const h_offset: f32 = offset_pixels * screen_scale.horizontal;
+//         const v_offset: f32 = offset_pixels * screen_scale.vertical;
+//         const cross_width = (size_pixels * screen_scale.horizontal) - (h_offset * 2.0);
+//         const cross_height = (size_pixels * screen_scale.vertical) - (v_offset * 2.0);
+//         const extent = geometry.Extent2D(f32){
+//             .x = 1.0 - (cross_width + (h_offset * 2.0)),
+//             .y = -1.0 + (cross_height + v_offset),
+//             .width = cross_width - h_offset,
+//             .height = cross_height - v_offset,
+//         };
+//         try ui_state.close_button.draw(extent, screen_scale);
+//     }
 
-    ui_state.window_region.top = -1.0 + height;
-}
+//     ui_state.window_region.top = -1.0 + height;
+// }
 
 fn initWaylandClient() !void {
     surface = try wayland_core.compositor.createSurface();
@@ -928,6 +835,11 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
 
             if (mouse_coordinates.x < 0 or mouse_coordinates.y < 0)
                 return;
+
+            mouse_click_coordinates = .{
+                .x = mouse_coordinates.x,
+                .y = mouse_coordinates.y,
+            };
 
             const mouse_button = @intToEnum(MouseButton, button.button);
             button_clicked = .none;
