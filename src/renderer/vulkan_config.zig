@@ -85,6 +85,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdPipelineBarrier = true,
     .createDescriptorSetLayout = true,
     .createDescriptorPool = true,
+    .destroyDescriptorPool = true,
     .allocateDescriptorSets = true,
     .createSampler = true,
     .updateDescriptorSets = true,
