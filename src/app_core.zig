@@ -17,8 +17,12 @@ const zmath = @import("zmath");
 const video_encoder = @import("video_record.zig");
 const RequestBuffer = @import("RequestBuffer.zig");
 const geometry = @import("geometry.zig");
+const Dimensions2D = geometry.Dimensions2D;
 const WebcamStream = @import("WebcamStream.zig").WebcamStream;
 const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
+
+// TODO: Audit, doesn't renderer belong here?
+const renderer = @import("renderer.zig");
 
 const audio_source = @import("audio_source.zig");
 var audio_source_interface: audio_source.Interface = undefined;
@@ -159,12 +163,12 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         }
     } else return error.NoScreencaptureBackend;
 
-    screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
-
     _ = wayland_core.sync();
 
     frontend_interface = frontend.interface(options.frontend);
     frontend_interface.init(gpa) catch return error.FrontendInitFail;
+
+    screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
 
     audio_source_interface = audio_source.bestInterface();
 
@@ -364,47 +368,10 @@ fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.
         .pixels = pixels,
     };
 
-    const video_frame_to_encode: [*]const graphics.RGBA(u8) = blk: {
-        if (!model.webcam_stream.enabled())
-            break :blk pixels;
+    const pixel_count: usize = width * height;
+    renderer.writeStreamFrame(0, @ptrCast([*]const u8, pixels)[0 .. pixel_count * 4]) catch assert(false);
 
-        const combined_frame = model.combined_frame orelse {
-            std.log.err("combined_frame hasn't been allocated. Webcam won't be recorded", .{});
-            break :blk pixels;
-        };
-
-        //
-        // We have to copy everything to a new buffer so that we can overlay the webcam
-        // This is a bit unfortunate from a performance perspective and perhaps could be
-        // omitted. However, it's better from a design perspective and I can optimize later
-        //
-        const pixel_count: usize = width * height;
-        std.mem.copy(
-            graphics.RGBA(u8),
-            combined_frame,
-            pixels[0..pixel_count],
-        );
-        const webcam_stream = model.webcam_stream;
-        const dimensions = webcam_stream.dimensions;
-        const src_frame = webcam_stream.last_frame;
-        assert(width >= webcam_stream.dimensions.width);
-        assert(height >= webcam_stream.dimensions.height);
-        const dst_offset_x: usize = width - webcam_stream.dimensions.width;
-        const dst_offset_y: usize = height - webcam_stream.dimensions.height;
-        var y_count: usize = dst_offset_y;
-        var dst_index: usize = (dst_offset_y * width) + dst_offset_x;
-        var src_index: usize = 0;
-        while (y_count < height) : (y_count += 1) {
-            std.mem.copy(
-                graphics.RGBA(u8),
-                combined_frame[dst_index .. dst_index + dimensions.width],
-                src_frame[src_index .. src_index + dimensions.width],
-            );
-            src_index += webcam_stream.dimensions.width;
-            dst_index += width;
-        }
-        break :blk combined_frame.ptr;
-    };
+    const video_frame_to_encode: [*]const graphics.RGBA(u8) = pixels;
 
     if (screencapture_start == null)
         screencapture_start = std.time.nanoTimestamp();
@@ -556,6 +523,10 @@ fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
 //
 
 fn openStreamSuccessCallback(opened_stream: screencapture.StreamInterface) void {
+    assert(opened_stream.pixel_format == .rgba);
+    _ = renderer.createStream(.rgba, opened_stream.dimensions) catch assert(false);
+
+    std.log.info("Stream opened!", .{});
     screencapture_stream = opened_stream;
 }
 
