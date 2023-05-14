@@ -15,7 +15,6 @@ const DateTime = utils.DateTime;
 const Timer = utils.Timer;
 const zmath = @import("zmath");
 const video_encoder = @import("video_record.zig");
-const RequestBuffer = @import("RequestBuffer.zig");
 const geometry = @import("geometry.zig");
 const Dimensions2D = geometry.Dimensions2D;
 const WebcamStream = @import("WebcamStream.zig").WebcamStream;
@@ -29,6 +28,10 @@ var audio_source_interface: audio_source.Interface = undefined;
 
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
+pub const CoreUpdate = enum {
+    video_source_added,
+};
+
 pub const Request = enum(u8) {
     core_shutdown,
 
@@ -37,6 +40,8 @@ pub const Request = enum(u8) {
     record_stop,
     record_quality_set,
     record_format_set,
+
+    source_pipewire_add,
 
     webcam_enable,
     webcam_disable,
@@ -78,9 +83,21 @@ var frontend_interface: frontend.Interface = undefined;
 const max_audio_streams = 2;
 var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
 
+const max_video_streams = 2;
+var video_stream_buffer: [max_video_streams]Model.VideoSource = undefined;
+
+pub const CoreRequestEncoder = utils.Encoder(Request, 512);
+pub const CoreRequestDecoder = CoreRequestEncoder.Decoder;
+
+pub const UpdateEncoder = utils.Encoder(CoreUpdate, 512);
+pub const UpdateDecoder = UpdateEncoder.Decoder;
+
+var update_encoder: UpdateEncoder = .{};
+var update_encoder_mutex: std.Thread.Mutex = .{};
+
 var model: Model = .{
     .audio_streams = &.{},
-    .desktop_capture_frame = null,
+    .video_streams = &.{},
     .recording_context = .{
         .format = .mp4,
         .quality = .low,
@@ -168,8 +185,6 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     frontend_interface = frontend.interface(options.frontend);
     frontend_interface.init(gpa) catch return error.FrontendInitFail;
 
-    screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
-
     audio_source_interface = audio_source.bestInterface();
 
     audio_source_interface.init(
@@ -193,7 +208,8 @@ pub fn run() !void {
         }
 
         model_mutex.lock();
-        var request_buffer = frontend_interface.update(&model) catch |err| {
+        var update_decoder = update_encoder.decoder();
+        var request_buffer = frontend_interface.update(&model, &update_decoder) catch |err| {
             std.log.err("Runtime User Interface error. {}", .{err});
             return;
         };
@@ -204,6 +220,9 @@ pub fn run() !void {
                 .core_shutdown => {
                     std.log.info("core: shutdown request", .{});
                     break :app_loop;
+                },
+                .source_pipewire_add => {
+                    screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
                 },
                 .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady),
                 .screenshot_format_set => {
@@ -316,6 +335,10 @@ pub fn run() !void {
             }
         }
 
+        update_encoder_mutex.lock();
+        update_encoder.reset();
+        update_encoder_mutex.unlock();
+
         const frame_duration = frame_timer.duration();
         if (frame_duration < ns_per_frame) {
             std.time.sleep(ns_per_frame - frame_duration);
@@ -362,7 +385,8 @@ pub fn displayList() [][]const u8 {
 fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
     model_mutex.lock();
     defer model_mutex.unlock();
-    model.desktop_capture_frame = .{
+
+    model.video_streams[0] = .{
         .dimensions = .{ .width = width, .height = height },
         .index = frame_index,
         .pixels = pixels,
@@ -523,11 +547,26 @@ fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
 //
 
 fn openStreamSuccessCallback(opened_stream: screencapture.StreamInterface) void {
-    assert(opened_stream.pixel_format == .rgba);
-    _ = renderer.createStream(.rgba, opened_stream.dimensions) catch assert(false);
+    const supported_image_format: renderer.SupportedVideoImageFormat = switch (opened_stream.pixel_format) {
+        .rgba => .rgba,
+        .bgrx => .bgrx,
+        else => unreachable,
+    };
+    _ = renderer.createStream(supported_image_format, opened_stream.dimensions) catch assert(false);
 
     std.log.info("Stream opened!", .{});
     screencapture_stream = opened_stream;
+
+    model.video_streams = video_stream_buffer[0..1];
+    model.video_streams[0] = .{
+        .index = 0,
+        .pixels = undefined,
+        .dimensions = opened_stream.dimensions,
+    };
+
+    update_encoder_mutex.lock();
+    update_encoder.write(.video_source_added) catch unreachable;
+    update_encoder_mutex.unlock();
 }
 
 fn openStreamErrorCallback() void {

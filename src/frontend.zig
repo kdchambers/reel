@@ -4,7 +4,10 @@
 const std = @import("std");
 const geometry = @import("geometry.zig");
 const app_core = @import("app_core.zig");
-const RequestBuffer = @import("RequestBuffer.zig");
+
+const CoreRequestEncoder = app_core.CoreRequestEncoder;
+const CoreRequestDecoder = app_core.CoreRequestDecoder;
+const CoreUpdateDecoder = app_core.UpdateDecoder;
 
 const Model = @import("Model.zig");
 
@@ -15,13 +18,13 @@ const impl_cli = @import("frontends/cli.zig");
 const impl_wayland = if (build_options.have_wayland) @import("frontends/wayland.zig") else void;
 
 pub const InterfaceImplTag = GenerateInterfaceImplTagEnum();
- 
+
 pub const InitError = impl_wayland.InitError || impl_cli.InitError || impl_headless.InitError;
 pub const UpdateError = impl_wayland.UpdateError || impl_cli.UpdateError || impl_headless.UpdateError;
 
 pub const InitFn = *const fn (allocator: std.mem.Allocator) InitError!void;
 pub const DeinitFn = *const fn () void;
-pub const UpdateFn = *const fn (model: *const Model) UpdateError!RequestBuffer;
+pub const UpdateFn = *const fn (model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder;
 
 pub const Interface = struct {
     init: InitFn,

@@ -146,7 +146,7 @@ pub fn Encoder(comptime Encoding: type, comptime buffer_size: comptime_int) type
             self.used += bytes_to_read;
         }
 
-        pub fn toDecoder(self: *@This()) Decoder {
+        pub fn decoder(self: *@This()) Decoder {
             return .{
                 .buffer = self.buffer[0..self.used],
                 .index = 0,

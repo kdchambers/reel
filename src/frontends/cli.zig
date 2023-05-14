@@ -5,11 +5,10 @@ const std = @import("std");
 const linux = std.os.linux;
 
 const Model = @import("../Model.zig");
-const RequestBuffer = @import("../RequestBuffer.zig");
 const app_core = @import("../app_core.zig");
-const Request = app_core.Request;
-
-const RequestEncoder = @import("../RequestEncoder.zig");
+const CoreUpdateDecoder = app_core.UpdateDecoder;
+const CoreRequestEncoder = app_core.CoreRequestEncoder;
+const CoreRequestDecoder = app_core.CoreRequestDecoder;
 
 const Command = enum(u8) {
     screenshot,
@@ -20,7 +19,7 @@ const Command = enum(u8) {
     invalid,
 };
 
-var request_encoder: RequestEncoder = .{};
+var request_encoder: CoreRequestEncoder = .{};
 
 const bindings = struct {
     const quit = [_]u8{'q'};
@@ -116,7 +115,7 @@ fn inputLoop() void {
     }
 }
 
-pub fn update(_: *const Model) UpdateError!RequestBuffer {
+pub fn update(_: *const Model, _: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
     request_encoder.used = 0;
     const stdout = std.io.getStdOut();
 
@@ -151,7 +150,7 @@ pub fn update(_: *const Model) UpdateError!RequestBuffer {
     }
     user_command = null;
 
-    return request_encoder.toRequestBuffer();
+    return request_encoder.decoder();
 }
 
 pub fn deinit() void {
