@@ -60,6 +60,12 @@ pub const Interface = struct {
     streamPause: *const StreamPauseFn,
     streamClose: *const StreamCloseFn,
     streamState: *const StreamStateFn,
+
+    info: BackendInfo,
+};
+
+pub const BackendInfo = struct {
+    name: []const u8,
 };
 
 pub const SourceType = enum {
@@ -91,10 +97,10 @@ pub const StreamState = enum {
 
 // TODO: Support more backends
 pub fn bestInterface() Interface {
-    if (backend_pipewire.isSupported())
-        return backend_pipewire.interface();
     if (backend_pulse.isSupported())
         return backend_pulse.interface();
+    if (backend_pipewire.isSupported())
+        return backend_pipewire.interface();
     //
     // TODO: Return an error
     //

@@ -139,6 +139,8 @@ pub fn interface() root.Interface {
         .streamPause = &streamPause,
         .streamClose = &streamClose,
         .streamState = &streamState,
+
+        .info = .{ .name = "pulseaudio" },
     };
 }
 
