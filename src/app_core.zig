@@ -41,7 +41,8 @@ pub const Request = enum(u8) {
     record_quality_set,
     record_format_set,
 
-    source_pipewire_add,
+    screencapture_add_source,
+    screencapture_request_source,
 
     webcam_enable,
     webcam_disable,
@@ -169,7 +170,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         inner: for (supported_screencapture_backends) |supported_backend| {
             if (ordered_backend == supported_backend) {
                 log.info("Screencapture backend: {s}", .{@tagName(supported_backend)});
-                break :blk screencapture.createInterface(supported_backend, onFrameReadyCallback) catch |err| {
+                break :blk screencapture.createInterface(supported_backend) catch |err| {
                     log.err("Failed to create interface to screencapture backend ({s}). Error: {}", .{
                         @tagName(supported_backend),
                         err,
@@ -179,6 +180,8 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
             }
         }
     } else return error.NoScreencaptureBackend;
+
+    screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
 
     _ = wayland_core.sync();
 
@@ -215,14 +218,28 @@ pub fn run() !void {
         };
         model_mutex.unlock();
 
+        update_encoder_mutex.lock();
+        update_encoder.reset();
+        update_encoder_mutex.unlock();
+
         request_loop: while (request_buffer.next()) |request| {
             switch (request) {
                 .core_shutdown => {
                     std.log.info("core: shutdown request", .{});
                     break :app_loop;
                 },
-                .source_pipewire_add => {
-                    screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
+                .screencapture_add_source => {
+                    const stream_index = request_buffer.readInt(u16) catch unreachable;
+                    std.log.info("core: Opening screencapture stream {d}", .{stream_index});
+                    screencapture_interface.openStream(
+                        stream_index,
+                        &onFrameReadyCallback,
+                        &openStreamSuccessCallback,
+                        &openStreamErrorCallback,
+                    );
+                },
+                .screencapture_request_source => {
+                    assert(false);
                 },
                 .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady),
                 .screenshot_format_set => {
@@ -334,10 +351,6 @@ pub fn run() !void {
                 else => std.log.err("Invalid core request", .{}),
             }
         }
-
-        update_encoder_mutex.lock();
-        update_encoder.reset();
-        update_encoder_mutex.unlock();
 
         const frame_duration = frame_timer.duration();
         if (frame_duration < ns_per_frame) {
@@ -575,10 +588,12 @@ fn openStreamErrorCallback() void {
 }
 
 fn screenCaptureInitSuccess() void {
-    screencapture_interface.openStream(
-        &openStreamSuccessCallback,
-        &openStreamErrorCallback,
-    );
+    if (screencapture_interface.info.query_streams) {
+        std.log.info("Screencapture backend initialized. Streams..", .{});
+        for (screencapture_interface.streamInfo(gpa)) |stream| {
+            std.log.info("  {s} {d} x {d}", .{ stream.name, stream.dimensions.width, stream.dimensions.height });
+        }
+    }
 }
 
 fn screenCaptureInitFail(errcode: screencapture.InitErrorSet) void {
