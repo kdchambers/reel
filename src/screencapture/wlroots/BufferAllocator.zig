@@ -22,7 +22,7 @@ memory_pool: *wl.ShmPool,
 used: u32,
 
 pub fn init(initial_size: u64, shared_memory: *wl.Shm) !WaylandAllocator {
-    const shm_name = "/wl_shm_2345";
+    const shm_name = "/reel_wl_shm";
     const fd = std.c.shm_open(
         shm_name,
         linux.O.RDWR | linux.O.CREAT,
@@ -74,7 +74,7 @@ pub fn create(self: *@This(), width: u32, height: u32, stride: u32, format: wl.S
     };
 }
 
-pub fn mappedMemoryForBuffer(self: @This(), buffer: *Buffer) []u8 {
+pub fn mappedMemoryForBuffer(self: @This(), buffer: *const Buffer) []u8 {
     const index_start = buffer.offset;
     const index_end = index_start + buffer.size;
     return self.mapped_memory[index_start..index_end];
