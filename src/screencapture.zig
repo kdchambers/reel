@@ -5,6 +5,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const graphics = @import("graphics.zig");
 const geometry = @import("geometry.zig");
+const Dimensions2D = geometry.Dimensions2D;
 
 const backend_pipewire = @import("screencapture/pipewire/screencapture_pipewire.zig");
 const backend_wlroots = if (build_options.have_wayland)
@@ -16,10 +17,9 @@ pub const State = enum(u8) {
     uninitialized,
     init_pending,
     init_failed,
-    open,
+    active,
     fatal_error,
     closed,
-    paused,
 };
 
 pub const SupportedPixelFormat = enum(u32) {
@@ -56,6 +56,16 @@ fn GenerateBackendEnum() type {
     });
 }
 
+pub const StreamInfo = struct {
+    name: []const u8,
+    dimensions: Dimensions2D(u32),
+    pixel_format: ?SupportedPixelFormat,
+};
+
+pub const BackendInfo = struct {
+    query_streams: bool,
+};
+
 //
 // TODO: This is to merge the error sets of all backends
 //
@@ -63,9 +73,16 @@ fn GenerateBackendEnum() type {
 pub const InitErrorSet = backend_wlroots.InitErrorSet;
 
 pub const InitFn = fn (onSuccess: *const InitOnSuccessFn, onError: *const InitOnErrorFn) void;
-pub const OpenStreamFn = fn (on_success: *const OpenStreamOnSuccessFn, on_error: *const OpenStreamOnErrorFn) void;
+pub const OpenStreamFn = fn (
+    stream_index: ?u16,
+    onFrameReady: *const OnFrameReadyFn,
+    on_success: *const OpenStreamOnSuccessFn,
+    on_error: *const OpenStreamOnErrorFn,
+) void;
 pub const DeinitFn = fn () void;
 pub const ScreenshotFn = fn (callback: *const OnScreenshotReadyFn) void;
+pub const QueryBackendInfoFn = fn () BackendInfo;
+pub const QueryStreamInfoFn = fn (allocator: std.mem.Allocator) []const StreamInfo;
 
 pub const OnScreenshotReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
 pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
@@ -78,6 +95,8 @@ pub const OpenStreamOnErrorFn = fn () void;
 
 pub const StreamInterface = struct {
     pub const State = enum {
+        uninitialized,
+        fatal_error,
         running,
         paused,
     };
@@ -107,6 +126,9 @@ pub const Interface = struct {
     openStream: *const OpenStreamFn,
     deinit: *const DeinitFn,
     screenshot: *const ScreenshotFn,
+    streamInfo: *const QueryStreamInfoFn,
+
+    info: BackendInfo,
 };
 
 var backend_buffer: [2]Backend = undefined;
@@ -116,17 +138,17 @@ const InterfaceBackends = union(Backend) {
     wlroots: Interface,
 };
 
-fn createInterfaceInternal(comptime backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
+fn createInterfaceInternal(comptime backend: Backend) !Interface {
     if (comptime build_options.have_wayland and backend == .wlroots)
-        return backend_wlroots.createInterface(onFrameReady);
+        return backend_wlroots.createInterface();
     if (comptime backend == .pipewire)
-        return backend_pipewire.createInterface(onFrameReady);
+        return backend_pipewire.createInterface();
     unreachable;
 }
 
-pub fn createInterface(backend: Backend, onFrameReady: *const OnFrameReadyFn) !Interface {
+pub fn createInterface(backend: Backend) !Interface {
     return switch (backend) {
-        inline else => |b| createInterfaceInternal(b, onFrameReady),
+        inline else => |b| createInterfaceInternal(b),
     };
 }
 
