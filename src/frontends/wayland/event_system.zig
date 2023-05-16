@@ -137,6 +137,18 @@ pub fn clearState() void {
     }
 }
 
+pub fn disableHoverZones() void {
+    var buffer_i: usize = 0;
+    while (buffer_i < event_cluster_buffer.len) : (buffer_i += 1) {
+        const cluster = &event_cluster_buffer.buffers[buffer_i];
+        var cluster_i: u8 = 0;
+        while (cluster_i < cluster.len) : (cluster_i += 1) {
+            const entry = cluster.atPtr(cluster_i);
+            entry.hover_enabled = false;
+        }
+    }
+}
+
 //
 // 16 Clusters of capacity 64 elements = Max of 1024
 //
@@ -186,9 +198,13 @@ pub fn bindStateToMouseEvent(
         const cluster = &event_cluster_buffer.buffers[buffer_i];
         var cluster_i: u8 = 0;
         while (cluster_i < cluster.len) : (cluster_i += 1) {
-            const entry = cluster.at(cluster_i);
-            if (entry.extent.index == aligned_index.index) {
-                entry.extent.getPtr().* = extent;
+            const entry_ptr = cluster.atPtr(cluster_i);
+            if (entry_ptr.extent.index == aligned_index.index) {
+                entry_ptr.extent.getPtr().* = extent;
+                //
+                // `disableHoverZones` will set this to false, so we have to re-enable it
+                //
+                entry_ptr.hover_enabled = options.enable_hover;
                 return;
             }
         }
