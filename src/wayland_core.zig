@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const assert = std.debug.assert;
 const builtin = @import("builtin");
 const linux = std.os.linux;
 
@@ -156,8 +157,8 @@ fn outputListener(output: *wl.Output, event: wl.Output.Event, index: *const u16)
     _ = output;
     switch (event) {
         .geometry => |data| {
-            const duped_make_string = allocator_ref.dupe(u8, std.mem.span(data.make)) catch return;
-            display_list.append(duped_make_string) catch return;
+            const duped_make_string = allocator_ref.dupe(u8, std.mem.span(data.make)) catch unreachable;
+            display_list.append(duped_make_string) catch unreachable;
             outputs.buffer[index.*].name = duped_make_string;
         },
         .mode => |mode| {
@@ -197,7 +198,7 @@ fn registryListener(registry_ref: *wl.Registry, event: wl.Registry.Event, _: *co
                         .handle = output_ptr,
                         .index = output_index,
                     }) catch unreachable;
-                    output_ptr.setListener(*const u16, outputListener, &output_index);
+                    output_ptr.setListener(*const u16, outputListener, &(outputs.buffer[outputs.len - 1].index));
                 }
             } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
                 window_decorations_opt = registry_ref.bind(global.name, zxdg.DecorationManagerV1, 2) catch blk: {
