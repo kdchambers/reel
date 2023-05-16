@@ -63,6 +63,7 @@ pub const StreamInfo = struct {
 };
 
 pub const BackendInfo = struct {
+    name: []const u8,
     query_streams: bool,
 };
 

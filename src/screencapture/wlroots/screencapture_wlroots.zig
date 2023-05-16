@@ -64,7 +64,7 @@ pub fn createInterface() screencapture.Interface {
         .deinit = deinit,
         .screenshot = screenshot,
         .streamInfo = queryStreamInfo,
-        .info = .{ .query_streams = true },
+        .info = .{ .name = "wlroots", .query_streams = true },
     };
 }
 
@@ -217,7 +217,6 @@ fn onFrameTick(frame_index: u32) void {
     stream_loop: for (0..initialized_stream_count) |i| {
         if (stream_buffer[i].stream_state != .running)
             continue :stream_loop;
-        assert(i == 0);
         const display_output = wayland_core.outputs.buffer[i].handle;
         inline for (&stream_buffer[i].frame_index_buffer, 0..) |*index, frame_index_index| {
             if (index.* == invalid_frame) {
@@ -255,7 +254,6 @@ pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn) void {
 }
 
 fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, frame_reference: *const StreamFrameReference) void {
-    assert(frame_reference.stream_index == 0);
     var stream_ptr = &stream_buffer[frame_reference.stream_index];
     switch (event) {
         .buffer_done => frame.copy(stream_ptr.buffers[frame_reference.frame_index].buffer),
@@ -271,7 +269,6 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
             }
             stream_ptr.*.frame_index_buffer[frame_reference.frame_index] = invalid_frame;
             assert(stream_buffer[0].frame_index_buffer[frame_reference.frame_index] == invalid_frame);
-            std.log.info("frameReadyCallback {d}", .{frame_reference.frame_index});
             stream_ptr.frameReadyCallback(stream_ptr.width, stream_ptr.height, unconverted_pixels);
         },
         .failed => {
