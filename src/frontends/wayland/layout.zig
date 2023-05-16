@@ -16,9 +16,11 @@ const utils = @import("../../utils.zig");
 const Duration = utils.Duration;
 
 const geometry = @import("../../geometry.zig");
+pub const ui_layer = geometry.ui_layer;
 const Extent2D = geometry.Extent2D;
 const Extent3D = geometry.Extent3D;
 const Coordinates2D = geometry.Coordinates2D;
+const Coordinates3D = geometry.Coordinates3D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 
 pub const Anchors = struct {
@@ -40,6 +42,7 @@ pub const Region = struct {
     margin: Margins = .{},
     width: ?f32 = null,
     height: ?f32 = null,
+    z: f32 = ui_layer.middle,
 
     pub inline fn top(self: @This()) f32 {
         const base = self.anchor.top orelse self.anchor.bottom.? - self.margin.bottom - self.height.?;
@@ -93,12 +96,13 @@ pub const Region = struct {
         };
     }
 
-    pub fn placement(self: @This()) Coordinates2D(f32) {
-        const base_x = self.anchor.left orelse unreachable;
-        const base_y = self.anchor.bottom orelse unreachable;
+    pub fn placement(self: @This()) Coordinates3D(f32) {
+        const base_x = self.anchor.left orelse self.anchor.right.? - self.width.? - self.margin.right;
+        const base_y = self.anchor.bottom orelse self.anchor.top.? + self.height.? + self.margin.top;
         return .{
             .x = base_x + self.margin.left,
             .y = base_y - self.margin.bottom,
+            .z = self.z,
         };
     }
 };
