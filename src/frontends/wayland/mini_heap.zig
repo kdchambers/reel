@@ -19,15 +19,27 @@ pub fn Index(comptime Type: type) type {
             return self.index == std.math.maxInt(u16);
         }
 
+        pub inline fn isValid(self: @This()) bool {
+            if (self.index % @alignOf(Type) != 0)
+                return false;
+            return true;
+        }
+
         pub inline fn get(self: @This()) Type {
+            assert(self.index != std.math.maxInt(u16));
+            assert(self.index % alignment == 0);
             return @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.index])).*;
         }
 
         pub inline fn getPtr(self: @This()) *Type {
+            assert(self.index != std.math.maxInt(u16));
+            assert(self.index % alignment == 0);
             return @ptrCast(*Type, @alignCast(alignment, &heap_memory[self.index]));
         }
 
         pub inline fn toIndexAligned(self: @This()) IndexAligned(Type) {
+            assert(self.index != std.math.maxInt(u16));
+            assert(self.index % alignment == 0);
             return .{ .index = @intCast(u14, @divExact(self.index, 8)) };
         }
     };
@@ -57,9 +69,20 @@ pub fn SliceIndex(comptime Type: type) type {
         index: u16,
         count: u16,
 
+        pub inline fn toIndex(self: @This(), index: u16) Index(Type) {
+            assert(index < self.count);
+            return .{ .index = self.index + (index * @sizeOf(Type)) };
+        }
+
         pub inline fn get(self: @This()) []Type {
             const index = self.index;
             return @ptrCast([*]Type, @alignCast(alignment, &heap_memory[index]))[0..self.count];
+        }
+
+        pub inline fn makeSlice(self: @This(), index: u16, count: u16) SliceIndex(Type) {
+            assert(index < self.count);
+            assert(index + count < self.count);
+            return .{ .index = self.index + (index * @sizeOf(Type)), .count = count };
         }
     };
 }
@@ -88,10 +111,7 @@ pub fn Cluster(comptime Type: type) type {
         pub inline fn setZero(self: @This()) void {
             const start_index: usize = self.base_index.index;
             const end_index: usize = start_index + (@sizeOf(Type) * @intCast(usize, self.capacity));
-            @memset(
-                @ptrCast([*]u8, &heap_memory[start_index..end_index]),
-                0,
-            );
+            @memset(heap_memory[start_index..end_index], 0);
         }
 
         pub inline fn write(self: *@This(), value: *const Type) Index(Type) {
@@ -129,16 +149,16 @@ pub fn Cluster(comptime Type: type) type {
     };
 }
 
-var heap_memory: [*]align(8) u8 = undefined;
+var heap_memory: []align(heap_alignment) u8 = undefined;
 var heap_index: u16 = undefined;
 
 pub fn init() !void {
-    heap_memory = (try std.heap.page_allocator.alignedAlloc(u8, heap_alignment, std.math.maxInt(u16))).ptr;
+    heap_memory = (try std.heap.page_allocator.alignedAlloc(u8, heap_alignment, std.math.maxInt(u16)));
     heap_index = 0;
 }
 
 pub fn deinit() void {
-    std.heap.page_allocator.free(heap_memory[0..std.math.maxInt(u16)]);
+    std.heap.page_allocator.free(heap_memory);
 }
 
 pub inline fn reset() void {
@@ -154,15 +174,15 @@ pub inline fn usedBytesCount() u16 {
 }
 
 pub inline fn reserve(comptime Type: type, count: u16, comptime options: WriteOptions) SliceIndex(Type) {
-    const allocation_size = @sizeOf(Type) * @intCast(u16, count);
-    const misalignment = allocation_size % heap_alignment;
-    const result_index = heap_index;
-    heap_index += allocation_size;
-    if (options.check_alignment) {
-        const alignment_padding = heap_alignment - misalignment;
-        heap_index += alignment_padding;
-    }
+    _ = options;
     assert(heap_index % heap_alignment == 0);
+    assert(@alignOf(Type) <= heap_alignment);
+    const result_index: u16 = heap_index;
+    const allocation_size = @sizeOf(Type) * @intCast(u16, count);
+    heap_index += allocation_size;
+    heap_index = roundUp(heap_index, heap_alignment);
+    assert(heap_index % heap_alignment == 0);
+    assert(result_index % @alignOf(Type) == 0);
     return .{ .index = result_index, .count = count };
 }
 
@@ -176,7 +196,7 @@ pub fn allocateCluster(comptime Type: type, capacity: u8) Cluster(Type) {
         });
         assert(is_aligned);
     }
-    const slice = reserve(Type, capacity, .{ .check_alignment = false });
+    const slice = reserve(Type, capacity, .{ .pad_to_alignment = false });
     return .{
         .base_index = .{ .index = slice.index },
         .capacity = capacity,
@@ -185,46 +205,83 @@ pub fn allocateCluster(comptime Type: type, capacity: u8) Cluster(Type) {
 }
 
 pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
-    assert(@alignOf(Type) <= heap_alignment);
-    const type_align = @alignOf(Type);
-    const alignment_padding = comptime heap_alignment - type_align;
-    const type_size = @sizeOf(Type);
-    @ptrCast(*Type, @alignCast(type_align, &heap_memory[heap_index])).* = value.*;
-    const result_index = heap_index;
-    heap_index += type_size + alignment_padding;
     assert(heap_index % heap_alignment == 0);
+    assert(@alignOf(Type) <= heap_alignment);
+    const alignment_padding = comptime heap_alignment - @alignOf(Type);
+    @ptrCast(*Type, @alignCast(@alignOf(Type), &heap_memory[heap_index])).* = value.*;
+    const result_index: u16 = heap_index;
+    heap_index += @sizeOf(Type) + alignment_padding;
+    assert(heap_index % heap_alignment == 0);
+    assert(result_index % @alignOf(Type) == 0);
     return .{ .index = result_index };
 }
 
 pub inline fn writeString(bytes: []const u8) []const u8 {
-    const handle = writeSlice(u8, bytes, .{ .check_alignment = true });
+    const handle = writeSlice(u8, bytes, .{ .pad_to_alignment = true });
     return heap_memory[handle.index .. handle.index + handle.count];
 }
 
 pub const WriteOptions = struct {
-    check_alignment: bool = false,
+    pad_to_alignment: bool = true,
 };
 
+inline fn roundUp(value: anytype, multiple: @TypeOf(value)) @TypeOf(value) {
+    const remainder = value % multiple;
+    return if (remainder == 0) value else (value + multiple) - remainder;
+}
+
 pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime options: WriteOptions) SliceIndex(Type) {
-    const type_size = @sizeOf(Type);
-    if (comptime !options.check_alignment) {
-        assert(@alignOf(Type) == heap_alignment);
-        const bytes_count = type_size * slice.len;
-        @memcpy(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..slice.len], slice);
-        const result_index = heap_index;
-        heap_index += bytes_count;
-        return result_index;
-    }
+    _ = options;
     comptime assert(@alignOf(Type) <= heap_alignment);
-    assert(slice.len <= std.math.maxInt(u16));
-    const allocation_size = type_size * slice.len;
-    // TODO: This is a hefty calculation for this function
-    const alignment_padding: u16 = @intCast(u16, @mod(heap_alignment - @mod(allocation_size, heap_alignment), heap_alignment));
-    @memcpy(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..slice.len], slice);
     const result_index = heap_index;
-    heap_index += @intCast(u16, type_size * slice.len) + alignment_padding;
-    assert(heap_index % heap_alignment == 0);
+    @memcpy(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..slice.len], slice);
+    heap_index += @sizeOf(Type) * slice.len;
+    heap_index = roundUp(heap_index, heap_alignment);
     return .{ .index = result_index, .count = @intCast(u16, slice.len) };
+}
+
+fn ClusterBuffer(comptime Type: type, comptime buffer_count: usize, comptime buffer_capacity: usize) type {
+    return struct {
+        buffers: [buffer_count]Cluster(Type),
+        len: u32,
+
+        pub inline fn init(self: *@This()) void {
+            self.buffers[0] = allocateCluster(Type, buffer_capacity);
+            self.len = 1;
+        }
+
+        pub inline fn write(self: *@This(), value: Type) Index(Type) {
+            const current_index = self.len - 1;
+            if (self.buffers[current_index].isSpace()) {
+                return self.buffers[current_index].write(&value);
+            }
+            const next_index = self.len;
+            self.len += 1;
+            // TODO:
+            std.debug.assert(self.len <= buffer_count);
+            self.buffers[next_index] = allocateCluster(Type, buffer_capacity);
+            return self.buffers[next_index].write(&value);
+        }
+
+        pub inline fn reserve(self: *@This()) Index(Type) {
+            const current_index = self.len - 1;
+            if (self.buffers[current_index].isSpace()) {
+                return self.buffers[current_index].reserve();
+            }
+            const next_index = self.len;
+            self.len += 1;
+            // TODO:
+            std.debug.assert(self.len <= buffer_count);
+            self.buffers[next_index] = allocateCluster(Type, buffer_capacity);
+            return self.buffers[next_index].reserve();
+        }
+
+        pub inline fn setZeroBuffers(self: *@This()) void {
+            for (0..self.len) |i| {
+                self.buffers[i].setZero();
+            }
+        }
+    };
 }
 
 test "mini_heap write values" {
@@ -276,7 +333,7 @@ test "mini_heap write slices" {
 
     try init();
 
-    const write_options = WriteOptions{ .check_alignment = true };
+    const write_options = WriteOptions{ .pad_to_alignment = true };
 
     const string1: []const u8 = "1234567";
     const string1_index = writeSlice(u8, string1, write_options);
