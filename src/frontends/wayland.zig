@@ -5,7 +5,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Model = @import("../Model.zig");
-const RequestBuffer = @import("../RequestBuffer.zig");
 const UIState = @import("wayland/UIState.zig");
 const audio_utils = @import("wayland/audio.zig");
 const zmath = @import("zmath");
@@ -62,18 +61,20 @@ const Selector = widgets.Selector;
 const TabbedSection = widgets.TabbedSection;
 
 const app_core = @import("../app_core.zig");
-const Request = app_core.Request;
-
-const RequestEncoder = @import("../RequestEncoder.zig");
+const CoreUpdateDecoder = app_core.UpdateDecoder;
+const CoreRequestEncoder = app_core.CoreRequestEncoder;
+const CoreRequestDecoder = app_core.CoreRequestDecoder;
 
 var ui_state: UIState = undefined;
 
 var cached_webcam_enabled: bool = false;
 
-var loaded_cursor: enum {
+const CursorState = enum {
     normal,
     pointer,
-} = .normal;
+};
+
+var loaded_cursor: CursorState = .normal;
 
 const XCursor = struct {
     const arrow = "arrow";
@@ -140,8 +141,6 @@ var gpu_texture_mutex: std.Thread.Mutex = undefined;
 
 pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
 
-var mouse_click_coordinates: ?geometry.Coordinates2D(f64) = null;
-
 const initial_screen_dimensions = struct {
     const width = 1280;
     const height = 840;
@@ -171,7 +170,7 @@ pub var is_mouse_moved: bool = false;
 var is_shutdown_requested: bool = false;
 
 var allocator_ref: std.mem.Allocator = undefined;
-var request_encoder: RequestEncoder = .{};
+var request_encoder: CoreRequestEncoder = .{};
 
 pub const InitError = error{
     FontInitFail,
@@ -251,7 +250,19 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.add_source_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.add_source_button.icon = .add_circle_24px;
 
-    ui_state.add_source_menu_open = false;
+    ui_state.select_source_provider_popup = widgets.ListSelectPopup.allocate();
+    ui_state.select_source_provider_popup.title = "Select Source Provider";
+    ui_state.select_source_provider_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
+    ui_state.select_source_provider_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
+    ui_state.select_source_provider_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
+    ui_state.select_source_provider_popup.addLabel("wlroots");
+
+    ui_state.select_video_source_popup = widgets.ListSelectPopup.allocate();
+    ui_state.select_video_source_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
+    ui_state.select_video_source_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
+    ui_state.select_video_source_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
+
+    ui_state.add_source_state = .closed;
 
     ui_state.action_tab = TabbedSection.create(
         &UIState.tab_headings,
@@ -265,8 +276,17 @@ pub fn init(allocator: std.mem.Allocator) !void {
     zmath.fftInitUnityTable(&audio_utils.unity_table);
 }
 
-pub fn update(model: *const Model) UpdateError!RequestBuffer {
+pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
     request_encoder.used = 0;
+
+    while (core_updates.next()) |core_update| {
+        switch (core_update) {
+            .video_source_added => is_draw_required = true,
+        }
+    }
+
+    if (model.video_streams.len != 0)
+        is_render_requested = true;
 
     if (model.recording_context.state != last_recording_state) {
         last_recording_state = model.recording_context.state;
@@ -283,17 +303,9 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         is_draw_required = true;
     }
 
-    // if (ui_state.window_decoration_requested) {
-    //     const widget_update = ui_state.close_button.update();
-    //     if (widget_update.left_clicked)
-    //         is_shutdown_requested = true;
-    //     if (widget_update.color_changed)
-    //         is_render_requested = true;
-    // }
-
     if (is_shutdown_requested) {
         request_encoder.write(.core_shutdown) catch unreachable;
-        return request_encoder.toRequestBuffer();
+        return request_encoder.decoder();
     }
 
     if (framebuffer_resized) {
@@ -312,6 +324,48 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
             is_render_requested = true;
     }
 
+    switch (ui_state.add_source_state) {
+        .closed => {},
+        .select_source_provider => {
+            const response = ui_state.select_source_provider_popup.update();
+            if (response.visual_change)
+                is_render_requested = true;
+            if (response.item_clicked) |item_index| {
+                assert(item_index < model.video_source_providers.len);
+                const selected_source_provider_ptr = &model.video_source_providers[item_index];
+                if (selected_source_provider_ptr.sources) |sources| {
+                    ui_state.select_video_source_popup.clearLabels();
+                    ui_state.select_video_source_popup.title = "Select Display";
+                    for (sources) |source| {
+                        ui_state.select_video_source_popup.addLabel(source.name);
+                    }
+                    ui_state.add_source_state = .select_source;
+                } else {
+                    //
+                    // If sources for provider is null, that means that interspection and selecting
+                    // a specific source from reel isn't supported. Instead we request a source
+                    // from the provider
+                    //
+                    request_encoder.write(.screencapture_request_source) catch unreachable;
+                    ui_state.add_source_state = .closed;
+                }
+                is_draw_required = true;
+            }
+        },
+        .select_source => {
+            const response = ui_state.select_video_source_popup.update();
+            if (response.visual_change)
+                is_render_requested = true;
+            if (response.item_clicked) |item_index| {
+                assert(item_index < model.video_source_providers[0].sources.?.len);
+                request_encoder.write(.screencapture_add_source) catch unreachable;
+                request_encoder.writeInt(u16, item_index) catch unreachable;
+                ui_state.add_source_state = .closed;
+                is_draw_required = true;
+            }
+        },
+    }
+
     {
         const result = ui_state.open_add_button.update();
         if (result.clicked) {
@@ -328,7 +382,10 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
     {
         const result = ui_state.add_source_button.update();
         if (result.clicked) {
-            ui_state.add_source_menu_open = !ui_state.add_source_menu_open;
+            ui_state.add_source_state = switch (ui_state.add_source_state) {
+                .closed => .select_source_provider,
+                else => .closed,
+            };
             is_draw_required = true;
         }
         if (result.modified)
@@ -373,7 +430,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                     }
                     ui_state.record_format.selected_index = @intCast(u16, i);
                     ui_state.record_format.is_open = false;
-                    event_system.clearBlockingEvents();
                     is_draw_required = true;
                 }
             }
@@ -416,7 +472,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                     }
                     ui_state.record_quality.selected_index = @intCast(u16, i);
                     ui_state.record_quality.is_open = false;
-                    event_system.clearBlockingEvents();
                     is_draw_required = true;
                 }
             }
@@ -481,7 +536,6 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
                     }
                     ui_state.screenshot_format.selected_index = @intCast(u16, i);
                     ui_state.screenshot_format.is_open = false;
-                    event_system.clearBlockingEvents();
                     is_draw_required = true;
                 }
             }
@@ -529,67 +583,35 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
     if (is_mouse_moved) {
         is_mouse_moved = false;
         const changes = event_system.handleMouseMovement(&mouse_position);
-        update_cursor: {
-            if (changes.hover_enter and loaded_cursor != .pointer) {
-                cursor = cursor_theme.getCursor(XCursor.pointer) orelse blk: {
-                    break :blk cursor_theme.getCursor(XCursor.hand1) orelse {
-                        std.log.info("Failed to load a cursor image for pointing", .{});
-                        break :update_cursor;
-                    };
-                };
-                const image = cursor.images[0];
-                const image_buffer = image.getBuffer() catch {
-                    std.log.warn("Failed to get cursor image buffer", .{});
-                    break :update_cursor;
-                };
-                cursor_surface.attach(image_buffer, 0, 0);
-                cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
-                cursor_surface.commit();
-                loaded_cursor = .pointer;
-            } else if (changes.hover_exit and loaded_cursor != .normal) {
-                cursor = cursor_theme.getCursor(XCursor.left_ptr).?;
-                const image = cursor.images[0];
-                const image_buffer = image.getBuffer() catch {
-                    std.log.warn("Failed to get cursor image buffer", .{});
-                    break :update_cursor;
-                };
-                cursor_surface.attach(image_buffer, 0, 0);
-                cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
-                cursor_surface.commit();
-                loaded_cursor = .normal;
-            }
-        }
+        if (changes.hover_enter and loaded_cursor != .pointer)
+            setCursorState(.pointer);
+        if (changes.hover_exit and loaded_cursor != .normal)
+            setCursorState(.normal);
     }
 
     if (is_draw_required) {
         is_draw_required = false;
         renderer.resetVertexBuffers();
 
-        // if (ui_state.window_decoration_requested) {
-        //     //
-        //     // We just reset the face_writer so a failure shouldn't really be possible
-        //     // NOTE: This will modify ui_state.window_region to make sure we don't
-        //     //       draw over the window decoration
-        //     //
-        //     drawWindowDecoration() catch unreachable;
-        // }
+        if (ui_state.window_decoration_requested) {
+            //
+            // We just reset the face_writer so a failure shouldn't really be possible
+            // NOTE: This will modify ui_state.window_region to make sure we don't
+            //       draw over the window decoration
+            //
+            drawWindowDecoration() catch unreachable;
+        }
 
-        // {
-        //     const screen_extent: Extent3D(f32) = .{
-        //         .x = -0.4,
-        //         .y = 0.0,
-        //         .z = 0.0,
-        //         .width = 48.0 * screen_scale.horizontal,
-        //         .height = 48.0 * screen_scale.vertical,
-        //     };
-        //     const texture_extent: Extent2D(f32) = .{
-        //         .x = @intToFloat(f32, icons.close.x),
-        //         .y = @intToFloat(f32, icons.close.y),
-        //         .width = @intToFloat(f32, icons.close.width),
-        //         .height = @intToFloat(f32, icons.close.height),
-        //     };
-        //     _ = renderer.drawIcon(screen_extent, texture_extent, RGBA.white, .bottom_left);
-        // }
+        //
+        // Redrawing invalidates all of the hover zones. Disable them here and
+        // they can be overwritten in the following draw fn
+        //
+        event_system.disableHoverZones();
+
+        //
+        // Reset cursor back to normal. Hoverzones have been invalidated
+        //
+        setCursorState(.normal);
 
         //
         // Switch here based on screen dimensions
@@ -631,50 +653,68 @@ pub fn update(model: *const Model) UpdateError!RequestBuffer {
         }
     }
 
-    mouse_click_coordinates = null;
+    event_system.mouse_click_coordinates = null;
 
-    return request_encoder.toRequestBuffer();
+    return request_encoder.decoder();
 }
 
 pub fn deinit() void {
     std.log.info("wayland deinit", .{});
 }
 
-// fn drawWindowDecoration() !void {
-//     const height: f32 = decoration_height_pixels * screen_scale.vertical;
-//     {
-//         const background_color = RGB.fromInt(200, 200, 200);
-//         const extent = geometry.Extent2D(f32){
-//             .x = -1.0,
-//             .y = -1.0,
-//             .width = 2.0,
-//             .height = height,
-//         };
-//         (try face_writer.create(QuadFace)).* = graphics.quadColored(
-//             extent,
-//             background_color.toRGBA(),
-//             .top_left,
-//         );
-//     }
+inline fn setCursorState(cursor_state: CursorState) void {
+    switch (cursor_state) {
+        .pointer => {
+            if (loaded_cursor == .pointer)
+                return;
 
-//     {
-//         const size_pixels: f32 = 28.0;
-//         const offset_pixels: f32 = (decoration_height_pixels - size_pixels) / 2.0;
-//         const h_offset: f32 = offset_pixels * screen_scale.horizontal;
-//         const v_offset: f32 = offset_pixels * screen_scale.vertical;
-//         const cross_width = (size_pixels * screen_scale.horizontal) - (h_offset * 2.0);
-//         const cross_height = (size_pixels * screen_scale.vertical) - (v_offset * 2.0);
-//         const extent = geometry.Extent2D(f32){
-//             .x = 1.0 - (cross_width + (h_offset * 2.0)),
-//             .y = -1.0 + (cross_height + v_offset),
-//             .width = cross_width - h_offset,
-//             .height = cross_height - v_offset,
-//         };
-//         try ui_state.close_button.draw(extent, screen_scale);
-//     }
+            cursor = cursor_theme.getCursor(XCursor.pointer) orelse blk: {
+                break :blk cursor_theme.getCursor(XCursor.hand1) orelse {
+                    std.log.info("Failed to load a cursor image for pointing", .{});
+                    return;
+                };
+            };
+            const image = cursor.images[0];
+            const image_buffer = image.getBuffer() catch {
+                std.log.warn("Failed to get cursor image buffer", .{});
+                return;
+            };
+            cursor_surface.attach(image_buffer, 0, 0);
+            cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
+            cursor_surface.commit();
+            loaded_cursor = .pointer;
+        },
+        .normal => {
+            if (loaded_cursor == .normal)
+                return;
+            cursor = cursor_theme.getCursor(XCursor.left_ptr).?;
+            const image = cursor.images[0];
+            const image_buffer = image.getBuffer() catch {
+                std.log.warn("Failed to get cursor image buffer", .{});
+                return;
+            };
+            cursor_surface.attach(image_buffer, 0, 0);
+            cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
+            cursor_surface.commit();
+            loaded_cursor = .normal;
+        },
+    }
+}
 
-//     ui_state.window_region.top = -1.0 + height;
-// }
+fn drawWindowDecoration() !void {
+    const height: f32 = decoration_height_pixels * screen_scale.vertical;
+    {
+        const background_color = RGB.fromInt(200, 200, 200);
+        const extent = geometry.Extent3D(f32){
+            .x = -1.0,
+            .y = -1.0,
+            .width = 2.0,
+            .height = height,
+        };
+        _ = renderer.drawQuad(extent, background_color.toRGBA(), .top_left);
+    }
+    ui_state.window_region.top = -1.0 + height;
+}
 
 fn initWaylandClient() !void {
     surface = try wayland_core.compositor.createSurface();
@@ -836,7 +876,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
             if (mouse_coordinates.x < 0 or mouse_coordinates.y < 0)
                 return;
 
-            mouse_click_coordinates = .{
+            event_system.mouse_click_coordinates = .{
                 .x = mouse_coordinates.x,
                 .y = mouse_coordinates.y,
             };
