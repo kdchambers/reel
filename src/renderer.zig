@@ -67,6 +67,8 @@ pub const reserveGreyscale = icon_pipeline.reserveGreyscale;
 pub const updateIconColor = icon_pipeline.updateIconColor;
 pub const debugDrawTexture = icon_pipeline.debugDrawTexture;
 
+pub const SupportedVideoImageFormat = video_pipeline.SupportedImageFormat;
+
 pub const writeStreamFrame = video_pipeline.writeStreamFrame;
 pub const drawVideoFrame = video_pipeline.drawVideoFrame;
 pub const addVideoSource = video_pipeline.addVideoSource;
@@ -568,6 +570,8 @@ fn calcRequiredCpuMemory() usize {
 
         bytes += color_vertex_buffer_capacity * @sizeOf(color_pipeline.Vertex);
         bytes += color_index_buffer_capacity * @sizeOf(u16);
+
+        bytes += 1024;
 
         break :blk bytes;
     };
