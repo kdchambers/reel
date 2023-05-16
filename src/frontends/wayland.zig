@@ -236,12 +236,12 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.open_settings_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.open_settings_button.icon = .settings_32px;
 
-    ui_state.open_add_button = IconButton.create();
-    ui_state.open_add_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
-    ui_state.open_add_button.on_hover_icon_color = RGBA.white;
-    ui_state.open_add_button.background_color = RGBA.transparent;
-    ui_state.open_add_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
-    ui_state.open_add_button.icon = .add_32px;
+    ui_state.open_sidemenu_button = IconButton.create();
+    ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
+    ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
+    ui_state.open_sidemenu_button.background_color = RGBA.transparent;
+    ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+    ui_state.open_sidemenu_button.icon = .menu_32px;
 
     ui_state.add_source_button = IconButton.create();
     ui_state.add_source_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
@@ -343,8 +343,8 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 } else {
                     //
                     // If sources for provider is null, that means that interspection and selecting
-                    // a specific source from reel isn't supported. Instead we request a source
-                    // from the provider
+                    // a specific source from the client isn't supported. Instead we simply request
+                    // *a* source from the provider which might be selected via an external interface
                     //
                     request_encoder.write(.screencapture_request_source) catch unreachable;
                     ui_state.add_source_state = .closed;
@@ -367,7 +367,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     }
 
     {
-        const result = ui_state.open_add_button.update();
+        const result = ui_state.open_sidemenu_button.update();
         if (result.clicked) {
             ui_state.sidebar_state = switch (ui_state.sidebar_state) {
                 .add_menu_open => .closed,

@@ -59,20 +59,29 @@ pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
 window_decoration_requested: bool,
 window_region: RegionAnchors,
 
-close_button: widgets.CloseButton,
-
 action_tab: widgets.TabbedSection,
 
 record_button: widgets.Button,
 record_format: widgets.Dropdown,
 record_quality: widgets.Dropdown,
 
+open_sidemenu_button: widgets.IconButton,
+open_settings_button: widgets.IconButton,
+add_source_button: widgets.IconButton,
+
+select_source_provider_popup: widgets.ListSelectPopup,
+select_video_source_popup: widgets.ListSelectPopup,
+
+add_source_state: enum {
+    closed,
+    select_source_provider,
+    select_source,
+},
+
+sidebar_state: enum { closed, settings_menu_open, help_menu_open, add_menu_open },
+
 screenshot_button: widgets.Button,
 screenshot_format: widgets.Dropdown,
-
-preview_display_selector: widgets.Selector,
-
-enable_webcam_checkbox: widgets.Checkbox,
 
 audio_source_spectogram: widgets.AudioSpectogram,
 audio_volume_level: widgets.AudioVolumeLevelHorizontal,
