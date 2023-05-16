@@ -85,7 +85,7 @@ const max_audio_streams = 2;
 var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
 
 const max_video_streams = 2;
-var video_stream_buffer: [max_video_streams]Model.VideoSource = undefined;
+var video_stream_buffer: [max_video_streams]Model.VideoStream = undefined;
 
 pub const CoreRequestEncoder = utils.Encoder(Request, 512);
 pub const CoreRequestDecoder = CoreRequestEncoder.Decoder;
@@ -96,7 +96,10 @@ pub const UpdateDecoder = UpdateEncoder.Decoder;
 var update_encoder: UpdateEncoder = .{};
 var update_encoder_mutex: std.Thread.Mutex = .{};
 
+var video_source_provider_buffer: [2]Model.VideoSourceProvider = undefined;
+
 var model: Model = .{
+    .video_source_providers = &.{},
     .audio_streams = &.{},
     .video_streams = &.{},
     .recording_context = .{
@@ -239,7 +242,17 @@ pub fn run() !void {
                     );
                 },
                 .screencapture_request_source => {
-                    assert(false);
+                    //
+                    // Passing null for `stream_index` indicates that any stream is fine, or
+                    // can it be decided by an external interface. This is required for the pipewire
+                    // backend which prompts the user which display to open a screencapture for
+                    //
+                    screencapture_interface.openStream(
+                        null,
+                        &onFrameReadyCallback,
+                        &openStreamSuccessCallback,
+                        &openStreamErrorCallback,
+                    );
                 },
                 .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady),
                 .screenshot_format_set => {
@@ -588,10 +601,19 @@ fn openStreamErrorCallback() void {
 }
 
 fn screenCaptureInitSuccess() void {
+    assert(model.video_source_providers.len == 0);
+    model.video_source_providers = video_source_provider_buffer[0..1];
+    model.video_source_providers[0].name = screencapture_interface.info.name;
     if (screencapture_interface.info.query_streams) {
         std.log.info("Screencapture backend initialized. Streams..", .{});
-        for (screencapture_interface.streamInfo(gpa)) |stream| {
+        const streams = screencapture_interface.streamInfo(gpa);
+        assert(streams.len <= 16);
+        model.video_source_providers[0].sources = gpa.alloc(Model.VideoSourceProvider.Source, streams.len) catch unreachable;
+        var sources_ptr = &(model.video_source_providers[0].sources.?);
+        for (streams, 0..) |stream, i| {
             std.log.info("  {s} {d} x {d}", .{ stream.name, stream.dimensions.width, stream.dimensions.height });
+            sources_ptr.*[i].name = stream.name;
+            sources_ptr.*[i].dimensions = stream.dimensions;
         }
     }
 }
