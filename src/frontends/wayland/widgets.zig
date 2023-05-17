@@ -5,14 +5,9 @@ const base = @import("widgets/base.zig");
 
 pub const init = base.init;
 
-pub const Section = base.Section;
-pub const TabbedSection = base.TabbedSection;
-pub const Dropdown = base.Dropdown;
-pub const Checkbox = base.Checkbox;
 pub const ImageButton = base.ImageButton;
-pub const Button = base.Button;
-pub const CloseButton = base.CloseButton;
-pub const Selector = base.Selector;
+pub const IconButton = base.IconButton;
+pub const ListSelectPopup = base.ListSelectPopup;
 
 pub const AudioSpectogram = @import("widgets/AudioSpectrogram.zig");
 pub const AudioVolumeLevelHorizontal = @import("widgets/AudioDbLevelHorizontal.zig");
