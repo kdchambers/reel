@@ -45,9 +45,9 @@ const Stream = struct {
 
 const StreamHandle = screencapture.StreamHandle;
 
-const StreamFrameReference = packed struct(u64) {
-    stream_index: u32,
-    frame_index: u32,
+const StreamFrameReference = packed struct(u32) {
+    stream_index: u16,
+    frame_index: u16,
 };
 
 const max_stream_count = 8;
@@ -240,8 +240,8 @@ fn onFrameTick(frame_index: u32) void {
                 };
                 const reference_index: usize = (i * frames_per_stream) + frame_index_index;
                 stream_frame_reference_buffer[reference_index] = .{
-                    .stream_index = @intCast(u32, i),
-                    .frame_index = frame_index_index,
+                    .stream_index = @intCast(u16, i),
+                    .frame_index = @intCast(u16, frame_index_index),
                 };
                 next_frame.setListener(
                     *const StreamFrameReference,
@@ -276,8 +276,8 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
                 else => unreachable,
             }
             stream_ptr.*.frame_index_buffer[frame_reference.frame_index] = invalid_frame;
-            // assert(stream_buffer[0].frame_index_buffer[frame_reference.frame_index] == invalid_frame);
-            stream_ptr.frameReadyCallback(stream_ptr.width, stream_ptr.height, unconverted_pixels);
+            const stream_handle: u16 = frame_reference.stream_index;
+            stream_ptr.frameReadyCallback(stream_handle, stream_ptr.width, stream_ptr.height, unconverted_pixels);
         },
         .failed => {
             std.log.err("screencapture: Frame capture failed", .{});

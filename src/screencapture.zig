@@ -87,7 +87,7 @@ pub const QueryBackendInfoFn = fn () BackendInfo;
 pub const QueryStreamInfoFn = fn (allocator: std.mem.Allocator) []const StreamInfo;
 
 pub const OnScreenshotReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
-pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
+pub const OnFrameReadyFn = fn (stream_handle: StreamHandle, width: u32, height: u32, pixels: [*]const PixelType) void;
 
 pub const InitOnSuccessFn = fn () void;
 pub const InitOnErrorFn = fn (errcode: InitErrorSet) void;

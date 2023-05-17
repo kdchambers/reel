@@ -152,6 +152,8 @@ var sample_buffer: [sample_multiple * 3]f32 = undefined;
 
 var screencapture_start: ?i128 = null;
 
+var stream_count: u32 = 0;
+
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
         return error.IncorrectState;
@@ -389,13 +391,15 @@ pub fn displayList() [][]const u8 {
     unreachable;
 }
 
-fn onFrameReadyCallback(width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
+fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, height: u32, pixels: [*]const screencapture.PixelType) void {
     model_mutex.lock();
     defer model_mutex.unlock();
 
     model.video_streams[0] = .{
         .dimensions = .{ .width = width, .height = height },
-        .index = frame_index,
+        .provider_index = 0,
+        .source_index = stream_handle,
+        .frame_index = frame_index,
         .pixels = pixels,
     };
 
@@ -564,12 +568,15 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
 
     std.log.info("Stream opened!", .{});
 
-    model.video_streams = video_stream_buffer[0..1];
-    model.video_streams[0] = .{
-        .index = 0,
+    model.video_streams = video_stream_buffer[0 .. stream_count + 1];
+    model.video_streams[stream_count] = .{
+        .frame_index = 0,
         .pixels = undefined,
+        .provider_index = 0,
+        .source_index = stream_handle,
         .dimensions = stream_info.dimensions,
     };
+    stream_count += 1;
 
     update_encoder_mutex.lock();
     update_encoder.write(.video_source_added) catch unreachable;
