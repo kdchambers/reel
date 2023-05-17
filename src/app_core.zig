@@ -395,16 +395,19 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
     model_mutex.lock();
     defer model_mutex.unlock();
 
-    model.video_streams[0] = .{
-        .dimensions = .{ .width = width, .height = height },
-        .provider_index = 0,
-        .source_index = stream_handle,
-        .frame_index = frame_index,
-        .pixels = pixels,
-    };
+    for(model.video_streams) |*stream| {
+        if(stream.source_index == stream_handle) {
+            stream.pixels = pixels;
+            assert(stream.provider_index == 0);
+            assert(stream.dimensions.width == width);
+            assert(stream.dimensions.height == height);
+            stream.frame_index = frame_index;
+        }
+    }
 
     const pixel_count: usize = width * height;
-    renderer.writeStreamFrame(0, @ptrCast([*]const u8, pixels)[0 .. pixel_count * 4]) catch assert(false);
+    const renderer_source_index = stream_binding_buffer[stream_handle];
+    renderer.writeStreamFrame(renderer_source_index, @ptrCast([*]const u8, pixels)[0 .. pixel_count * 4]) catch assert(false);
 
     const video_frame_to_encode: [*]const graphics.RGBA(u8) = pixels;
 
@@ -557,6 +560,8 @@ fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
 // Screen capture callbacks
 //
 
+var stream_binding_buffer: [8]u32 = undefined;
+
 fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyopaque) void {
     const stream_info = screencapture_interface.streamInfo(stream_handle);
     const supported_image_format: renderer.SupportedVideoImageFormat = switch (stream_info.pixel_format.?) {
@@ -564,7 +569,7 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
         .bgrx => .bgrx,
         else => unreachable,
     };
-    _ = renderer.createStream(supported_image_format, stream_info.dimensions) catch assert(false);
+    stream_binding_buffer[stream_handle] = renderer.createStream(supported_image_format, stream_info.dimensions) catch unreachable;
 
     std.log.info("Stream opened!", .{});
 
