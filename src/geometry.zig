@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Keith Chambers
 
-pub const layer = struct {
+pub const ui_layer = struct {
     pub const top = 0.0;
 
     pub const high_upper = 0.25;
@@ -30,7 +30,7 @@ pub fn Coordinates3D(comptime BaseType: type) type {
     return extern struct {
         x: BaseType,
         y: BaseType,
-        z: BaseType = layer.middle,
+        z: BaseType = ui_layer.middle,
     };
 }
 
@@ -42,7 +42,7 @@ pub fn Dimensions2D(comptime BaseType: type) type {
 }
 
 pub fn Extent2D(comptime BaseType: type) type {
-    return packed struct {
+    return extern struct {
         x: BaseType,
         y: BaseType,
         height: BaseType,
@@ -70,7 +70,7 @@ pub fn Extent3D(comptime BaseType: type) type {
     return extern struct {
         x: BaseType,
         y: BaseType,
-        z: BaseType = layer.middle,
+        z: BaseType = ui_layer.middle,
         height: BaseType,
         width: BaseType,
 
