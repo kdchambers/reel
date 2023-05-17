@@ -124,7 +124,6 @@ var model_mutex: std.Thread.Mutex = .{};
 var webcam_opt: ?WebcamStream = null;
 
 var screencapture_open: bool = false;
-var screencapture_stream: ?screencapture.StreamInterface = null;
 var frame_index: u64 = 0;
 
 var last_audio_source_timestamp: i128 = 0;
@@ -239,6 +238,7 @@ pub fn run() !void {
                         &onFrameReadyCallback,
                         &openStreamSuccessCallback,
                         &openStreamErrorCallback,
+                        &.{},
                     );
                 },
                 .screencapture_request_source => {
@@ -252,6 +252,7 @@ pub fn run() !void {
                         &onFrameReadyCallback,
                         &openStreamSuccessCallback,
                         &openStreamErrorCallback,
+                        &.{},
                     );
                 },
                 .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady),
@@ -336,30 +337,10 @@ pub fn run() !void {
                     } else assert(false);
                 },
                 .webcam_enable => {
-                    if (screencapture_stream == null) {
-                        std.log.err("Webcam cannot be enabled without screencapture stream", .{});
-                        continue :request_loop;
-                    }
-                    if (!model.webcam_stream.enabled()) {
-                        const pixels_count: usize = model.webcam_stream.dimensions.width * model.webcam_stream.dimensions.height;
-                        model.webcam_stream.last_frame = (try gpa.alloc(graphics.RGBA(u8), pixels_count)).ptr;
-                        webcam_opt = WebcamStream.create("/dev/video0", model.webcam_stream.dimensions) catch |err| blk: {
-                            std.log.warn("Failed to connect to a webcam stream. Error: {}", .{err});
-                            break :blk null;
-                        };
-                        if (webcam_opt) |webcam| {
-                            model.webcam_stream.dimensions = webcam.dimensions();
-                            model.webcam_stream.last_frame_index = 0;
-                            if (model.combined_frame == null) {
-                                const pixels_per_frame = screencapture_stream.?.dimensions.width * screencapture_stream.?.dimensions.height;
-                                model.combined_frame = gpa.alloc(graphics.RGBA(u8), pixels_per_frame) catch {
-                                    std.log.err("Out of memory", .{});
-                                    break :app_loop;
-                                };
-                            }
-                        } else continue :request_loop;
-                        std.log.info("Webcam: enabled", .{});
-                    } else assert(false);
+                    //
+                    // TODO: Implement
+                    //
+                    assert(false);
                 },
                 else => std.log.err("Invalid core request", .{}),
             }
@@ -572,22 +553,22 @@ fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
 // Screen capture callbacks
 //
 
-fn openStreamSuccessCallback(opened_stream: screencapture.StreamInterface) void {
-    const supported_image_format: renderer.SupportedVideoImageFormat = switch (opened_stream.pixel_format) {
+fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyopaque) void {
+    const stream_info = screencapture_interface.streamInfo(stream_handle);
+    const supported_image_format: renderer.SupportedVideoImageFormat = switch (stream_info.pixel_format.?) {
         .rgba => .rgba,
         .bgrx => .bgrx,
         else => unreachable,
     };
-    _ = renderer.createStream(supported_image_format, opened_stream.dimensions) catch assert(false);
+    _ = renderer.createStream(supported_image_format, stream_info.dimensions) catch assert(false);
 
     std.log.info("Stream opened!", .{});
-    screencapture_stream = opened_stream;
 
     model.video_streams = video_stream_buffer[0..1];
     model.video_streams[0] = .{
         .index = 0,
         .pixels = undefined,
-        .dimensions = opened_stream.dimensions,
+        .dimensions = stream_info.dimensions,
     };
 
     update_encoder_mutex.lock();
@@ -595,7 +576,7 @@ fn openStreamSuccessCallback(opened_stream: screencapture.StreamInterface) void 
     update_encoder_mutex.unlock();
 }
 
-fn openStreamErrorCallback() void {
+fn openStreamErrorCallback(_: *anyopaque) void {
     // TODO:
     std.log.err("Failed to open screencapture stream", .{});
 }
@@ -606,7 +587,7 @@ fn screenCaptureInitSuccess() void {
     model.video_source_providers[0].name = screencapture_interface.info.name;
     if (screencapture_interface.info.query_streams) {
         std.log.info("Screencapture backend initialized. Streams..", .{});
-        const streams = screencapture_interface.streamInfo(gpa);
+        const streams = screencapture_interface.queryStreams(gpa);
         assert(streams.len <= 16);
         model.video_source_providers[0].sources = gpa.alloc(Model.VideoSourceProvider.Source, streams.len) catch unreachable;
         var sources_ptr = &(model.video_source_providers[0].sources.?);

@@ -15,14 +15,16 @@ const geometry = @import("../../geometry.zig");
 const wayland_client = @import("../../frontends/wayland.zig");
 
 const WaylandBufferAllocator = @import("BufferAllocator.zig");
-var buffer_allocator: WaylandBufferAllocator = undefined;
-
-const StreamInterface = screencapture.StreamInterface;
-
 const PixelType = screencapture.PixelType;
 
-const max_stream_count = 8;
-const frames_per_stream = 3;
+pub const InitErrorSet = error{
+    NoWaylandDisplay,
+    NoWaylandOutput,
+    CaptureOutputFail,
+    AllocateWaylandBuffersFail,
+    WaylandScreencaptureFail,
+    OutOfMemory,
+};
 
 const Stream = struct {
     frameReadyCallback: *const screencapture.OnFrameReadyFn,
@@ -33,7 +35,7 @@ const Stream = struct {
     width: u32,
     height: u32,
     stride: u32,
-    stream_state: screencapture.StreamInterface.State,
+    stream_state: screencapture.StreamState,
     format: wl.Shm.Format,
 
     pub inline fn requiredMemory(self: *const @This()) usize {
@@ -41,21 +43,39 @@ const Stream = struct {
     }
 };
 
+const StreamHandle = screencapture.StreamHandle;
+
+const StreamFrameReference = packed struct(u64) {
+    stream_index: u32,
+    frame_index: u32,
+};
+
+const max_stream_count = 8;
+const frames_per_stream = 3;
 const invalid_frame = std.math.maxInt(u32);
 
-var output_display_count: u32 = 0;
-var initialized_stream_count: u32 = 0;
-
-var stream_buffer: [max_stream_count]Stream = undefined;
-
+var onInitSuccessCallback: *const screencapture.InitOnSuccessFn = undefined;
+var onInitErrorCallback: *const screencapture.InitOnErrorFn = undefined;
 var onOpenSuccessCallback: *const screencapture.OpenOnSuccessFn = undefined;
 var onOpenErrorCallback: *const screencapture.OpenOnErrorFn = undefined;
 
+var screenshot_callback: *const screencapture.OnScreenshotReadyFn = undefined;
+var screenshot_requested: bool = false;
+
+var buffer_allocator: WaylandBufferAllocator = undefined;
+
+var stream_buffer: [max_stream_count]Stream = undefined;
+var stream_frame_reference_buffer: [max_stream_count * frames_per_stream]StreamFrameReference = undefined;
+
+var output_display_count: u32 = 0;
+var initialized_stream_count: u32 = 0;
 var frametick_callback_index: u32 = 0;
-
 var backend_state: screencapture.State = .uninitialized;
-
 var frame_callback_registered: bool = false;
+
+pub fn detectSupport() bool {
+    return (wayland_core.screencopy_manager_opt != null and wayland_core.outputs.len > 0);
+}
 
 pub fn createInterface() screencapture.Interface {
     return .{
@@ -63,43 +83,14 @@ pub fn createInterface() screencapture.Interface {
         .init = init,
         .deinit = deinit,
         .screenshot = screenshot,
-        .streamInfo = queryStreamInfo,
+        .queryStreams = queryStreamInfo,
+        .streamPause = streamPause,
+        .streamClose = streamClose,
+        .streamState = streamState,
+        .streamInfo = streamInfo,
         .info = .{ .name = "wlroots", .query_streams = true },
     };
 }
-
-fn queryStreamInfo(allocator: std.mem.Allocator) []screencapture.StreamInfo {
-    assert(wayland_core.outputs.len <= 32);
-    var streams = allocator.alloc(screencapture.StreamInfo, wayland_core.outputs.len) catch unreachable;
-    for (0..wayland_core.outputs.len) |i| {
-        streams[i] = .{
-            .name = wayland_core.outputs.buffer[i].name,
-            .dimensions = .{
-                .width = @intCast(u32, wayland_core.outputs.buffer[i].dimensions.width),
-                .height = @intCast(u32, wayland_core.outputs.buffer[i].dimensions.height),
-            },
-            .pixel_format = null,
-        };
-        assert(streams[i].name.len <= 64);
-    }
-    return streams;
-}
-
-pub fn detectSupport() bool {
-    return (wayland_core.screencopy_manager_opt != null and wayland_core.outputs.len > 0);
-}
-
-var onInitSuccessCallback: *const screencapture.InitOnSuccessFn = undefined;
-var onInitErrorCallback: *const screencapture.InitOnErrorFn = undefined;
-
-pub const InitErrorSet = error{
-    NoWaylandDisplay,
-    NoWaylandOutput,
-    CaptureOutputFail,
-    AllocateWaylandBuffersFail,
-    WaylandScreencaptureFail,
-    OutOfMemory,
-};
 
 pub fn init(
     on_success_cb: *const screencapture.InitOnSuccessFn,
@@ -148,18 +139,53 @@ pub fn init(
 
 pub fn deinit() void {}
 
-fn streamPause(self: StreamInterface, is_paused: bool) void {
-    _ = self;
+fn queryStreamInfo(allocator: std.mem.Allocator) []screencapture.StreamInfo {
+    assert(wayland_core.outputs.len <= 32);
+    var streams = allocator.alloc(screencapture.StreamInfo, wayland_core.outputs.len) catch unreachable;
+    for (0..wayland_core.outputs.len) |i| {
+        streams[i] = .{
+            .name = wayland_core.outputs.buffer[i].name,
+            .dimensions = .{
+                .width = @intCast(u32, wayland_core.outputs.buffer[i].dimensions.width),
+                .height = @intCast(u32, wayland_core.outputs.buffer[i].dimensions.height),
+            },
+            .pixel_format = null,
+        };
+        assert(streams[i].name.len <= 64);
+    }
+    return streams;
+}
+
+fn streamInfo(handle: StreamHandle) screencapture.StreamInfo {
+    const output_index = stream_buffer[handle].output_index;
+    const dimensions = wayland_core.outputs.buffer[output_index].dimensions;
+    const pixel_format: screencapture.SupportedPixelFormat = switch (stream_buffer[handle].format) {
+        .rgba8888 => .bgra,
+        .xbgr8888 => .rgba,
+        else => unreachable,
+    };
+    return .{
+        .name = wayland_core.outputs.buffer[output_index].name,
+        .dimensions = .{
+            .width = @intCast(u32, dimensions.width),
+            .height = @intCast(u32, dimensions.height),
+        },
+        .pixel_format = pixel_format,
+    };
+}
+
+fn streamPause(handle: StreamHandle, is_paused: bool) void {
+    _ = handle;
     _ = is_paused;
 }
 
-fn streamState(self: StreamInterface) StreamInterface.State {
-    _ = self;
+fn streamState(handle: StreamHandle) screencapture.StreamState {
+    _ = handle;
     return .running;
 }
 
-fn streamClose(self: StreamInterface) void {
-    _ = self;
+fn streamClose(handle: StreamHandle) void {
+    _ = handle;
 }
 
 pub fn openStream(
@@ -167,6 +193,7 @@ pub fn openStream(
     onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
     on_success_cb: *const screencapture.OpenStreamOnSuccessFn,
     on_error_cb: *const screencapture.OpenStreamOnErrorFn,
+    user_data: *anyopaque,
 ) void {
     _ = on_error_cb;
 
@@ -188,28 +215,12 @@ pub fn openStream(
     stream_buffer[stream_index].stream_state = .running;
     stream_buffer[stream_index].frameReadyCallback = onFrameReadyCallback;
 
-    on_success_cb(.{
-        .index = stream_index,
-        .pause = streamPause,
-        .close = streamClose,
-        .state = streamState,
-        .pixel_format = .rgba,
-        .dimensions = .{
-            .width = stream_buffer[stream_index].width,
-            .height = stream_buffer[stream_index].height,
-        },
-    });
+    on_success_cb(stream_index, user_data);
 }
 
 pub fn state() screencapture.State {
     return backend_state;
 }
-
-const StreamFrameReference = packed struct(u64) {
-    stream_index: u32,
-    frame_index: u32,
-};
-var stream_frame_reference_buffer: [max_stream_count * frames_per_stream]StreamFrameReference = undefined;
 
 fn onFrameTick(frame_index: u32) void {
     const screencopy_manager = wayland_core.screencopy_manager_opt orelse unreachable;
@@ -245,9 +256,6 @@ fn onFrameTick(frame_index: u32) void {
     }
 }
 
-var screenshot_callback: *const screencapture.OnScreenshotReadyFn = undefined;
-var screenshot_requested: bool = false;
-
 pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn) void {
     screenshot_callback = callback;
     screenshot_requested = true;
@@ -268,7 +276,7 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
                 else => unreachable,
             }
             stream_ptr.*.frame_index_buffer[frame_reference.frame_index] = invalid_frame;
-            assert(stream_buffer[0].frame_index_buffer[frame_reference.frame_index] == invalid_frame);
+            // assert(stream_buffer[0].frame_index_buffer[frame_reference.frame_index] == invalid_frame);
             stream_ptr.frameReadyCallback(stream_ptr.width, stream_ptr.height, unconverted_pixels);
         },
         .failed => {

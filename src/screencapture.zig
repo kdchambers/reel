@@ -79,6 +79,7 @@ pub const OpenStreamFn = fn (
     onFrameReady: *const OnFrameReadyFn,
     on_success: *const OpenStreamOnSuccessFn,
     on_error: *const OpenStreamOnErrorFn,
+    user_data: *anyopaque,
 ) void;
 pub const DeinitFn = fn () void;
 pub const ScreenshotFn = fn (callback: *const OnScreenshotReadyFn) void;
@@ -91,32 +92,21 @@ pub const OnFrameReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelTy
 pub const InitOnSuccessFn = fn () void;
 pub const InitOnErrorFn = fn (errcode: InitErrorSet) void;
 
-pub const OpenStreamOnSuccessFn = fn (stream_interface: StreamInterface) void;
-pub const OpenStreamOnErrorFn = fn () void;
+pub const OpenStreamOnSuccessFn = fn (stream: StreamHandle, user_data: *anyopaque) void;
+pub const OpenStreamOnErrorFn = fn (user_data: *anyopaque) void;
 
-pub const StreamInterface = struct {
-    pub const State = enum {
-        uninitialized,
-        fatal_error,
-        running,
-        paused,
-    };
+pub const StreamPauseFn = fn (handle: StreamHandle, is_paused: bool) void;
+pub const StreamStateFn = fn (handle: StreamHandle) StreamState;
+pub const StreamCloseFn = fn (handle: StreamHandle) void;
+pub const StreamInfoFn = fn (handle: StreamHandle) StreamInfo;
 
-    pub const PauseFn = fn (self: @This(), is_paused: bool) void;
-    pub const StateFn = fn (self: @This()) StreamInterface.State;
-    pub const CloseFn = fn (self: @This()) void;
+pub const StreamHandle = u16;
 
-    //
-    // Internal handle that represents the display
-    //
-    index: u32,
-
-    pause: *const PauseFn,
-    close: *const CloseFn,
-    state: *const StateFn,
-
-    dimensions: geometry.Dimensions2D(u32),
-    pixel_format: SupportedPixelFormat,
+pub const StreamState = enum {
+    uninitialized,
+    fatal_error,
+    running,
+    paused,
 };
 
 pub const Interface = struct {
@@ -127,7 +117,12 @@ pub const Interface = struct {
     openStream: *const OpenStreamFn,
     deinit: *const DeinitFn,
     screenshot: *const ScreenshotFn,
-    streamInfo: *const QueryStreamInfoFn,
+    queryStreams: *const QueryStreamInfoFn,
+
+    streamPause: *const StreamPauseFn,
+    streamClose: *const StreamCloseFn,
+    streamState: *const StreamStateFn,
+    streamInfo: *const StreamInfoFn,
 
     info: BackendInfo,
 };
