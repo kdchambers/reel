@@ -95,6 +95,7 @@ const Stream = struct {
 
 pub const SupportedImageFormat = enum {
     rgba,
+    bgrx,
 };
 
 pub fn resetVertexBuffer() void {
@@ -103,7 +104,6 @@ pub fn resetVertexBuffer() void {
 
 pub inline fn writeStreamFrame(stream_index: u32, pixels: []const u8) !void {
     assert(stream_count > stream_index);
-    assert(stream_index == 0);
     const stream_ptr: *Stream = &stream_buffer[stream_index];
     @memcpy(stream_ptr.mapped_memory, pixels);
 }
@@ -133,12 +133,11 @@ pub fn createStream(
     const logical_device = vulkan_core.logical_device;
 
     const stream_index: u32 = stream_count;
-    assert(stream_index == 0);
-    const stream_ptr: *Stream = &stream_buffer[stream_index];
 
+    const stream_ptr: *Stream = &stream_buffer[stream_index];
     stream_ptr.dimensions = source_dimensions;
 
-    std.log.info("Adding stream #{d} with dimensions: {d} x {d}", .{
+    std.log.info("renderer: Adding stream #{d} with dimensions: {d} x {d}", .{
         stream_index,
         stream_ptr.dimensions.width,
         stream_ptr.dimensions.height,
@@ -146,6 +145,7 @@ pub fn createStream(
 
     const image_format = switch (supported_image_format) {
         .rgba => vk.Format.r8g8b8a8_unorm,
+        .bgrx => vk.Format.b8g8r8a8_unorm,
     };
 
     const pixel_count = source_dimensions.width * source_dimensions.height;
@@ -284,12 +284,9 @@ pub fn createStream(
 }
 
 pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
-    // if (stream_count == 0)
-    //     return;
     if (draw_quad_count == 0)
         return;
 
-    // assert(stream_count == 1);
     assert(draw_quad_count == 1);
 
     const stream_ptr = &stream_buffer[0];
