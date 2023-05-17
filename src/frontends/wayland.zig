@@ -215,35 +215,22 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.window_region.bottom = 1.0;
     ui_state.window_region.top = -1.0;
 
-    ui_state.record_button = Button.create();
-    ui_state.record_format = try Dropdown.create(3);
-    ui_state.record_format.labels = &UIState.format_labels;
-    ui_state.record_format.selected_index = 0;
-
-    ui_state.screenshot_button = Button.create();
-    ui_state.screenshot_format = try Dropdown.create(4);
-    ui_state.screenshot_format.labels = &UIState.image_format_labels;
-    ui_state.screenshot_format.selected_index = 0;
-
-    ui_state.record_quality = try Dropdown.create(3);
-    ui_state.record_quality.labels = &UIState.quality_labels;
-    ui_state.record_quality.selected_index = 0;
-
-    ui_state.open_settings_button = IconButton.create();
+    ui_state.open_settings_button = IconButton.allocate();
     ui_state.open_settings_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
     ui_state.open_settings_button.on_hover_icon_color = RGBA.white;
     ui_state.open_settings_button.background_color = RGBA.transparent;
     ui_state.open_settings_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.open_settings_button.icon = .settings_32px;
 
-    ui_state.open_sidemenu_button = IconButton.create();
-    ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
+    ui_state.open_sidemenu_button = IconButton.allocate();
     ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
     ui_state.open_sidemenu_button.background_color = RGBA.transparent;
     ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
-    ui_state.open_sidemenu_button.icon = .menu_32px;
+    ui_state.open_sidemenu_button.icon = .arrow_back_32px;
+    ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
+    // ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
 
-    ui_state.add_source_button = IconButton.create();
+    ui_state.add_source_button = IconButton.allocate();
     ui_state.add_source_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
     ui_state.add_source_button.on_hover_icon_color = RGBA.white;
     ui_state.add_source_button.background_color = RGBA.transparent;
@@ -263,11 +250,6 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.select_video_source_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
 
     ui_state.add_source_state = .closed;
-
-    ui_state.action_tab = TabbedSection.create(
-        &UIState.tab_headings,
-        RGB{ .r = 150, .g = 35, .b = 57 },
-    );
 
     //
     // TODO: Don't hardcode bin count
@@ -317,6 +299,35 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     }
 
     {
+        const response = ui_state.open_sidemenu_button.update();
+        if (response.clicked) {
+            switch (ui_state.sidebar_state) {
+                .open => {
+                    ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
+                    ui_state.open_sidemenu_button.background_color = RGBA.transparent;
+                    ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+                    // ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
+                    ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
+                    ui_state.open_sidemenu_button.icon = .arrow_back_32px;
+                    ui_state.sidebar_state = .closed;
+                },
+                .closed => {
+                    ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
+                    ui_state.open_sidemenu_button.background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
+                    ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+                    ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
+                    // ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
+                    ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
+                    ui_state.sidebar_state = .open;
+                },
+            }
+            is_draw_required = true;
+        }
+        if (response.modified)
+            is_render_requested = true;
+    }
+
+    {
         const result = ui_state.open_settings_button.update();
         if (result.clicked)
             std.log.info("Settings button clicked", .{});
@@ -361,211 +372,35 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 request_encoder.write(.screencapture_add_source) catch unreachable;
                 request_encoder.writeInt(u16, item_index) catch unreachable;
                 ui_state.add_source_state = .closed;
+                //
+                // Close the righthand sidebar once we've finished adding a new source
+                //
+                // TODO: Implement a cleaner way of switching between button states
+                //       Or just use two seperate buttons
+                ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
+                ui_state.open_sidemenu_button.background_color = RGBA.transparent;
+                ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+                ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
+                ui_state.open_sidemenu_button.icon = .arrow_back_32px;
+                ui_state.sidebar_state = .closed;
+
                 is_draw_required = true;
             }
         },
     }
 
     {
-        const result = ui_state.open_sidemenu_button.update();
-        if (result.clicked) {
-            ui_state.sidebar_state = switch (ui_state.sidebar_state) {
-                .add_menu_open => .closed,
-                else => .add_menu_open,
-            };
-            is_draw_required = true;
-        }
-        if (result.modified)
-            is_render_requested = true;
-    }
-
-    {
-        const result = ui_state.add_source_button.update();
-        if (result.clicked) {
+        const response = ui_state.add_source_button.update();
+        if (response.clicked) {
+            assert(ui_state.sidebar_state == .open);
             ui_state.add_source_state = switch (ui_state.add_source_state) {
                 .closed => .select_source_provider,
                 else => .closed,
             };
             is_draw_required = true;
         }
-        if (result.modified)
+        if (response.modified)
             is_render_requested = true;
-    }
-
-    if (ui_state.action_tab.active_index == 0) {
-        //
-        // Recording format selection dropdown
-        //
-        if (!ui_state.record_format.is_open) {
-            const state = ui_state.record_format.state();
-            if (state.hover_enter) {
-                ui_state.record_format.setColor(record_button_color_hover);
-                is_render_requested = true;
-            }
-            if (state.hover_exit) {
-                ui_state.record_format.setColor(record_button_color_normal);
-                is_render_requested = true;
-            }
-            if (state.left_click_release) {
-                ui_state.record_format.is_open = true;
-                is_draw_required = true;
-            }
-        } else {
-            const item_count = ui_state.record_format.item_count;
-            for (ui_state.record_format.item_states[0..item_count], 0..) |item_state, i| {
-                const state_copy = item_state.get();
-                item_state.getPtr().clear();
-                if (state_copy.hover_enter) {
-                    ui_state.record_format.setItemColor(i, record_button_color_hover);
-                    is_render_requested = true;
-                }
-                if (state_copy.hover_exit) {
-                    ui_state.record_format.setItemColor(i, record_button_color_normal);
-                    is_render_requested = true;
-                }
-                if (state_copy.left_click_release) {
-                    if (i != ui_state.record_format.selected_index) {
-                        request_encoder.write(.record_format_set) catch unreachable;
-                        request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
-                    }
-                    ui_state.record_format.selected_index = @intCast(u16, i);
-                    ui_state.record_format.is_open = false;
-                    is_draw_required = true;
-                }
-            }
-        }
-
-        //
-        // Recording format selection dropdown
-        //
-        if (!ui_state.record_quality.is_open) {
-            const state = ui_state.record_quality.state();
-            if (state.hover_enter) {
-                ui_state.record_quality.setColor(record_button_color_hover);
-                is_render_requested = true;
-            }
-            if (state.hover_exit) {
-                ui_state.record_quality.setColor(record_button_color_normal);
-                is_render_requested = true;
-            }
-            if (state.left_click_release) {
-                ui_state.record_quality.is_open = true;
-                is_draw_required = true;
-            }
-        } else {
-            const item_count = ui_state.record_quality.item_count;
-            for (ui_state.record_quality.item_states[0..item_count], 0..) |item_state, i| {
-                const state_copy = item_state.get();
-                item_state.getPtr().clear();
-                if (state_copy.hover_enter) {
-                    ui_state.record_quality.setItemColor(i, record_button_color_hover);
-                    is_render_requested = true;
-                }
-                if (state_copy.hover_exit) {
-                    ui_state.record_quality.setItemColor(i, record_button_color_normal);
-                    is_render_requested = true;
-                }
-                if (state_copy.left_click_release) {
-                    if (i != ui_state.record_quality.selected_index) {
-                        request_encoder.write(.record_quality_set) catch unreachable;
-                        request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
-                    }
-                    ui_state.record_quality.selected_index = @intCast(u16, i);
-                    ui_state.record_quality.is_open = false;
-                    is_draw_required = true;
-                }
-            }
-        }
-
-        {
-            const state = ui_state.record_button.state();
-            if (state.hover_enter) {
-                ui_state.record_button.setColor(record_button_color_hover);
-                is_render_requested = true;
-            }
-            if (state.hover_exit) {
-                ui_state.record_button.setColor(record_button_color_normal);
-                is_render_requested = true;
-            }
-
-            if (state.left_click_release) {
-                switch (model.recording_context.state) {
-                    .idle => request_encoder.write(.record_start) catch unreachable,
-                    .recording => request_encoder.write(.record_stop) catch unreachable,
-                    else => {},
-                }
-                is_draw_required = true;
-            }
-        }
-    } else if (ui_state.action_tab.active_index == 1) {
-        //
-        // Recording format selection dropdown
-        //
-        if (!ui_state.screenshot_format.is_open) {
-            const state = ui_state.screenshot_format.state();
-            if (state.hover_enter) {
-                ui_state.screenshot_format.setColor(record_button_color_hover);
-                is_render_requested = true;
-            }
-            if (state.hover_exit) {
-                ui_state.screenshot_format.setColor(record_button_color_normal);
-                is_render_requested = true;
-            }
-            if (state.left_click_release) {
-                ui_state.screenshot_format.is_open = true;
-                is_draw_required = true;
-            }
-        } else {
-            const item_count = ui_state.screenshot_format.item_count;
-            for (ui_state.screenshot_format.item_states[0..item_count], 0..) |item_state, i| {
-                const state_copy = item_state.get();
-                item_state.getPtr().clear();
-                if (state_copy.hover_enter) {
-                    ui_state.screenshot_format.setItemColor(i, record_button_color_hover);
-                    is_render_requested = true;
-                }
-                if (state_copy.hover_exit) {
-                    ui_state.screenshot_format.setItemColor(i, record_button_color_normal);
-                    is_render_requested = true;
-                }
-                if (state_copy.left_click_release) {
-                    if (i != ui_state.screenshot_format.selected_index) {
-                        std.log.info("Image format set! {d}", .{i});
-                        request_encoder.write(.screenshot_format_set) catch unreachable;
-                        request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
-                    }
-                    ui_state.screenshot_format.selected_index = @intCast(u16, i);
-                    ui_state.screenshot_format.is_open = false;
-                    is_draw_required = true;
-                }
-            }
-        }
-    }
-
-    const action_tab_update = ui_state.action_tab.update();
-    if (action_tab_update.tab_changed) {
-        _ = ui_state.record_button.state();
-        _ = ui_state.record_quality.state();
-        _ = ui_state.record_format.state();
-        is_draw_required = true;
-    }
-
-    if (ui_state.action_tab.active_index == 1) {
-        const state = ui_state.screenshot_button.state();
-        if (state.hover_enter) {
-            ui_state.screenshot_button.setColor(record_button_color_hover);
-            is_render_requested = true;
-        }
-        if (state.hover_exit) {
-            ui_state.screenshot_button.setColor(record_button_color_normal);
-            is_render_requested = true;
-        }
-
-        if (state.left_click_release) {
-            request_encoder.write(.screenshot_do) catch unreachable;
-        }
-    } else {
-        _ = ui_state.screenshot_button.state();
     }
 
     const mouse_position = mouseCoordinatesNDCR();
@@ -606,7 +441,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         // Redrawing invalidates all of the hover zones. Disable them here and
         // they can be overwritten in the following draw fn
         //
-        event_system.disableHoverZones();
+        event_system.invalidateEvents();
 
         //
         // Reset cursor back to normal. Hoverzones have been invalidated

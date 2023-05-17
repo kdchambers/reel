@@ -62,16 +62,22 @@ pub const Vertex = extern struct {
 
 pub const Icon = enum {
     add_32px,
+    arrow_back_32px,
+    arrow_forward_32px,
     add_circle_24px,
     help_32px,
+    menu_32px,
     settings_32px,
 };
 
 const icon_directory_path = "assets/icons/";
 const icon_path_list = [_][]const u8{
     icon_directory_path ++ "add_32px.png",
+    icon_directory_path ++ "arrow_back_32px.png",
+    icon_directory_path ++ "arrow_forward_32px.png",
     icon_directory_path ++ "add_circle_24px.png",
     icon_directory_path ++ "help_32px.png",
+    icon_directory_path ++ "menu_32px.png",
     icon_directory_path ++ "settings_32px.png",
 };
 

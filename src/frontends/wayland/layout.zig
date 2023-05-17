@@ -90,7 +90,7 @@ pub const Region = struct {
         return .{
             .x = x + self.margin.left,
             .y = y - self.margin.bottom,
-            .z = 0.8,
+            .z = self.z,
             .width = width,
             .height = height,
         };

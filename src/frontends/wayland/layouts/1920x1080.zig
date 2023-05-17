@@ -15,6 +15,8 @@ const Dimensions2D = geometry.Dimensions2D;
 const Coordinates3D = geometry.Coordinates3D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 
+const ui_root = @import("../../wayland.zig");
+
 const Region = @import("../layout.zig").Region;
 
 const renderer = @import("../../../renderer.zig");
@@ -66,25 +68,46 @@ pub fn draw(
             const margin_pixels: f32 = 8.0;
             ui_state.open_settings_button.draw(placement, margin_pixels, screen_scale);
         }
+    }
 
-        if (ui_state.sidebar_state == .add_menu_open) {
+    switch (ui_state.sidebar_state) {
+        .open => {
+            var right_sidebar_region: Region = .{};
+            right_sidebar_region.anchor.right = window.right;
+            right_sidebar_region.anchor.top = window.top;
+            right_sidebar_region.z = ui_layer.middle_lower;
+            right_sidebar_region.width = 400.0 * screen_scale.horizontal;
+            right_sidebar_region.anchor.bottom = window.bottom;
+
+            var close_sidebar_button_region: Region = .{};
+            close_sidebar_button_region.anchor.left = right_sidebar_region.left();
+            close_sidebar_button_region.anchor.top = right_sidebar_region.top();
+            close_sidebar_button_region.z = ui_layer.middle;
+            close_sidebar_button_region.width = 32.0 * screen_scale.horizontal;
+            close_sidebar_button_region.height = 32.0 * screen_scale.vertical;
+            close_sidebar_button_region.margin.top = 10 * screen_scale.vertical;
+            close_sidebar_button_region.margin.left = 10 * screen_scale.horizontal;
+
+            ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
+            // ui_state.open_sidemenu_button.background_color = sidebar_color;
+            ui_state.open_sidemenu_button.draw(close_sidebar_button_region.placement(), 4.0, screen_scale);
+
             const scene_controls_background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
-            const scene_controls_extent = Extent3D(f32){
-                .x = 1.0 - (400.0 * screen_scale.horizontal),
-                .y = 1.0,
-                .width = 400.0 * screen_scale.horizontal,
-                .height = 2.0,
-            };
+            const scene_controls_extent = right_sidebar_region.toExtent();
+            assert(scene_controls_extent.z == right_sidebar_region.z);
             _ = renderer.drawQuad(scene_controls_extent, scene_controls_background_color, .bottom_left);
+
+            const top_margin: f32 = 44.0 * screen_scale.vertical;
+
             const header_bar_extent = Extent3D(f32){
                 .x = scene_controls_extent.x,
-                .y = -1.0 + (40.0 * screen_scale.vertical),
+                .y = -1.0 + (40.0 * screen_scale.vertical) + top_margin,
                 .width = scene_controls_extent.width,
                 .height = 40.0 * screen_scale.vertical,
             };
             const header_bar_text_extent = Extent3D(f32){
                 .x = scene_controls_extent.x,
-                .y = -1.0 + (40.0 * screen_scale.vertical) + 0.001,
+                .y = -1.0 + (40.0 * screen_scale.vertical) + 0.001 + top_margin,
                 .width = scene_controls_extent.width / 4.0,
                 .height = 40.0 * screen_scale.vertical,
             };
@@ -95,7 +118,7 @@ pub fn draw(
             {
                 const add_circle_placement = Coordinates3D(f32){
                     .x = 1.0 - (40.0 * screen_scale.horizontal),
-                    .y = -1.0 + (40.0 * screen_scale.vertical),
+                    .y = -1.0 + (40.0 * screen_scale.vertical) + top_margin,
                 };
                 ui_state.add_source_button.draw(add_circle_placement, 8.0, screen_scale);
             }
@@ -131,18 +154,19 @@ pub fn draw(
                 },
                 else => {},
             }
-        }
+        },
+        .closed => {
+            var open_sidebar_button_region: Region = .{};
+            open_sidebar_button_region.anchor.right = window.right;
+            open_sidebar_button_region.anchor.top = window.top;
+            open_sidebar_button_region.z = ui_layer.middle_lower;
+            open_sidebar_button_region.width = 32.0 * screen_scale.horizontal;
+            open_sidebar_button_region.height = 32.0 * screen_scale.vertical;
+            open_sidebar_button_region.margin.top = 12 * screen_scale.vertical;
+            open_sidebar_button_region.margin.right = 20 * screen_scale.horizontal;
+            ui_state.open_sidemenu_button.draw(open_sidebar_button_region.placement(), 4.0, screen_scale);
+        },
     }
-
-    var right_sidebar_region: Region = .{};
-    right_sidebar_region.anchor.right = window.right;
-    right_sidebar_region.anchor.top = window.top;
-    right_sidebar_region.width = 32.0 * screen_scale.horizontal;
-    right_sidebar_region.height = 32.0 * screen_scale.vertical;
-    right_sidebar_region.z = ui_layer.low_upper;
-    right_sidebar_region.margin.top = 12 * screen_scale.vertical;
-    right_sidebar_region.margin.right = 20 * screen_scale.horizontal;
-    ui_state.open_sidemenu_button.draw(right_sidebar_region.placement(), 4.0, screen_scale);
 
     var preview_region: Region = .{};
     {
@@ -187,7 +211,7 @@ pub fn draw(
         const scale = @min(scale_horizontal, scale_vertical);
 
         preview_region.anchor.right = window.right;
-        preview_region.anchor.top = right_sidebar_region.bottom();
+        preview_region.anchor.top = if (ui_state.sidebar_state == .closed) window.top + (40.0 * screen_scale.vertical) else window.top;
         preview_region.height = dimensions.height * scale;
         preview_region.width = dimensions.width * scale;
 
@@ -195,7 +219,7 @@ pub fn draw(
         preview_region.margin.top = margin_top;
 
         var preview_extent = preview_region.toExtent();
-        preview_extent.z = ui_layer.low_lower;
+        preview_region.z = ui_layer.low_lower;
 
         preview_region.anchor.right.? += 1 * screen_scale.horizontal;
         preview_region.anchor.top.? -= 1 * screen_scale.vertical;
