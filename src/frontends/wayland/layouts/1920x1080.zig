@@ -24,6 +24,8 @@ const renderer = @import("../../../renderer.zig");
 const Model = @import("../../../Model.zig");
 const UIState = @import("../UIState.zig");
 
+const event_system = @import("../event_system.zig");
+
 const sidebar_color = RGBA{ .r = 17, .g = 20, .b = 26, .a = 255 };
 
 pub fn update(
@@ -55,6 +57,7 @@ pub fn draw(
             const placement = Coordinates3D(f32){
                 .x = -1.0 + (8.0 * screen_scale.horizontal),
                 .y = 1.0 - (10.0 * screen_scale.vertical),
+                .z = ui_layer.middle,
             };
             const color = RGB{ .r = 202, .g = 202, .b = 202 };
             _ = renderer.drawIcon(placement, .help_32px, screen_scale, color.toRGBA(), .bottom_left);
@@ -64,6 +67,7 @@ pub fn draw(
             const placement = Coordinates3D(f32){
                 .x = -1.0,
                 .y = 1.0 - (48.0 * screen_scale.vertical),
+                .z = ui_layer.middle,
             };
             const margin_pixels: f32 = 8.0;
             ui_state.open_settings_button.draw(placement, margin_pixels, screen_scale);
@@ -102,12 +106,14 @@ pub fn draw(
             const header_bar_extent = Extent3D(f32){
                 .x = scene_controls_extent.x,
                 .y = -1.0 + (40.0 * screen_scale.vertical) + top_margin,
+                .z = ui_layer.middle,
                 .width = scene_controls_extent.width,
                 .height = 40.0 * screen_scale.vertical,
             };
             const header_bar_text_extent = Extent3D(f32){
                 .x = scene_controls_extent.x,
                 .y = -1.0 + (40.0 * screen_scale.vertical) + 0.001 + top_margin,
+                .z = ui_layer.middle,
                 .width = scene_controls_extent.width / 4.0,
                 .height = 40.0 * screen_scale.vertical,
             };
@@ -119,8 +125,27 @@ pub fn draw(
                 const add_circle_placement = Coordinates3D(f32){
                     .x = 1.0 - (40.0 * screen_scale.horizontal),
                     .y = -1.0 + (40.0 * screen_scale.vertical) + top_margin,
+                    .z = ui_layer.middle,
                 };
                 ui_state.add_source_button.draw(add_circle_placement, 8.0, screen_scale);
+            }
+
+            {
+                const item_height: f32 = 40.0 * screen_scale.vertical;
+                const margin_right: f32 = 10.0 * screen_scale.horizontal;
+                const item_width: f32 = 400.0 * screen_scale.horizontal;
+                for (model.video_streams, 0..) |stream, i| {
+                    const extent = Extent3D(f32){
+                        .x = right_sidebar_region.left() + margin_right,
+                        .y = header_bar_extent.y + (@intToFloat(f32, i + 1) * item_height),
+                        .z = ui_layer.middle,
+                        .width = item_width,
+                        .height = item_height,
+                    };
+                    std.log.info("Source stream: {d}", .{stream.source_index});
+                    const source_name = model.video_source_providers[stream.provider_index].sources.?[stream.source_index].name;
+                    _ = renderer.drawText(source_name, extent, screen_scale, .small, RGBA.white, .middle, .middle);
+                }
             }
 
             switch (ui_state.add_source_state) {
@@ -130,6 +155,7 @@ pub fn draw(
                     const menu_placement = Coordinates3D(f32){
                         .x = 1.0 - (40.0 * screen_scale.horizontal) - menu_item_width,
                         .y = -1.0 + (200.0 * screen_scale.vertical),
+                        .z = ui_layer.middle,
                     };
                     ui_state.select_source_provider_popup.draw(
                         menu_placement,
@@ -144,6 +170,7 @@ pub fn draw(
                     const menu_placement = Coordinates3D(f32){
                         .x = 1.0 - (80.0 * screen_scale.horizontal) - menu_item_width,
                         .y = -1.0 + (200.0 * screen_scale.vertical),
+                        .z = ui_layer.middle,
                     };
                     ui_state.select_video_source_popup.draw(
                         menu_placement,
@@ -221,11 +248,11 @@ pub fn draw(
         var preview_extent = preview_region.toExtent();
         preview_region.z = ui_layer.low_lower;
 
-        preview_region.anchor.right.? += 1 * screen_scale.horizontal;
-        preview_region.anchor.top.? -= 1 * screen_scale.vertical;
+        preview_region.anchor.right.? += 2 * screen_scale.horizontal;
+        preview_region.anchor.top.? -= 2 * screen_scale.vertical;
 
-        preview_region.width.? += 2 * screen_scale.horizontal;
-        preview_region.height.? += 2 * screen_scale.vertical;
+        preview_region.width.? += 4 * screen_scale.horizontal;
+        preview_region.height.? += 4 * screen_scale.vertical;
 
         const background_color = if (model.recording_context.state == .recording)
             RGB.fromInt(150, 20, 20)
@@ -242,6 +269,23 @@ pub fn draw(
             try renderer.resizeCanvas(canvas_dimensions_pixels);
             preview_extent.z = ui_layer.low;
             renderer.drawVideoFrame(preview_extent);
+
+            const video_source_extents = renderer.videoSourceExtents(screen_scale);
+            ui_state.video_source_mouse_event_count = @intCast(u32, video_source_extents.len);
+            for (video_source_extents, 0..) |source_extent, i| {
+                const absolute_extent = Extent3D(f32){
+                    .x = source_extent.x + preview_extent.x,
+                    .y = source_extent.y + preview_extent.y,
+                    .z = source_extent.z + ui_layer.low_lower,
+                    .width = source_extent.width,
+                    .height = source_extent.height,
+                };
+                std.log.info("Source extent: {d} x {d}", .{
+                    absolute_extent.width,
+                    absolute_extent.height,
+                });
+                event_system.writeMouseEventSlot(ui_state.video_source_mouse_event_buffer[i], absolute_extent, .{});
+            }
         }
     }
 }

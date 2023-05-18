@@ -125,6 +125,42 @@ pub inline fn addVideoSource(stream: u32, relative_extent: Extent2D(u16)) void {
     source_count += 1;
 }
 
+var source_extent_buffer: [8]Extent3D(f32) = undefined;
+
+pub fn videoSourceExtents(screen_scale: ScaleFactor2D(f32)) []Extent3D(f32) {
+    var z_level: f32 = 0.0;
+    const z_increment: f32 = 0.01;
+    for (draw_context_buffer[0..source_count], 0..) |draw_context, i| {
+        std.log.info("Source dimensions: {d} x {d}", .{ draw_context.relative_extent.width, draw_context.relative_extent.height });
+        const stream_index = draw_context.stream_index;
+        const scale_factor = ScaleFactor2D(f32){
+            .horizontal = @intToFloat(f32, canvas_dimensions.width) / @intToFloat(f32, stream_buffer[stream_index].dimensions.width),
+            .vertical = @intToFloat(f32, canvas_dimensions.height) / @intToFloat(f32, stream_buffer[stream_index].dimensions.height),
+        };
+        source_extent_buffer[i] = .{
+            .x = @intToFloat(f32, draw_context.relative_extent.x) * screen_scale.horizontal,
+            .y = @intToFloat(f32, draw_context.relative_extent.y) * screen_scale.vertical,
+            .z = z_level,
+            .width = @intToFloat(f32, draw_context.relative_extent.width) * screen_scale.horizontal * scale_factor.horizontal,
+            .height = @intToFloat(f32, draw_context.relative_extent.height) * screen_scale.vertical * scale_factor.vertical,
+        };
+        z_level += z_increment;
+    }
+    return source_extent_buffer[0..source_count];
+}
+
+pub fn sourceRelativePlacement(source_index: u16) Coordinates2D(u16) {
+    return .{
+        .x = draw_context_buffer[source_index].relative_extent.x,
+        .y = draw_context_buffer[source_index].relative_extent.y,
+    };
+}
+
+pub fn moveSource(source_index: u16, placement: Coordinates2D(u16)) void {
+    draw_context_buffer[source_index].relative_extent.x = placement.x;
+    draw_context_buffer[source_index].relative_extent.y = placement.y;
+}
+
 pub fn createStream(
     supported_image_format: SupportedImageFormat,
     source_dimensions: Dimensions2D(u32),
@@ -326,23 +362,24 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         //
         // Convert x,y from bottom_left to top_left and invert y axis
         //
-        const top_left = Coordinates2D(f32){
+        const top_right = Coordinates2D(f32){
             .x = @intToFloat(f32, relative_extent.x),
-            .y = @intToFloat(f32, stream_ptr.dimensions.height - relative_extent.height),
+            .y = @intToFloat(f32, stream_ptr.dimensions.height - relative_extent.height - relative_extent.y),
         };
-        const bottom_right = Coordinates2D(f32){
-            .x = @intToFloat(f32, relative_extent.width),
+        const bottom_left = Coordinates2D(f32){
+            .x = @intToFloat(f32, relative_extent.width + relative_extent.x),
             .y = @intToFloat(f32, stream_ptr.dimensions.height - relative_extent.y),
         };
+
         const dst_region_offsets = [2]vk.Offset3D{
             .{
-                .x = @floatToInt(i32, @floor(top_left.x * scale_factor.horizontal)),
-                .y = @floatToInt(i32, @floor(top_left.y * scale_factor.vertical)),
+                .x = @floatToInt(i32, @floor(top_right.x * scale_factor.horizontal)),
+                .y = @floatToInt(i32, @floor(top_right.y * scale_factor.vertical)),
                 .z = 0,
             },
             .{
-                .x = @floatToInt(i32, @floor(bottom_right.x * scale_factor.horizontal)),
-                .y = @floatToInt(i32, @floor(bottom_right.y * scale_factor.vertical)),
+                .x = @floatToInt(i32, @floor(bottom_left.x * scale_factor.horizontal)),
+                .y = @floatToInt(i32, @floor(bottom_left.y * scale_factor.vertical)),
                 .z = 1,
             },
         };

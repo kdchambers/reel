@@ -75,6 +75,10 @@ pub const addVideoSource = video_pipeline.addVideoSource;
 pub const createStream = video_pipeline.createStream;
 pub const resizeCanvas = video_pipeline.resizeCanvas;
 
+pub const videoSourceExtents = video_pipeline.videoSourceExtents;
+pub const moveSource = video_pipeline.moveSource;
+pub const sourceRelativePlacement = video_pipeline.sourceRelativePlacement;
+
 const max_frames_in_flight = 2;
 
 var current_frame: u32 = 0;

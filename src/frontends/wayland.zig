@@ -37,10 +37,12 @@ pub fn addOnFrameCallback(callback: *const FrameTickCallbackFn) void {
 const layout_1920x1080 = @import("wayland/layouts/1920x1080.zig");
 
 const geometry = @import("../geometry.zig");
+const Dimensions2D = geometry.Dimensions2D;
 const Extent2D = geometry.Extent2D;
 const Extent3D = geometry.Extent3D;
 const Coordinates2D = geometry.Coordinates2D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
+const ui_layer = geometry.ui_layer;
 
 const event_system = @import("wayland/event_system.zig");
 const audio = @import("../audio_source.zig");
@@ -68,6 +70,13 @@ const CoreRequestDecoder = app_core.CoreRequestDecoder;
 var ui_state: UIState = undefined;
 
 var cached_webcam_enabled: bool = false;
+
+const StreamDragContext = struct {
+    start_coordinates: Coordinates2D(u16),
+    start_mouse_coordinates: Coordinates2D(u16),
+    source_index: u16,
+};
+var stream_drag_context: ?StreamDragContext = null;
 
 const CursorState = enum {
     normal,
@@ -251,6 +260,11 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.add_source_state = .closed;
 
+    ui_state.video_source_mouse_event_count = 0;
+    for (&ui_state.video_source_mouse_event_buffer) |*slot| {
+        slot.* = event_system.reserveMouseEventSlot();
+    }
+
     //
     // TODO: Don't hardcode bin count
     //
@@ -296,6 +310,21 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             std.log.err("Failed to recreate swapchain. Error: {}", .{err});
         };
         is_draw_required = true;
+    }
+
+    for (ui_state.video_source_mouse_event_buffer[0..ui_state.video_source_mouse_event_count], 0..) |slot, i| {
+        const state_copy = slot.get().state;
+        slot.getPtr().state.clear();
+        if (state_copy.left_click_press) {
+            stream_drag_context = .{
+                .start_coordinates = renderer.sourceRelativePlacement(@intCast(u16, i)),
+                .start_mouse_coordinates = .{
+                    .x = @floatToInt(u16, @floor(mouse_coordinates.x)),
+                    .y = @floatToInt(u16, @floor(mouse_coordinates.y)),
+                },
+                .source_index = @intCast(u16, i),
+            };
+        }
     }
 
     {
@@ -543,6 +572,7 @@ fn drawWindowDecoration() !void {
         const extent = geometry.Extent3D(f32){
             .x = -1.0,
             .y = -1.0,
+            .z = ui_layer.bottom,
             .width = 2.0,
             .height = height,
         };
@@ -701,6 +731,22 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
             mouse_coordinates.x = motion_mouse_x;
             mouse_coordinates.y = motion_mouse_y;
 
+            if (stream_drag_context) |drag| {
+                const mouse_delta = Coordinates2D(i32){
+                    .x = @floatToInt(i32, motion_mouse_x) - @intCast(i32, drag.start_mouse_coordinates.x),
+                    .y = @intCast(i32, drag.start_mouse_coordinates.y) - @floatToInt(i32, motion_mouse_y),
+                };
+
+                std.log.info("Delta: {d} x {d}", .{mouse_delta.x, mouse_delta.y });
+
+                const new_placement = Coordinates2D(u16){
+                    .x = @intCast(u16, drag.start_coordinates.x + mouse_delta.x),
+                    .y = @intCast(u16, drag.start_coordinates.y + mouse_delta.y),
+                };
+                renderer.moveSource(drag.source_index, new_placement);
+                is_record_requested = true;
+            }
+
             is_mouse_moved = true;
         },
         .button => |button| {
@@ -729,6 +775,9 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 button_clicked = .middle;
 
             button_state = button.state;
+
+            if(mouse_button == .left and button_state == .released)
+                stream_drag_context = null;
 
             std.log.info("Button mouse coordinates: {d}, {d}", .{
                 mouse_coordinates.x,

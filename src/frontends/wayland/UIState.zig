@@ -7,6 +7,9 @@ const Model = @import("../../Model.zig");
 const VideoFormat = Model.VideoFormat;
 const ImageFormat = Model.ImageFormat;
 
+const mini_heap = @import("mini_heap.zig");
+const event_system = @import("event_system.zig");
+
 //
 // TODO: Use a comptime function to generate format_labels & image_format_labels
 //
@@ -65,6 +68,9 @@ add_source_button: widgets.IconButton,
 
 select_source_provider_popup: widgets.ListSelectPopup,
 select_video_source_popup: widgets.ListSelectPopup,
+
+video_source_mouse_event_buffer: [8]mini_heap.Index(event_system.MouseEventEntry),
+video_source_mouse_event_count: u32,
 
 add_source_state: enum {
     closed,
