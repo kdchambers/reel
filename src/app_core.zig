@@ -17,6 +17,7 @@ const zmath = @import("zmath");
 const video_encoder = @import("video_record.zig");
 const geometry = @import("geometry.zig");
 const Dimensions2D = geometry.Dimensions2D;
+const Extent2D = geometry.Extent2D;
 const WebcamStream = @import("WebcamStream.zig").WebcamStream;
 const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 
@@ -395,8 +396,8 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
     model_mutex.lock();
     defer model_mutex.unlock();
 
-    for(model.video_streams) |*stream| {
-        if(stream.source_index == stream_handle) {
+    for (model.video_streams) |*stream| {
+        if (stream.source_index == stream_handle) {
             stream.pixels = pixels;
             assert(stream.provider_index == 0);
             assert(stream.dimensions.width == width);
@@ -570,6 +571,17 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
         else => unreachable,
     };
     stream_binding_buffer[stream_handle] = renderer.createStream(supported_image_format, stream_info.dimensions) catch unreachable;
+
+    //
+    // Draw this source to the canvas at 50% of it's size
+    //
+    const relative_extent = Extent2D(u16){
+        .x = 0,
+        .y = 0,
+        .width = @intCast(u16, @divExact(stream_info.dimensions.width, 2)),
+        .height = @intCast(u16, @divExact(stream_info.dimensions.height, 2)),
+    };
+    renderer.addVideoSource(stream_binding_buffer[stream_handle], relative_extent);
 
     std.log.info("Stream opened!", .{});
 

@@ -71,7 +71,7 @@ var stream_buffer: [max_stream_count]Stream = undefined;
 var cpu_memory_index: u32 = std.math.maxInt(u32);
 
 const DrawContext = struct {
-    relative_extent: Extent3D(u16),
+    relative_extent: Extent2D(u16),
     stream_index: u32,
 };
 
@@ -115,7 +115,7 @@ pub inline fn drawVideoFrame(extent: Extent3D(f32)) void {
     draw_quad_count += 1;
 }
 
-pub inline fn addVideoSource(stream: u32, relative_extent: Extent3D(u16)) void {
+pub inline fn addVideoSource(stream: u32, relative_extent: Extent2D(u16)) void {
     assert(stream_count > stream);
     assert(source_count < max_draw_count);
     draw_context_buffer[source_count] = .{
@@ -287,52 +287,72 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
     if (draw_quad_count == 0)
         return;
 
+    assert(source_count != 0);
     assert(draw_quad_count == 1);
 
-    const stream_ptr = &stream_buffer[0];
-
     const device_dispatch = vulkan_core.device_dispatch;
-    const subresource_layers = vk.ImageSubresourceLayers{
-        .aspect_mask = .{ .color_bit = true },
-        .layer_count = 1,
-        .mip_level = 0,
-        .base_array_layer = 0,
-    };
 
-    var src_region_offsets = [2]vk.Offset3D{
-        .{ .x = 0, .y = 0, .z = 0 },
-        .{
-            .x = @intCast(i32, stream_ptr.dimensions.width),
-            .y = @intCast(i32, stream_ptr.dimensions.height),
-            .z = 1,
-        },
-    };
-    const dst_region_offsets = [2]vk.Offset3D{
-        .{ .x = 0, .y = 0, .z = 0 },
-        .{
-            .x = @intCast(i32, canvas_dimensions.width),
-            .y = @intCast(i32, canvas_dimensions.height),
-            .z = 1,
-        },
-    };
+    for (0..source_count) |i| {
+        const draw_context_ptr: *const DrawContext = &draw_context_buffer[i];
+        const stream_ptr: *const Stream = &stream_buffer[draw_context_ptr.stream_index];
+        const relative_extent = draw_context_ptr.relative_extent;
 
-    const regions = [_]vk.ImageBlit{.{
-        .src_subresource = subresource_layers,
-        .src_offsets = src_region_offsets,
-        .dst_subresource = subresource_layers,
-        .dst_offsets = dst_region_offsets,
-    }};
+        const scale_factor = ScaleFactor2D(f32){
+            .horizontal = @intToFloat(f32, canvas_dimensions.width) / @intToFloat(f32, stream_ptr.dimensions.width),
+            .vertical = @intToFloat(f32, canvas_dimensions.height) / @intToFloat(f32, stream_ptr.dimensions.height),
+        };
+        //
+        // Assert we're not upscaling the image as that isn't supported currently
+        //
+        assert(scale_factor.horizontal <= 1.0);
+        assert(scale_factor.vertical <= 1.0);
 
-    device_dispatch.cmdBlitImage(
-        command_buffer,
-        stream_ptr.image,
-        .general,
-        canvas_image,
-        .general,
-        1,
-        &regions,
-        scale_method,
-    );
+        const subresource_layers = vk.ImageSubresourceLayers{
+            .aspect_mask = .{ .color_bit = true },
+            .layer_count = 1,
+            .mip_level = 0,
+            .base_array_layer = 0,
+        };
+
+        var src_region_offsets = [2]vk.Offset3D{
+            .{ .x = 0, .y = 0, .z = 0 },
+            .{
+                .x = @intCast(i32, stream_ptr.dimensions.width),
+                .y = @intCast(i32, stream_ptr.dimensions.height),
+                .z = 1,
+            },
+        };
+        const dst_region_offsets = [2]vk.Offset3D{
+            .{
+                .x = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.x) * scale_factor.horizontal)),
+                .y = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.y) * scale_factor.vertical)),
+                .z = 0,
+            },
+            .{
+                .x = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.width) * scale_factor.horizontal)),
+                .y = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.height) * scale_factor.vertical)),
+                .z = 1,
+            },
+        };
+
+        const regions = [_]vk.ImageBlit{.{
+            .src_subresource = subresource_layers,
+            .src_offsets = src_region_offsets,
+            .dst_subresource = subresource_layers,
+            .dst_offsets = dst_region_offsets,
+        }};
+
+        device_dispatch.cmdBlitImage(
+            command_buffer,
+            stream_ptr.image,
+            .general,
+            canvas_image,
+            .general,
+            1,
+            &regions,
+            scale_method,
+        );
+    }
 
     const image_barriers = [_]vk.ImageMemoryBarrier{
         .{
@@ -494,7 +514,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
             .memory_type_index = cpu_memory_index,
         }, null);
         canvas_mapped_memory = @ptrCast([*]RGBA(u8), (try device_dispatch.mapMemory(logical_device, canvas_memory, 0, image_size_bytes, .{})).?)[0..pixel_count];
-        @memset(canvas_mapped_memory, RGBA(u8).red);
+        @memset(canvas_mapped_memory, RGBA(u8).transparent);
     }
     try device_dispatch.bindImageMemory(logical_device, canvas_image, canvas_memory, 0);
 
