@@ -54,7 +54,7 @@ var indices_used: u16 = 0;
 pub const Vertex = extern struct {
     x: f32,
     y: f32,
-    z: f32 = 0.8,
+    z: f32 = geometry.ui_layer.middle,
     u: f32,
     v: f32,
     color: RGBA(u8),
