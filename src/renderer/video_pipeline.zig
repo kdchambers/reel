@@ -328,6 +328,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
     const device_dispatch = vulkan_core.device_dispatch;
 
+    @memset(canvas_mapped_memory, RGBA(u8).transparent);
+
     for (0..source_count) |i| {
         const draw_context_ptr: *const DrawContext = &draw_context_buffer[i];
         const stream_ptr: *const Stream = &stream_buffer[draw_context_ptr.stream_index];
