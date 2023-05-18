@@ -322,15 +322,27 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
                 .z = 1,
             },
         };
+
+        //
+        // Convert x,y from bottom_left to top_left and invert y axis
+        //
+        const top_left = Coordinates2D(f32){
+            .x = @intToFloat(f32, relative_extent.x),
+            .y = @intToFloat(f32, stream_ptr.dimensions.height - relative_extent.height),
+        };
+        const bottom_right = Coordinates2D(f32){
+            .x = @intToFloat(f32, relative_extent.width),
+            .y = @intToFloat(f32, stream_ptr.dimensions.height - relative_extent.y),
+        };
         const dst_region_offsets = [2]vk.Offset3D{
             .{
-                .x = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.x) * scale_factor.horizontal)),
-                .y = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.y) * scale_factor.vertical)),
+                .x = @floatToInt(i32, @floor(top_left.x * scale_factor.horizontal)),
+                .y = @floatToInt(i32, @floor(top_left.y * scale_factor.vertical)),
                 .z = 0,
             },
             .{
-                .x = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.width) * scale_factor.horizontal)),
-                .y = @floatToInt(i32, @floor(@intToFloat(f32, relative_extent.height) * scale_factor.vertical)),
+                .x = @floatToInt(i32, @floor(bottom_right.x * scale_factor.horizontal)),
+                .y = @floatToInt(i32, @floor(bottom_right.y * scale_factor.vertical)),
                 .z = 1,
             },
         };
