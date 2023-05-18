@@ -240,6 +240,15 @@ pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime opti
     return .{ .index = result_index, .count = @intCast(u16, slice.len) };
 }
 
+pub inline fn writeN(comptime Type: type, value: *const Type, count: u16) SliceIndex(Type) {
+    comptime assert(@alignOf(Type) <= heap_alignment);
+    const result_index = heap_index;
+    @memset(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..count], value.*);
+    heap_index += @sizeOf(Type) * count;
+    heap_index = roundUp(heap_index, heap_alignment);
+    return .{ .index = result_index, .count = @intCast(u16, count) };
+}
+
 fn ClusterBuffer(comptime Type: type, comptime buffer_count: usize, comptime buffer_capacity: usize) type {
     return struct {
         buffers: [buffer_count]Cluster(Type),

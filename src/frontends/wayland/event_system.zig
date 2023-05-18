@@ -81,7 +81,14 @@ var event_count: u16 = 0;
 
 pub fn init() !void {
     try mini_heap.init();
-    event_slot_buffer = mini_heap.reserve(MouseEventEntry, max_mouse_event_slot_count, .{});
+    const init_mouse_entry = MouseEventEntry {
+        .extent = .{ .x = -2.0, .y = -2.0, .width = 0.0, .height = 0.0 },
+        .z_layer = 255,
+        .draw_index = 0,
+        .state = .{},
+        .flags = .{},
+    };
+    event_slot_buffer = mini_heap.writeN(MouseEventEntry, &init_mouse_entry, max_mouse_event_slot_count);
 }
 
 pub const MouseEventOptions = packed struct(u32) {
