@@ -70,7 +70,7 @@ pub fn Extent3D(comptime BaseType: type) type {
     return extern struct {
         x: BaseType,
         y: BaseType,
-        z: BaseType = ui_layer.middle,
+        z: BaseType,
         height: BaseType,
         width: BaseType,
 
