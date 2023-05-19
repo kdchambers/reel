@@ -71,7 +71,7 @@ var stream_buffer: [max_stream_count]Stream = undefined;
 var cpu_memory_index: u32 = std.math.maxInt(u32);
 
 const DrawContext = struct {
-    relative_extent: Extent2D(u16),
+    relative_extent: Extent2D(f32),
     stream_index: u32,
 };
 
@@ -81,12 +81,12 @@ var canvas_memory: vk.DeviceMemory = undefined;
 var canvas_image: vk.Image = undefined;
 var canvas_image_view: vk.ImageView = undefined;
 var canvas_mapped_memory: []RGBA(u8) = undefined;
-var canvas_dimensions: Dimensions2D(u32) = .{ .width = 0, .height = 0 };
+var canvas_dimensions: Dimensions2D(f32) = .{ .width = 0, .height = 0 };
 
 var scale_method: vk.Filter = .nearest;
 
 const Stream = struct {
-    dimensions: Dimensions2D(u32),
+    dimensions: Dimensions2D(f32),
     mapped_memory: []u8,
     memory: vk.DeviceMemory,
     image: vk.Image,
@@ -115,9 +115,21 @@ pub inline fn drawVideoFrame(extent: Extent3D(f32)) void {
     draw_quad_count += 1;
 }
 
-pub inline fn addVideoSource(stream: u32, relative_extent: Extent2D(u16)) void {
+pub inline fn addVideoSource(stream: u32, relative_extent: Extent2D(f32)) void {
     assert(stream_count > stream);
     assert(source_count < max_draw_count);
+
+    assert(relative_extent.x >= 0.0);
+    assert(relative_extent.x <= 1.0);
+    assert(relative_extent.y >= 0.0);
+    assert(relative_extent.y <= 1.0);
+    assert(relative_extent.width >= 0.0);
+    assert(relative_extent.width <= 1.0);
+    assert(relative_extent.height >= 0.0);
+    assert(relative_extent.height <= 1.0);
+    assert(relative_extent.width + relative_extent.x <= 1.0);
+    assert(relative_extent.height + relative_extent.y <= 1.0);
+
     draw_context_buffer[source_count] = .{
         .relative_extent = relative_extent,
         .stream_index = stream,
@@ -132,17 +144,12 @@ pub fn videoSourceExtents(screen_scale: ScaleFactor2D(f32)) []Extent3D(f32) {
     const z_increment: f32 = 0.01;
     for (draw_context_buffer[0..source_count], 0..) |draw_context, i| {
         std.log.info("Source dimensions: {d} x {d}", .{ draw_context.relative_extent.width, draw_context.relative_extent.height });
-        const stream_index = draw_context.stream_index;
-        const scale_factor = ScaleFactor2D(f32){
-            .horizontal = @intToFloat(f32, canvas_dimensions.width) / @intToFloat(f32, stream_buffer[stream_index].dimensions.width),
-            .vertical = @intToFloat(f32, canvas_dimensions.height) / @intToFloat(f32, stream_buffer[stream_index].dimensions.height),
-        };
         source_extent_buffer[i] = .{
-            .x = @intToFloat(f32, draw_context.relative_extent.x) * screen_scale.horizontal,
-            .y = @intToFloat(f32, draw_context.relative_extent.y) * screen_scale.vertical,
+            .x = draw_context.relative_extent.x * canvas_dimensions.width * screen_scale.horizontal,
+            .y = draw_context.relative_extent.y * canvas_dimensions.height * screen_scale.vertical,
             .z = z_level,
-            .width = @intToFloat(f32, draw_context.relative_extent.width) * screen_scale.horizontal * scale_factor.horizontal,
-            .height = @intToFloat(f32, draw_context.relative_extent.height) * screen_scale.vertical * scale_factor.vertical,
+            .width = draw_context.relative_extent.width * canvas_dimensions.width * screen_scale.horizontal,
+            .height = draw_context.relative_extent.height * canvas_dimensions.height * screen_scale.vertical,
         };
         z_level += z_increment;
     }
@@ -151,14 +158,15 @@ pub fn videoSourceExtents(screen_scale: ScaleFactor2D(f32)) []Extent3D(f32) {
 
 pub fn sourceRelativePlacement(source_index: u16) Coordinates2D(u16) {
     return .{
-        .x = draw_context_buffer[source_index].relative_extent.x,
-        .y = draw_context_buffer[source_index].relative_extent.y,
+        .x = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
+        .y = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
     };
 }
 
 pub fn moveSource(source_index: u16, placement: Coordinates2D(u16)) void {
-    draw_context_buffer[source_index].relative_extent.x = placement.x;
-    draw_context_buffer[source_index].relative_extent.y = placement.y;
+    const relative_extent_ptr: *Extent2D(f32) = &draw_context_buffer[source_index].relative_extent;
+    relative_extent_ptr.x = @min(1.0, canvas_dimensions.width / @intToFloat(f32, placement.x));
+    relative_extent_ptr.x = @min(1.0, canvas_dimensions.height / @intToFloat(f32, placement.y));
 }
 
 pub fn createStream(
@@ -171,7 +179,10 @@ pub fn createStream(
     const stream_index: u32 = stream_count;
 
     const stream_ptr: *Stream = &stream_buffer[stream_index];
-    stream_ptr.dimensions = source_dimensions;
+    stream_ptr.dimensions = .{
+        .width = @intToFloat(f32, source_dimensions.width),
+        .height = @intToFloat(f32, source_dimensions.height),
+    };
 
     std.log.info("renderer: Adding stream #{d} with dimensions: {d} x {d}", .{
         stream_index,
@@ -335,9 +346,18 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         const stream_ptr: *const Stream = &stream_buffer[draw_context_ptr.stream_index];
         const relative_extent = draw_context_ptr.relative_extent;
 
+        assert(relative_extent.x >= 0.0);
+        assert(relative_extent.x <= 1.0);
+        assert(relative_extent.y >= 0.0);
+        assert(relative_extent.y <= 1.0);
+        assert(relative_extent.width >= 0.0);
+        assert(relative_extent.width <= 1.0);
+        assert(relative_extent.height >= 0.0);
+        assert(relative_extent.height <= 1.0);
+
         const scale_factor = ScaleFactor2D(f32){
-            .horizontal = @intToFloat(f32, canvas_dimensions.width) / @intToFloat(f32, stream_ptr.dimensions.width),
-            .vertical = @intToFloat(f32, canvas_dimensions.height) / @intToFloat(f32, stream_ptr.dimensions.height),
+            .horizontal = canvas_dimensions.width / stream_ptr.dimensions.width,
+            .vertical = canvas_dimensions.height / stream_ptr.dimensions.height,
         };
         //
         // Assert we're not upscaling the image as that isn't supported currently
@@ -355,33 +375,35 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         var src_region_offsets = [2]vk.Offset3D{
             .{ .x = 0, .y = 0, .z = 0 },
             .{
-                .x = @intCast(i32, stream_ptr.dimensions.width),
-                .y = @intCast(i32, stream_ptr.dimensions.height),
+                .x = @floatToInt(i32, stream_ptr.dimensions.width),
+                .y = @floatToInt(i32, stream_ptr.dimensions.height),
                 .z = 1,
             },
         };
 
-        //
-        // Convert x,y from bottom_left to top_left and invert y axis
-        //
-        const top_right = Coordinates2D(f32){
-            .x = @intToFloat(f32, relative_extent.x),
-            .y = @intToFloat(f32, stream_ptr.dimensions.height - relative_extent.height - relative_extent.y),
+        const top_left = Coordinates2D(f32){
+            .x = canvas_dimensions.width * relative_extent.x,
+            .y = canvas_dimensions.height * (1.0 - relative_extent.height - relative_extent.y),
         };
-        const bottom_left = Coordinates2D(f32){
-            .x = @intToFloat(f32, relative_extent.width + relative_extent.x),
-            .y = @intToFloat(f32, stream_ptr.dimensions.height - relative_extent.y),
+        const bottom_right = Coordinates2D(f32){
+            .x = canvas_dimensions.width * (relative_extent.x + relative_extent.width),
+            .y = canvas_dimensions.height * (1.0 - relative_extent.y),
         };
+
+        assert(top_left.x <= canvas_dimensions.width);
+        assert(bottom_right.x <= canvas_dimensions.width);
+        assert(top_left.y <= canvas_dimensions.height);
+        assert(bottom_right.y <= canvas_dimensions.height);
 
         const dst_region_offsets = [2]vk.Offset3D{
             .{
-                .x = @floatToInt(i32, @floor(top_right.x * scale_factor.horizontal)),
-                .y = @floatToInt(i32, @floor(top_right.y * scale_factor.vertical)),
+                .x = @floatToInt(i32, @floor(top_left.x)),
+                .y = @floatToInt(i32, @floor(top_left.y)),
                 .z = 0,
             },
             .{
-                .x = @floatToInt(i32, @floor(bottom_left.x * scale_factor.horizontal)),
-                .y = @floatToInt(i32, @floor(bottom_left.y * scale_factor.vertical)),
+                .x = @floatToInt(i32, @floor(bottom_right.x)),
+                .y = @floatToInt(i32, @floor(bottom_right.y)),
                 .z = 1,
             },
         };
@@ -512,16 +534,18 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
     assert(dimensions.width > 0);
     assert(dimensions.height > 0);
 
-    if (dimensions.width == canvas_dimensions.width and dimensions.height == canvas_dimensions.height)
+    if (dimensions.width == @floatToInt(u32, canvas_dimensions.width))
+        return;
+    if (dimensions.height == @floatToInt(u32, canvas_dimensions.height))
         return;
 
     const pixel_count = dimensions.width * dimensions.height;
     var create_image_view: bool = true;
     var reallocate_memory: bool = true;
 
-    if (canvas_dimensions.width != 0) {
+    if (dimensions.width != 0) {
         create_image_view = false;
-        const current_pixel_count: usize = canvas_dimensions.width * canvas_dimensions.height;
+        const current_pixel_count = @floatToInt(usize, canvas_dimensions.width) * @floatToInt(usize, canvas_dimensions.height);
         device_dispatch.destroyImageView(logical_device, canvas_image_view, null);
         device_dispatch.destroyImage(logical_device, canvas_image, null);
         if (current_pixel_count < pixel_count) {
@@ -533,7 +557,13 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
             reallocate_memory = false;
         }
     }
-    canvas_dimensions = dimensions;
+    canvas_dimensions = .{
+        .width = @intToFloat(f32, dimensions.width),
+        .height = @intToFloat(f32, dimensions.height),
+    };
+
+    assert(@floatToInt(u32, canvas_dimensions.width) == dimensions.width);
+    assert(@floatToInt(u32, canvas_dimensions.height) == dimensions.height);
 
     const bytes_per_pixel = 4;
     const image_size_bytes: usize = pixel_count * bytes_per_pixel;
