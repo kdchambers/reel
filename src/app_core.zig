@@ -575,11 +575,11 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     //
     // Draw this source to the canvas at 50% of it's size
     //
-    const relative_extent = Extent2D(u16){
-        .x = 0,
-        .y = 0,
-        .width = @intCast(u16, @divExact(stream_info.dimensions.width, 2)),
-        .height = @intCast(u16, @divExact(stream_info.dimensions.height, 2)),
+    const relative_extent = Extent2D(f32){
+        .x = 0.0,
+        .y = 0.0,
+        .width = 0.5,
+        .height = 0.5,
     };
     renderer.addVideoSource(stream_binding_buffer[stream_handle], relative_extent);
 

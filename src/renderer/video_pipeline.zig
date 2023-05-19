@@ -165,8 +165,20 @@ pub fn sourceRelativePlacement(source_index: u16) Coordinates2D(u16) {
 
 pub fn moveSource(source_index: u16, placement: Coordinates2D(u16)) void {
     const relative_extent_ptr: *Extent2D(f32) = &draw_context_buffer[source_index].relative_extent;
-    relative_extent_ptr.x = @min(1.0, canvas_dimensions.width / @intToFloat(f32, placement.x));
-    relative_extent_ptr.x = @min(1.0, canvas_dimensions.height / @intToFloat(f32, placement.y));
+    const max_x: f32 = 1.0 - relative_extent_ptr.width;
+    const max_y: f32 = 1.0 - relative_extent_ptr.height;
+    relative_extent_ptr.x = @max(0.0, @min(max_x, @intToFloat(f32, placement.x) / canvas_dimensions.width));
+    relative_extent_ptr.y = @max(0.0, @min(max_y, @intToFloat(f32, placement.y) / canvas_dimensions.height));
+    assert(relative_extent_ptr.x >= 0.0);
+    assert(relative_extent_ptr.x <= 1.0);
+    assert(relative_extent_ptr.y >= 0.0);
+    assert(relative_extent_ptr.y <= 1.0);
+    assert(relative_extent_ptr.width >= 0.0);
+    assert(relative_extent_ptr.width <= 1.0);
+    assert(relative_extent_ptr.height >= 0.0);
+    assert(relative_extent_ptr.height <= 1.0);
+    assert(relative_extent_ptr.x + relative_extent_ptr.width <= 1.0);
+    assert(relative_extent_ptr.y + relative_extent_ptr.height <= 1.0);
 }
 
 pub fn createStream(
@@ -354,6 +366,9 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         assert(relative_extent.width <= 1.0);
         assert(relative_extent.height >= 0.0);
         assert(relative_extent.height <= 1.0);
+
+        assert(relative_extent.x + relative_extent.width <= 1.0);
+        assert(relative_extent.y + relative_extent.height <= 1.0);
 
         const scale_factor = ScaleFactor2D(f32){
             .horizontal = canvas_dimensions.width / stream_ptr.dimensions.width,

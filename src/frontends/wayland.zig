@@ -44,7 +44,11 @@ const Coordinates2D = geometry.Coordinates2D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 const ui_layer = geometry.ui_layer;
 
+const mini_heap = @import("wayland/mini_heap.zig");
+
 const event_system = @import("wayland/event_system.zig");
+const MouseEventEntry = event_system.MouseEventEntry;
+
 const audio = @import("../audio_source.zig");
 
 const graphics = @import("../graphics.zig");
@@ -74,6 +78,7 @@ var cached_webcam_enabled: bool = false;
 const StreamDragContext = struct {
     start_coordinates: Coordinates2D(u16),
     start_mouse_coordinates: Coordinates2D(u16),
+    mouse_event_slot_index: mini_heap.Index(MouseEventEntry),
     source_index: u16,
 };
 var stream_drag_context: ?StreamDragContext = null;
@@ -322,6 +327,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                     .x = @floatToInt(u16, @floor(mouse_coordinates.x)),
                     .y = @floatToInt(u16, @floor(mouse_coordinates.y)),
                 },
+                .mouse_event_slot_index = slot,
                 .source_index = @intCast(u16, i),
             };
         }
@@ -720,6 +726,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
         .leave => |leave| {
             _ = leave;
             is_mouse_in_screen = false;
+            stream_drag_context = null;
         },
         .motion => |motion| {
             if (!is_mouse_in_screen)
@@ -736,12 +743,9 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                     .x = @floatToInt(i32, motion_mouse_x) - @intCast(i32, drag.start_mouse_coordinates.x),
                     .y = @intCast(i32, drag.start_mouse_coordinates.y) - @floatToInt(i32, motion_mouse_y),
                 };
-
-                std.log.info("Delta: {d} x {d}", .{mouse_delta.x, mouse_delta.y });
-
                 const new_placement = Coordinates2D(u16){
-                    .x = @intCast(u16, drag.start_coordinates.x + mouse_delta.x),
-                    .y = @intCast(u16, drag.start_coordinates.y + mouse_delta.y),
+                    .x = @intCast(u16, @max(0, drag.start_coordinates.x + mouse_delta.x)),
+                    .y = @intCast(u16, @max(0, drag.start_coordinates.y + mouse_delta.y)),
                 };
                 renderer.moveSource(drag.source_index, new_placement);
                 is_record_requested = true;
@@ -776,8 +780,18 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
 
             button_state = button.state;
 
-            if(mouse_button == .left and button_state == .released)
-                stream_drag_context = null;
+            if (mouse_button == .left and button_state == .released) {
+                if (stream_drag_context) |drag| {
+                    const mouse_delta = Coordinates2D(i32){
+                        .x = @floatToInt(i32, mouse_coordinates.x) - @intCast(i32, drag.start_mouse_coordinates.x),
+                        .y = @intCast(i32, drag.start_mouse_coordinates.y) - @floatToInt(i32, mouse_coordinates.y),
+                    };
+                    const extent_ptr: *Extent2D(f32) = &drag.mouse_event_slot_index.getPtr().extent;
+                    extent_ptr.x += @intToFloat(f32, mouse_delta.x) * screen_scale.horizontal;
+                    extent_ptr.y += -@intToFloat(f32, mouse_delta.y) * screen_scale.vertical;
+                    stream_drag_context = null;
+                }
+            }
 
             std.log.info("Button mouse coordinates: {d}, {d}", .{
                 mouse_coordinates.x,
