@@ -74,9 +74,9 @@ pub fn draw(
         }
     }
 
+    var right_sidebar_region: Region = .{};
     switch (ui_state.sidebar_state) {
         .open => {
-            var right_sidebar_region: Region = .{};
             right_sidebar_region.anchor.right = window.right;
             right_sidebar_region.anchor.top = window.top;
             right_sidebar_region.z = ui_layer.middle_lower;
@@ -195,6 +195,13 @@ pub fn draw(
         },
     }
 
+    var activity_region: Region = .{};
+    activity_region.anchor.left = icon_bar_region.right();
+    activity_region.anchor.bottom = window.bottom;
+    activity_region.anchor.right = window.right;
+    activity_region.height = 300.0 * screen_scale.vertical;
+    _ = renderer.drawQuad(activity_region.toExtent(), RGBA.fromInt(50, 100, 24, 255), .bottom_left);
+
     var preview_region: Region = .{};
     {
         const frame_dimensions: geometry.Dimensions2D(u32) = blk: {
@@ -211,14 +218,23 @@ pub fn draw(
         const margin_pixels: f32 = 10.0;
         const margin_horizontal: f32 = margin_pixels * screen_scale.horizontal;
 
-        const margin_top: f32 = 10.0 * screen_scale.vertical;
+        const margin_top: f32 = 50.0 * screen_scale.vertical;
         const margin_bottom: f32 = 10.0 * screen_scale.vertical;
         const margin_vertical: f32 = margin_top + margin_bottom;
 
         const left_side = icon_bar_region.right();
 
-        const horizontal_space = @fabs(left_side - window.right) - (margin_horizontal * 2.0);
-        const vertical_space = @fabs(window.bottom - window.top) - margin_vertical;
+        const right_anchor: f32 = if (ui_state.sidebar_state == .open and ui_root.screen_dimensions.width >= 1400)
+            right_sidebar_region.left()
+        else
+            window.right;
+
+        const horizontal_space = @fabs(left_side - right_anchor) - (margin_horizontal * 2.0);
+
+        const top_anchor: f32 = window.top + margin_top;
+        const bottom_anchor: f32 = activity_region.top();
+
+        const vertical_space = @fabs(bottom_anchor - top_anchor) - margin_vertical;
 
         const dimensions = geometry.Dimensions2D(f32){
             .width = dimensions_pixels.width * screen_scale.horizontal,
@@ -237,18 +253,19 @@ pub fn draw(
 
         const scale = @min(scale_horizontal, scale_vertical);
 
-        preview_region.anchor.right = window.right;
-        preview_region.anchor.top = if (ui_state.sidebar_state == .closed) window.top + (40.0 * screen_scale.vertical) else window.top;
+        preview_region.anchor.left = icon_bar_region.right();
+        preview_region.anchor.top = top_anchor;
         preview_region.height = dimensions.height * scale;
         preview_region.width = dimensions.width * scale;
 
-        preview_region.margin.right = margin_horizontal;
-        preview_region.margin.top = margin_top;
+        const horizontal_space_remaining: f32 = horizontal_space - preview_region.width.?;
+
+        preview_region.margin.left = @max(margin_horizontal, horizontal_space_remaining / 2.0);
 
         var preview_extent = preview_region.toExtent();
         preview_region.z = ui_layer.low_lower;
 
-        preview_region.anchor.right.? += 2 * screen_scale.horizontal;
+        preview_region.anchor.left.? -= 2 * screen_scale.horizontal;
         preview_region.anchor.top.? -= 2 * screen_scale.vertical;
 
         preview_region.width.? += 4 * screen_scale.horizontal;
@@ -275,7 +292,7 @@ pub fn draw(
             for (video_source_extents, 0..) |source_extent, i| {
                 const absolute_extent = Extent3D(f32){
                     .x = source_extent.x + preview_extent.x,
-                    .y = source_extent.y + preview_extent.y,
+                    .y = preview_extent.y - source_extent.y,
                     .z = source_extent.z + ui_layer.low_lower,
                     .width = source_extent.width,
                     .height = source_extent.height,

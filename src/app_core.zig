@@ -578,8 +578,8 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     const relative_extent = Extent2D(f32){
         .x = 0.0,
         .y = 0.0,
-        .width = 0.5,
-        .height = 0.5,
+        .width = 1.0,
+        .height = 1.0,
     };
     renderer.addVideoSource(stream_binding_buffer[stream_handle], relative_extent);
 
