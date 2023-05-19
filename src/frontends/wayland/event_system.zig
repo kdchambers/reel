@@ -81,7 +81,7 @@ var event_count: u16 = 0;
 
 pub fn init() !void {
     try mini_heap.init();
-    const init_mouse_entry = MouseEventEntry {
+    const init_mouse_entry = MouseEventEntry{
         .extent = .{ .x = -2.0, .y = -2.0, .width = 0.0, .height = 0.0 },
         .z_layer = 255,
         .draw_index = 0,
@@ -134,18 +134,15 @@ pub fn reserveMouseEventSlots(count: u16) SliceIndex(MouseEventEntry) {
     return event_slot_buffer.makeSlice(current_index, count);
 }
 
-var current_draw_index: u8 = 0;
+var current_draw_index: u8 = 1;
 
 pub inline fn invalidateEvents() void {
-    current_draw_index += 1;
     if (current_draw_index == 254) {
-        // TODO: Implement
-        assert(false);
         current_draw_index = 1;
-        //
-        //  Set draw_index of all entries to 0
-        //
-    }
+        for (event_slot_buffer.get()[0..event_count]) |*entry| {
+            entry.draw_index = 0;
+        }
+    } else current_draw_index += 1;
 }
 
 pub fn writeMouseEventSlot(
