@@ -83,6 +83,17 @@ const StreamDragContext = struct {
 };
 var stream_drag_context: ?StreamDragContext = null;
 
+const SourceResizeContext = struct {
+    edge: UIState.Edge,
+    //
+    // Relative value in pixels from the start edge
+    //
+    start_value: f32,
+    source_index: u16,
+    start_mouse_value: f32,
+};
+var source_resize_drag_context: ?SourceResizeContext = null;
+
 const CursorState = enum {
     normal,
     pointer,
@@ -258,6 +269,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.select_source_provider_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
     ui_state.select_source_provider_popup.addLabel("wlroots");
 
+    ui_state.video_source_mouse_edge_buffer[0].allocate();
+    ui_state.video_source_mouse_edge_buffer[1].allocate();
+
     ui_state.select_video_source_popup = widgets.ListSelectPopup.allocate();
     ui_state.select_video_source_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_video_source_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
@@ -422,6 +436,53 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 is_draw_required = true;
             }
         },
+    }
+
+    {
+        for (ui_state.video_source_mouse_edge_buffer[0..ui_state.video_source_mouse_event_count], 0..) |edges, i| {
+            if (edges.edgeClicked()) |edge| {
+                const relative_extent = renderer.sourceRelativeExtent(@intCast(u16, i));
+                switch (edge) {
+                    .left => {
+                        std.log.info("Left edge of source {d} clicked", .{i});
+                        source_resize_drag_context = .{
+                            .edge = .left,
+                            .start_value = @intToFloat(f32, relative_extent.x),
+                            .start_mouse_value = @floatCast(f32, mouse_coordinates.x),
+                            .source_index = @intCast(u16, i),
+                        };
+                    },
+                    .right => {
+                        std.log.info("Right edge of source {d} clicked", .{i});
+                        source_resize_drag_context = .{
+                            .edge = .right,
+                            .start_value = @intToFloat(f32, relative_extent.x + relative_extent.width),
+                            .start_mouse_value = @floatCast(f32, mouse_coordinates.x),
+                            .source_index = @intCast(u16, i),
+                        };
+                    },
+                    .top => {
+                        std.log.info("Top edge of source {d} clicked", .{i});
+                        source_resize_drag_context = .{
+                            .edge = .top,
+                            .start_value = @intToFloat(f32, relative_extent.y - relative_extent.height),
+                            .start_mouse_value = @floatCast(f32, mouse_coordinates.y),
+                            .source_index = @intCast(u16, i),
+                        };
+                    },
+                    .bottom => {
+                        std.log.info("Bottom edge of source {d} clicked", .{i});
+                        source_resize_drag_context = .{
+                            .edge = .bottom,
+                            .start_value = @intToFloat(f32, relative_extent.y),
+                            .start_mouse_value = @floatCast(f32, mouse_coordinates.y),
+                            .source_index = @intCast(u16, i),
+                        };
+                    },
+                    else => unreachable,
+                }
+            }
+        }
     }
 
     {
@@ -751,6 +812,30 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 is_record_requested = true;
             }
 
+            if (source_resize_drag_context) |resize_edge| {
+                switch (resize_edge.edge) {
+                    .left => {
+                        // Needs to be a normalized value
+                        const mouse_delta_x = @floatCast(f32, motion_mouse_x - resize_edge.start_mouse_value);
+                        renderer.moveEdgeLeft(resize_edge.source_index, resize_edge.start_value + mouse_delta_x);
+                    },
+                    .right => {
+                        const mouse_delta_x = @floatCast(f32, motion_mouse_x - resize_edge.start_mouse_value);
+                        renderer.moveEdgeRight(resize_edge.source_index, resize_edge.start_value + mouse_delta_x);
+                    },
+                    .bottom => {
+                        const mouse_delta_y = @floatCast(f32, resize_edge.start_mouse_value - motion_mouse_y);
+                        renderer.moveEdgeBottom(resize_edge.source_index, resize_edge.start_value + mouse_delta_y);
+                    },
+                    .top => {
+                        const mouse_delta_y = @floatCast(f32, resize_edge.start_mouse_value - motion_mouse_y);
+                        renderer.moveEdgeTop(resize_edge.source_index, resize_edge.start_value + mouse_delta_y);
+                    },
+                    else => unreachable,
+                }
+                is_record_requested = true;
+            }
+
             is_mouse_moved = true;
         },
         .button => |button| {
@@ -790,6 +875,13 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                     extent_ptr.x += @intToFloat(f32, mouse_delta.x) * screen_scale.horizontal;
                     extent_ptr.y += -@intToFloat(f32, mouse_delta.y) * screen_scale.vertical;
                     stream_drag_context = null;
+                }
+
+                if (source_resize_drag_context) |_| {
+                    //
+                    // TODO: Implement
+                    //
+                    source_resize_drag_context = null;
                 }
             }
 
