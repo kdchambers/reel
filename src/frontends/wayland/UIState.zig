@@ -2,13 +2,18 @@
 // Copyright (c) 2023 Keith Chambers
 
 const geometry = @import("../../geometry.zig");
+const Extent3D = geometry.Extent3D;
+
 const widgets = @import("widgets.zig");
 const Model = @import("../../Model.zig");
 const VideoFormat = Model.VideoFormat;
 const ImageFormat = Model.ImageFormat;
 
 const mini_heap = @import("mini_heap.zig");
+const Index = mini_heap.Index;
+
 const event_system = @import("event_system.zig");
+const MouseEventEntry = event_system.MouseEventEntry;
 
 //
 // TODO: Use a comptime function to generate format_labels & image_format_labels
@@ -57,6 +62,113 @@ pub const RegionAnchors = struct {
     }
 };
 
+pub const Edge = enum {
+    top_right,
+    top_left,
+    bottom_right,
+    bottom_left,
+    left,
+    right,
+    top,
+    bottom,
+};
+
+pub const EdgeRegions = struct {
+    // top_right: Index(MouseEventEntry),
+    // top_left: Index(MouseEventEntry),
+    // bottom_right: Index(MouseEventEntry),
+    // bottom_left: Index(MouseEventEntry),
+    left: Index(MouseEventEntry),
+    right: Index(MouseEventEntry),
+    top: Index(MouseEventEntry),
+    bottom: Index(MouseEventEntry),
+
+    pub fn allocate(self: *@This()) void {
+        // self.top_right = event_system.reserveMouseEventSlot();
+        // self.top_left = event_system.reserveMouseEventSlot();
+        // self.bottom_right = event_system.reserveMouseEventSlot();
+        // self.bottom_left = event_system.reserveMouseEventSlot();
+        self.left = event_system.reserveMouseEventSlot();
+        self.right = event_system.reserveMouseEventSlot();
+        self.top = event_system.reserveMouseEventSlot();
+        self.bottom = event_system.reserveMouseEventSlot();
+    }
+
+    pub fn fromExtent(self: @This(), extent: Extent3D(f32), border_h: f32, border_v: f32) void {
+        const left_extent = Extent3D(f32){
+            .x = extent.x,
+            .y = extent.y,
+            .z = extent.z,
+            .width = border_h,
+            .height = extent.height,
+        };
+        const right_extent = Extent3D(f32){
+            .x = extent.x + extent.width - border_h,
+            .y = extent.y,
+            .z = extent.z,
+            .width = border_h,
+            .height = extent.height,
+        };
+        const top_extent = Extent3D(f32){
+            .x = extent.x + border_h,
+            .y = extent.y - (extent.height - border_v),
+            .z = extent.z,
+            .width = extent.width - (border_h * 2.0),
+            .height = border_v,
+        };
+        const bottom_extent = Extent3D(f32){
+            .x = extent.x + border_h,
+            .y = extent.y,
+            .z = extent.z,
+            .width = extent.width - (border_h * 2.0),
+            .height = border_v,
+        };
+
+        event_system.writeMouseEventSlot(self.left, left_extent, .{});
+        event_system.writeMouseEventSlot(self.right, right_extent, .{});
+        event_system.writeMouseEventSlot(self.top, top_extent, .{});
+        event_system.writeMouseEventSlot(self.bottom, bottom_extent, .{});
+    }
+
+    pub fn edgeClicked(self: @This()) ?Edge {
+        // const top_right_state = self.top_right.getPtr().state;
+        // const top_left_state = self.top_left.getPtr().state;
+        // const bottom_right_state = self.bottom_right.getPtr().state;
+        // const bottom_left_state = self.bottom_left.getPtr().state;
+        const left_state = self.left.getPtr().state;
+        const right_state = self.right.getPtr().state;
+        const top_state = self.top.getPtr().state;
+        const bottom_state = self.bottom.getPtr().state;
+
+        // self.top_right.getPtr().state.clear();
+        // self.top_left.getPtr().state.clear();
+        // self.bottom_right.getPtr().state.clear();
+        // self.bottom_left.getPtr().state.clear();
+        self.left.getPtr().state.clear();
+        self.right.getPtr().state.clear();
+        self.top.getPtr().state.clear();
+        self.bottom.getPtr().state.clear();
+
+        // if (top_right_state.left_click_press)
+        //     return .top_right;
+        // if (top_left_state.left_click_press)
+        //     return .top_left;
+        // if (bottom_right_state.left_click_press)
+        //     return .bottom_right;
+        // if (bottom_left_state.left_click_press)
+        //     return .bottom_left;
+        if (left_state.left_click_press)
+            return .left;
+        if (right_state.left_click_press)
+            return .right;
+        if (top_state.left_click_press)
+            return .top;
+        if (bottom_state.left_click_press)
+            return .bottom;
+        return null;
+    }
+};
+
 pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
 
 window_decoration_requested: bool,
@@ -69,7 +181,8 @@ add_source_button: widgets.IconButton,
 select_source_provider_popup: widgets.ListSelectPopup,
 select_video_source_popup: widgets.ListSelectPopup,
 
-video_source_mouse_event_buffer: [8]mini_heap.Index(event_system.MouseEventEntry),
+video_source_mouse_edge_buffer: [2]EdgeRegions,
+video_source_mouse_event_buffer: [2]Index(MouseEventEntry),
 video_source_mouse_event_count: u32,
 
 add_source_state: enum {
