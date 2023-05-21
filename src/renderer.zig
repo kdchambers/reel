@@ -78,6 +78,12 @@ pub const resizeCanvas = video_pipeline.resizeCanvas;
 pub const videoSourceExtents = video_pipeline.videoSourceExtents;
 pub const moveSource = video_pipeline.moveSource;
 pub const sourceRelativePlacement = video_pipeline.sourceRelativePlacement;
+pub const sourceRelativeExtent = video_pipeline.sourceRelativeExtent;
+
+pub const moveEdgeLeft = video_pipeline.moveEdgeLeft;
+pub const moveEdgeRight = video_pipeline.moveEdgeRight;
+pub const moveEdgeTop = video_pipeline.moveEdgeTop;
+pub const moveEdgeBottom = video_pipeline.moveEdgeBottom;
 
 const max_frames_in_flight = 2;
 

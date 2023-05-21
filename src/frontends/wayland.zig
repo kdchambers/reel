@@ -465,7 +465,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                         std.log.info("Top edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .top,
-                            .start_value = @intToFloat(f32, relative_extent.y - relative_extent.height),
+                            .start_value = @fabs(@intToFloat(f32, relative_extent.y) - @intToFloat(f32, relative_extent.height)),
                             .start_mouse_value = @floatCast(f32, mouse_coordinates.y),
                             .source_index = @intCast(u16, i),
                         };

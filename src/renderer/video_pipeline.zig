@@ -163,6 +163,15 @@ pub fn sourceRelativePlacement(source_index: u16) Coordinates2D(u16) {
     };
 }
 
+pub fn sourceRelativeExtent(source_index: u16) Extent2D(u16) {
+    return .{
+        .x = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
+        .y = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
+        .width = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.width * canvas_dimensions.width),
+        .height = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.height * canvas_dimensions.height),
+    };
+}
+
 pub fn moveSource(source_index: u16, placement: Coordinates2D(u16)) void {
     const relative_extent_ptr: *Extent2D(f32) = &draw_context_buffer[source_index].relative_extent;
     const max_x: f32 = 1.0 - relative_extent_ptr.width;
@@ -179,6 +188,62 @@ pub fn moveSource(source_index: u16, placement: Coordinates2D(u16)) void {
     assert(relative_extent_ptr.height <= 1.0);
     assert(relative_extent_ptr.x + relative_extent_ptr.width <= 1.0);
     assert(relative_extent_ptr.y + relative_extent_ptr.height <= 1.0);
+}
+
+pub inline fn moveEdgeLeft(source_index: u16, value: f32) void {
+    if (value < 0.0)
+        return;
+    if (value > canvas_dimensions.width)
+        return;
+    const new_x: f32 = value / canvas_dimensions.width;
+    const old_x: f32 = draw_context_buffer[source_index].relative_extent.x;
+    const end_x: f32 = old_x + draw_context_buffer[source_index].relative_extent.width;
+    draw_context_buffer[source_index].relative_extent.width = end_x - new_x;
+    draw_context_buffer[source_index].relative_extent.x = new_x;
+    assert(new_x >= 0.0);
+    assert(new_x <= 1.0);
+}
+
+pub inline fn moveEdgeRight(source_index: u16, value: f32) void {
+    if (value < 0)
+        return;
+    if (value > canvas_dimensions.width)
+        return;
+    const new_end_x: f32 = value / canvas_dimensions.width;
+    const new_width: f32 = new_end_x - draw_context_buffer[source_index].relative_extent.x;
+    draw_context_buffer[source_index].relative_extent.width = new_width;
+    assert(new_width >= 0.0);
+    assert(new_width <= 1.0);
+}
+
+pub inline fn moveEdgeTop(source_index: u16, value: f32) void {
+    if (value < 0)
+        return;
+    if (value > canvas_dimensions.height)
+        return;
+    const new_height: f32 = value / canvas_dimensions.height;
+    draw_context_buffer[source_index].relative_extent.height = new_height;
+    assert(new_height >= 0.0);
+    assert(new_height <= 1.0);
+}
+
+pub inline fn moveEdgeBottom(source_index: u16, value: f32) void {
+    if (value < 0.0)
+        return;
+    if(value > canvas_dimensions.height)
+        return;
+    const new_y: f32 = value / canvas_dimensions.height;
+    const old_y: f32 = draw_context_buffer[source_index].relative_extent.y;
+    const end_y: f32 = old_y + draw_context_buffer[source_index].relative_extent.height;
+    const new_height: f32 = end_y - new_y;
+    draw_context_buffer[source_index].relative_extent.height = new_height;
+    draw_context_buffer[source_index].relative_extent.y = new_y;
+    assert(new_y >= 0.0);
+    assert(new_y <= 1.0);
+    assert(new_height >= 0.0);
+    assert(new_height <= 1.0);
+    assert(new_y + new_height >= 0.0);
+    assert(new_y + new_height <= 1.0);
 }
 
 pub fn createStream(
@@ -398,7 +463,7 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
         const top_left = Coordinates2D(f32){
             .x = canvas_dimensions.width * relative_extent.x,
-            .y = canvas_dimensions.height * (1.0 - relative_extent.height - relative_extent.y),
+            .y = canvas_dimensions.height * (1.0 - (relative_extent.height + relative_extent.y)),
         };
         const bottom_right = Coordinates2D(f32){
             .x = canvas_dimensions.width * (relative_extent.x + relative_extent.width),
@@ -422,6 +487,11 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
                 .z = 1,
             },
         };
+
+        assert(dst_region_offsets[0].x >= 0);
+        assert(dst_region_offsets[0].y >= 0);
+        assert(dst_region_offsets[1].x >= 0);
+        assert(dst_region_offsets[1].y >= 0);
 
         const regions = [_]vk.ImageBlit{.{
             .src_subresource = subresource_layers,
@@ -560,6 +630,14 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
 
     if (dimensions.width != 0) {
         create_image_view = false;
+
+        //
+        // TODO: This is a hack, we need to wait until images aren't in use before
+        //       we destroy them. We could wait until all command buffers finish but
+        //       a better solution would be to defer deletion until a later frame
+        //
+        std.time.sleep(std.time.ns_per_ms * 1);
+
         const current_pixel_count = @floatToInt(usize, canvas_dimensions.width) * @floatToInt(usize, canvas_dimensions.height);
         device_dispatch.destroyImageView(logical_device, canvas_image_view, null);
         device_dispatch.destroyImage(logical_device, canvas_image, null);
