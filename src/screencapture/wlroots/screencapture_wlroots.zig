@@ -92,6 +92,8 @@ pub fn createInterface() screencapture.Interface {
     };
 }
 
+var frame_index: u32 = 0;
+
 pub fn init(
     on_success_cb: *const screencapture.InitOnSuccessFn,
     on_error_cb: *const screencapture.InitOnErrorFn,
@@ -197,11 +199,6 @@ pub fn openStream(
 ) void {
     _ = on_error_cb;
 
-    if (!frame_callback_registered) {
-        frame_callback_registered = true;
-        wayland_client.addOnFrameCallback(&onFrameTick);
-    }
-
     //
     // Check the stream state, if it's been initialized then we don't need to
     // do anything, just return
@@ -216,13 +213,20 @@ pub fn openStream(
     stream_buffer[stream_index].frameReadyCallback = onFrameReadyCallback;
 
     on_success_cb(stream_index, user_data);
+
+    captureNextFrame();
 }
 
 pub fn state() screencapture.State {
     return backend_state;
 }
 
-fn onFrameTick(frame_index: u32) void {
+pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn) void {
+    screenshot_callback = callback;
+    screenshot_requested = true;
+}
+
+fn captureNextFrame() void {
     const screencopy_manager = wayland_core.screencopy_manager_opt orelse unreachable;
     assert(initialized_stream_count == 2);
     stream_loop: for (0..initialized_stream_count) |i| {
@@ -254,11 +258,7 @@ fn onFrameTick(frame_index: u32) void {
         }
         std.log.warn("wlroots screencapture: No free buffers to capture frame for stream #{d}", .{i});
     }
-}
-
-pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn) void {
-    screenshot_callback = callback;
-    screenshot_requested = true;
+    frame_index += 1;
 }
 
 fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.ScreencopyFrameV1.Event, frame_reference: *const StreamFrameReference) void {
@@ -275,6 +275,9 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
                 .xbgr8888 => {},
                 else => unreachable,
             }
+
+            captureNextFrame();
+
             stream_ptr.*.frame_index_buffer[frame_reference.frame_index] = invalid_frame;
             const stream_handle: u16 = frame_reference.stream_index;
             stream_ptr.frameReadyCallback(stream_handle, stream_ptr.width, stream_ptr.height, unconverted_pixels);
