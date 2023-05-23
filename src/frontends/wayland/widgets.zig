@@ -8,6 +8,7 @@ pub const init = base.init;
 pub const ImageButton = base.ImageButton;
 pub const IconButton = base.IconButton;
 pub const ListSelectPopup = base.ListSelectPopup;
+pub const TabbedSection = base.TabbedSection;
 
 pub const AudioSpectogram = @import("widgets/AudioSpectrogram.zig");
 pub const AudioVolumeLevelHorizontal = @import("widgets/AudioDbLevelHorizontal.zig");
