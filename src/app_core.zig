@@ -38,9 +38,12 @@ pub const Request = enum(u8) {
 
     record_start,
     record_pause,
+    record_resume,
     record_stop,
     record_quality_set,
     record_format_set,
+
+    stream_start,
 
     screencapture_add_source,
     screencapture_request_source,
@@ -117,6 +120,7 @@ var model: Model = .{
         .last_frame = undefined,
         .last_frame_index = std.math.maxInt(u64),
     },
+    .canvas_dimensions = .{ .width = 1920, .height = 1080 },
     .combined_frame = null,
 };
 
@@ -271,6 +275,11 @@ pub fn run() !void {
                     std.log.info("Screenshot display set to: {s}", .{display_list[display_index]});
                 },
                 .record_start => {
+                    if (model.video_streams.len == 0 or model.audio_streams.len == 0) {
+                        std.log.err("Cannot start recording without streams", .{});
+                        continue :request_loop;
+                    }
+
                     const RecordOptions = video_encoder.RecordOptions;
                     const quality: RecordOptions.Quality = switch (model.recording_context.quality) {
                         .low => .low,
@@ -296,14 +305,14 @@ pub fn run() !void {
                     };
                     const options = RecordOptions{
                         .output_name = output_file_name,
-                        .dimensions = .{
-                            .width = 1920,
-                            .height = 1080,
-                        },
+                        .dimensions = model.canvas_dimensions,
                         .format = extension,
                         .quality = quality,
                         .fps = 60,
                     };
+
+                    assert(video_encoder.state == .uninitialized or video_encoder.state == .closed);
+
                     video_encoder.open(options) catch |err| {
                         std.log.err("app: Failed to start video encoder. Error: {}", .{err});
                         continue :request_loop;

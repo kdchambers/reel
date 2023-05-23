@@ -221,8 +221,8 @@ pub fn draw(
         region.anchor.bottom = activity_region.bottom();
         region.height = activity_region.height.? - topbar_region.height.?;
 
-        switch (ui_state.activity_section.active_index) {
-            0 => {
+        switch (@intToEnum(UIState.Activity, ui_state.activity_section.active_index)) {
+            .record => {
                 var start_button_region = Region{};
                 start_button_region.anchor.right = region.right();
                 start_button_region.anchor.bottom = region.bottom();
@@ -230,10 +230,16 @@ pub fn draw(
                 start_button_region.margin.right = 10.0 * screen_scale.horizontal;
 
                 start_button_region.height = 32.0 * screen_scale.vertical;
-                start_button_region.width = 120 * screen_scale.horizontal;
+                start_button_region.width = 120.0 * screen_scale.horizontal;
 
-                ui_state.activity_start_button.label = "Record";
+                ui_state.activity_start_button.label = switch(model.recording_context.state) {
+                    .recording => "Stop",
+                    .idle, .sync => "Record",
+                    .paused => "Resume",
+                };
+
                 ui_state.activity_start_button.color = RGBA.fromInt(55, 55, 55, 255);
+                ui_state.activity_start_button.color_hovered = RGBA.fromInt(65, 65, 65, 255);
                 ui_state.activity_start_button.text_color = RGBA.white;
 
                 ui_state.activity_start_button.draw(
@@ -242,13 +248,12 @@ pub fn draw(
                     .{ .rounding_radius = 4.0 },
                 );
             },
-            1 => {
+            .stream => {
                 _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
             },
-            2 => {
+            .screenshot => {
                 _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
             },
-            else => unreachable,
         }
     }
 

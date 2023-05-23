@@ -5,6 +5,7 @@ const base = @import("widgets/base.zig");
 
 pub const init = base.init;
 
+pub const Button = base.Button;
 pub const ImageButton = base.ImageButton;
 pub const IconButton = base.IconButton;
 pub const ListSelectPopup = base.ListSelectPopup;

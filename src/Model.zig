@@ -96,6 +96,8 @@ pub const VideoSourceProvider = struct {
 
 video_source_providers: []VideoSourceProvider,
 
+canvas_dimensions: Dimensions2D(u32),
+
 audio_streams: []AudioStream,
 video_streams: []VideoStream,
 

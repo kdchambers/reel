@@ -32,10 +32,16 @@ pub const image_format_labels = [_][]const u8{
     @tagName(ImageFormat.qoi),
 };
 
-pub const tab_headings = [_][]const u8{
+pub const activity_labels = [_][]const u8{
     "Record",
-    "Screenshot",
     "Stream",
+    "Screenshot",
+};
+
+pub const Activity = enum(u16) {
+    record = 0,
+    stream = 1,
+    screenshot = 2,
 };
 
 pub const RegionAnchors = struct {

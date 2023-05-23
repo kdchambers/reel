@@ -273,9 +273,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.select_video_source_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_video_source_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
 
-    ui_state.activity_section.init(
-        &.{ "Record", "Stream", "Screenshot" },
-    );
+    ui_state.activity_section.init(&UIState.activity_labels);
 
     ui_state.activity_start_button.init();
 
@@ -389,6 +387,26 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = true;
         if (response.tab_index != null)
             is_draw_required = true;
+    }
+
+    {
+        const response = ui_state.activity_start_button.update();
+        if (response.clicked) {
+            switch (@intToEnum(UIState.Activity, ui_state.activity_section.active_index)) {
+                .record => {
+                    switch (model.recording_context.state) {
+                        .idle => request_encoder.write(.record_start) catch unreachable,
+                        .paused => request_encoder.write(.record_resume) catch unreachable,
+                        .recording => request_encoder.write(.record_stop) catch unreachable,
+                        else => {},
+                    }
+                },
+                .stream => request_encoder.write(.stream_start) catch unreachable,
+                .screenshot => request_encoder.write(.screenshot_do) catch unreachable,
+            }
+        }
+        if (response.modified)
+            is_render_requested = true;
     }
 
     switch (ui_state.add_source_state) {
