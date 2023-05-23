@@ -79,6 +79,16 @@ pub inline fn updateQuadColor(vertex_index: u32, color: RGBA(u8)) void {
     quad_ptr[3].color = color;
 }
 
+pub inline fn updateQuadRangeColor(vertex_index: u32, quad_count: u16, color: RGBA(u8)) void {
+    const quads = @ptrCast([*][4]Vertex, &vertices_buffer[vertex_index])[0..quad_count];
+    for (quads) |*quad_ptr| {
+        quad_ptr.*[0].color = color;
+        quad_ptr.*[1].color = color;
+        quad_ptr.*[2].color = color;
+        quad_ptr.*[3].color = color;
+    }
+}
+
 pub inline fn drawQuad(extent: Extent3D(f32), color: RGBA(u8), comptime anchor_point: graphics.AnchorPoint) u16 {
     const vertex_index = vertices_used;
     var quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
