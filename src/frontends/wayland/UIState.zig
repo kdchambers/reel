@@ -171,6 +171,7 @@ select_source_provider_popup: widgets.ListSelectPopup,
 select_video_source_popup: widgets.ListSelectPopup,
 
 activity_section: widgets.TabbedSection,
+activity_start_button: widgets.Button,
 
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),

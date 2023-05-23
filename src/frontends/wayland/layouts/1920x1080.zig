@@ -212,9 +212,35 @@ pub fn draw(
 
         ui_state.activity_section.draw(topbar_region.toExtent(), screen_scale);
 
+        //
+        // Drawable region for whichever activity is selected
+        //
+        var region = Region{};
+        region.anchor.left = activity_region.left();
+        region.anchor.right = activity_region.right();
+        region.anchor.bottom = activity_region.bottom();
+        region.height = activity_region.height.? - topbar_region.height.?;
+
         switch (ui_state.activity_section.active_index) {
             0 => {
-                _ = renderer.drawText("Record", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
+                var start_button_region = Region{};
+                start_button_region.anchor.right = region.right();
+                start_button_region.anchor.bottom = region.bottom();
+                start_button_region.margin.bottom = 10.0 * screen_scale.vertical;
+                start_button_region.margin.right = 10.0 * screen_scale.horizontal;
+
+                start_button_region.height = 32.0 * screen_scale.vertical;
+                start_button_region.width = 120 * screen_scale.horizontal;
+
+                ui_state.activity_start_button.label = "Record";
+                ui_state.activity_start_button.color = RGBA.fromInt(55, 55, 55, 255);
+                ui_state.activity_start_button.text_color = RGBA.white;
+
+                ui_state.activity_start_button.draw(
+                    start_button_region.toExtent(),
+                    screen_scale,
+                    .{ .rounding_radius = 4.0 },
+                );
             },
             1 => {
                 _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);

@@ -277,6 +277,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
         &.{ "Record", "Stream", "Screenshot" },
     );
 
+    ui_state.activity_start_button.init();
+
     ui_state.add_source_state = .closed;
 
     ui_state.video_source_mouse_event_count = 0;
