@@ -74,7 +74,6 @@ pub const Region = struct {
             if (self.anchor.right) |right_anchor| {
                 break :blk (right_anchor - self.margin.right) - (x + self.margin.left);
             }
-            std.debug.assert(false);
             unreachable;
         };
         const height = blk: {
@@ -84,7 +83,6 @@ pub const Region = struct {
             if (self.anchor.top) |top_anchor| {
                 break :blk (y - top_anchor) - self.margin.top;
             }
-            std.debug.assert(false);
             unreachable;
         };
         return .{
