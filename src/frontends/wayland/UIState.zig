@@ -83,18 +83,7 @@ pub const EdgeRegions = struct {
     top: Index(MouseEventEntry),
     bottom: Index(MouseEventEntry),
 
-    pub fn allocate(self: *@This()) void {
-        // self.top_right = event_system.reserveMouseEventSlot();
-        // self.top_left = event_system.reserveMouseEventSlot();
-        // self.bottom_right = event_system.reserveMouseEventSlot();
-        // self.bottom_left = event_system.reserveMouseEventSlot();
-        self.left = event_system.reserveMouseEventSlot();
-        self.right = event_system.reserveMouseEventSlot();
-        self.top = event_system.reserveMouseEventSlot();
-        self.bottom = event_system.reserveMouseEventSlot();
-    }
-
-    pub fn fromExtent(self: @This(), extent: Extent3D(f32), border_h: f32, border_v: f32) void {
+    pub fn fromExtent(self: *@This(), extent: Extent3D(f32), border_h: f32, border_v: f32) void {
         const left_extent = Extent3D(f32){
             .x = extent.x,
             .y = extent.y,
@@ -124,10 +113,10 @@ pub const EdgeRegions = struct {
             .height = border_v,
         };
 
-        event_system.writeMouseEventSlot(self.left, left_extent, .{});
-        event_system.writeMouseEventSlot(self.right, right_extent, .{});
-        event_system.writeMouseEventSlot(self.top, top_extent, .{});
-        event_system.writeMouseEventSlot(self.bottom, bottom_extent, .{});
+        self.left = event_system.writeMouseEventSlot(left_extent, .{});
+        self.right = event_system.writeMouseEventSlot(right_extent, .{});
+        self.top = event_system.writeMouseEventSlot(top_extent, .{});
+        self.bottom = event_system.writeMouseEventSlot(bottom_extent, .{});
     }
 
     pub fn edgeClicked(self: @This()) ?Edge {
