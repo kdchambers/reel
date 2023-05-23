@@ -73,24 +73,6 @@ pub const MouseButton = enum(c_int) {
     _,
 };
 
-pub var mouse_click_coordinates: ?geometry.Coordinates2D(f64) = null;
-
-const max_mouse_event_slot_count = 128;
-var event_slot_buffer: SliceIndex(MouseEventEntry) = .{ .index = std.math.maxInt(u16), .count = 0 };
-var event_count: u16 = 0;
-
-pub fn init() !void {
-    try mini_heap.init();
-    const init_mouse_entry = MouseEventEntry{
-        .extent = .{ .x = -2.0, .y = -2.0, .width = 0.0, .height = 0.0 },
-        .z_layer = 255,
-        .draw_index = 0,
-        .state = .{},
-        .flags = .{},
-    };
-    event_slot_buffer = mini_heap.writeN(MouseEventEntry, &init_mouse_entry, max_mouse_event_slot_count);
-}
-
 pub const MouseEventOptions = packed struct(u32) {
     enable_hover: bool = true,
     start_active: bool = false,
@@ -108,7 +90,7 @@ pub const MouseEventEntry = extern struct {
 
     extent: Extent2D(f32),
     z_layer: u8,
-    draw_index: u8,
+    reserved: u8 = 0,
     state: HoverZoneState,
     flags: Flags,
 };
@@ -120,40 +102,74 @@ comptime {
     assert(@alignOf(MouseEventEntry) == 4);
 }
 
+const MouseMovementUpdate = packed struct(u16) {
+    hover_enter: bool = false,
+    hover_exit: bool = false,
+    reserved: u14 = 0,
+};
+
+const max_mouse_event_slot_count = 128;
+
+pub var mouse_click_coordinates: ?geometry.Coordinates2D(f64) = null;
+
+var event_slot_buffer: SliceIndex(MouseEventEntry) = .{ .index = std.math.maxInt(u16), .count = 0 };
+var mouse_event_slot_count: u16 = 0;
+
+pub fn init() !void {
+    try mini_heap.init();
+    const init_mouse_entry = MouseEventEntry{
+        .extent = .{ .x = -2.0, .y = -2.0, .width = 0.0, .height = 0.0 },
+        .z_layer = 255,
+        .state = .{},
+        .flags = .{},
+    };
+    event_slot_buffer = mini_heap.writeN(MouseEventEntry, &init_mouse_entry, max_mouse_event_slot_count);
+}
+
 pub fn reserveMouseEventSlot() Index(MouseEventEntry) {
-    assert(event_count < max_mouse_event_slot_count);
-    const current_index: u16 = event_count;
-    event_count += 1;
+    assert(mouse_event_slot_count < max_mouse_event_slot_count);
+    const current_index: u16 = mouse_event_slot_count;
+    mouse_event_slot_count += 1;
     return event_slot_buffer.toIndex(current_index);
 }
 
 pub fn reserveMouseEventSlots(count: u16) SliceIndex(MouseEventEntry) {
-    const current_index: u16 = event_count;
-    event_count += count;
-    assert(event_count < max_mouse_event_slot_count);
+    const current_index: u16 = mouse_event_slot_count;
+    mouse_event_slot_count += count;
+    assert(mouse_event_slot_count < max_mouse_event_slot_count);
     return event_slot_buffer.makeSlice(current_index, count);
 }
 
-var current_draw_index: u8 = 1;
-
 pub inline fn invalidateEvents() void {
-    if (current_draw_index == 254) {
-        current_draw_index = 1;
-        for (event_slot_buffer.get()[0..event_count]) |*entry| {
-            entry.draw_index = 0;
-        }
-    } else current_draw_index += 1;
+    mouse_event_slot_count = 0;
 }
 
 pub fn writeMouseEventSlot(
-    mouse_event_slot_index: Index(MouseEventEntry),
+    extent: geometry.Extent3D(f32),
+    options: MouseEventOptions,
+) Index(MouseEventEntry) {
+    event_slot_buffer.get()[mouse_event_slot_count] = .{
+        .extent = extent.to2D(),
+        .z_layer = @floatToInt(u8, @floor(extent.z * 100.0)),
+        .state = .{},
+        .flags = .{
+            .hover_enabled = options.enable_hover,
+            .hover_active = options.start_active,
+        },
+    };
+    const written_index = mouse_event_slot_count;
+    mouse_event_slot_count += 1;
+    return event_slot_buffer.toIndex(written_index);
+}
+
+pub inline fn overwriteMouseEventSlot(
+    slot: *MouseEventEntry,
     extent: geometry.Extent3D(f32),
     options: MouseEventOptions,
 ) void {
-    mouse_event_slot_index.getPtr().* = .{
+    slot.* = .{
         .extent = extent.to2D(),
         .z_layer = @floatToInt(u8, @floor(extent.z * 100.0)),
-        .draw_index = current_draw_index,
         .state = .{},
         .flags = .{
             .hover_enabled = options.enable_hover,
@@ -165,8 +181,8 @@ pub fn writeMouseEventSlot(
 pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: MouseButton, button_action: wl.Pointer.ButtonState) void {
     var min_z_layer: u8 = 255;
     var matched_entry: *MouseEventEntry = undefined;
-    for (event_slot_buffer.get()[0..event_count]) |*entry| {
-        if (entry.draw_index == current_draw_index and entry.z_layer <= min_z_layer) {
+    for (event_slot_buffer.get()[0..mouse_event_slot_count]) |*entry| {
+        if (entry.z_layer <= min_z_layer) {
             const is_within_extent = (position.x >= entry.extent.x and position.x <= (entry.extent.x + entry.extent.width) and
                 position.y <= entry.extent.y and position.y >= (entry.extent.y - entry.extent.height));
             if (!is_within_extent)
@@ -201,12 +217,6 @@ pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: Mo
     }
 }
 
-const MouseMovementUpdate = packed struct(u16) {
-    hover_enter: bool = false,
-    hover_exit: bool = false,
-    reserved: u14 = 0,
-};
-
 pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) MouseMovementUpdate {
     var min_enter_z_layer: u8 = 255;
     var min_exit_z_layer: u8 = 255;
@@ -215,8 +225,8 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) MouseMo
     var matched_hover_exit: ?*MouseEventEntry = null;
 
     var response: MouseMovementUpdate = .{};
-    for (event_slot_buffer.get()[0..event_count]) |*entry| {
-        if (entry.draw_index == current_draw_index and entry.flags.hover_enabled) {
+    for (event_slot_buffer.get()[0..mouse_event_slot_count]) |*entry| {
+        if (entry.flags.hover_enabled) {
             const extent = entry.extent;
             const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
                 position.y <= extent.y and position.y >= (extent.y - extent.height));
