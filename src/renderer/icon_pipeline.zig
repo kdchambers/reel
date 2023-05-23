@@ -65,9 +65,12 @@ pub const Icon = enum {
     arrow_back_32px,
     arrow_forward_32px,
     add_circle_24px,
+    camera_32px,
     help_32px,
     menu_32px,
     settings_32px,
+    stream_32px,
+    videocam_32px,
 };
 
 const icon_directory_path = "assets/icons/";
@@ -76,9 +79,12 @@ const icon_path_list = [_][]const u8{
     icon_directory_path ++ "arrow_back_32px.png",
     icon_directory_path ++ "arrow_forward_32px.png",
     icon_directory_path ++ "add_circle_24px.png",
+    icon_directory_path ++ "camera_32px.png",
     icon_directory_path ++ "help_32px.png",
     icon_directory_path ++ "menu_32px.png",
     icon_directory_path ++ "settings_32px.png",
+    icon_directory_path ++ "stream_32px.png",
+    icon_directory_path ++ "videocam_32px.png",
 };
 
 var icon_extent_list: [icon_path_list.len]Extent2D(u32) = undefined;
