@@ -273,6 +273,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.select_video_source_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_video_source_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
 
+    ui_state.activity_section.init(
+        &.{ "Record", "Stream", "Screenshot" },
+    );
+
     ui_state.add_source_state = .closed;
 
     ui_state.video_source_mouse_event_count = 0;
@@ -375,6 +379,14 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             std.log.info("Settings button clicked", .{});
         if (result.modified)
             is_render_requested = true;
+    }
+
+    {
+        const response = ui_state.activity_section.update();
+        if (response.visual_change)
+            is_render_requested = true;
+        if (response.tab_index != null)
+            is_draw_required = true;
     }
 
     switch (ui_state.add_source_state) {

@@ -27,6 +27,7 @@ const UIState = @import("../UIState.zig");
 const event_system = @import("../event_system.zig");
 
 const sidebar_color = RGBA{ .r = 17, .g = 20, .b = 26, .a = 255 };
+const window_color = RGBA.fromInt(28, 30, 35, 255);
 
 pub fn update(
     model: *const Model,
@@ -89,11 +90,10 @@ pub fn draw(
             close_sidebar_button_region.z = ui_layer.middle;
             close_sidebar_button_region.width = 32.0 * screen_scale.horizontal;
             close_sidebar_button_region.height = 32.0 * screen_scale.vertical;
-            close_sidebar_button_region.margin.top = 10 * screen_scale.vertical;
-            close_sidebar_button_region.margin.left = 10 * screen_scale.horizontal;
+            close_sidebar_button_region.margin.top = 10.0 * screen_scale.vertical;
+            close_sidebar_button_region.margin.left = 10.0 * screen_scale.horizontal;
 
             ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
-            // ui_state.open_sidemenu_button.background_color = sidebar_color;
             ui_state.open_sidemenu_button.draw(close_sidebar_button_region.placement(), 4.0, screen_scale);
 
             const scene_controls_background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
@@ -196,11 +196,35 @@ pub fn draw(
     }
 
     var activity_region: Region = .{};
-    activity_region.anchor.left = icon_bar_region.right();
-    activity_region.anchor.bottom = window.bottom;
-    activity_region.anchor.right = window.right;
-    activity_region.height = 300.0 * screen_scale.vertical;
-    _ = renderer.drawQuad(activity_region.toExtent(), RGBA.fromInt(50, 100, 24, 255), .bottom_left);
+    {
+        activity_region.anchor.left = icon_bar_region.right();
+        activity_region.anchor.bottom = window.bottom;
+        activity_region.anchor.right = window.right;
+        activity_region.height = 300.0 * screen_scale.vertical;
+
+        _ = renderer.drawQuad(activity_region.toExtent(), window_color, .bottom_left);
+
+        var topbar_region: Region = .{};
+        topbar_region.anchor.top = activity_region.top();
+        topbar_region.anchor.left = activity_region.left();
+        topbar_region.anchor.right = activity_region.right();
+        topbar_region.height = 40.0 * screen_scale.vertical;
+
+        ui_state.activity_section.draw(topbar_region.toExtent(), screen_scale);
+
+        switch (ui_state.activity_section.active_index) {
+            0 => {
+                _ = renderer.drawText("Record", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
+            },
+            1 => {
+                _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
+            },
+            2 => {
+                _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
+            },
+            else => unreachable,
+        }
+    }
 
     var preview_region: Region = .{};
     {
@@ -301,7 +325,19 @@ pub fn draw(
                     absolute_extent.width,
                     absolute_extent.height,
                 });
-                event_system.writeMouseEventSlot(ui_state.video_source_mouse_event_buffer[i], absolute_extent, .{});
+                ui_state.video_source_mouse_event_buffer[i] = event_system.writeMouseEventSlot(absolute_extent, .{});
+
+                const edges_extent = Extent3D(f32){
+                    .x = absolute_extent.x,
+                    .y = absolute_extent.y,
+                    .z = ui_layer.middle,
+                    .width = absolute_extent.width,
+                    .height = absolute_extent.height,
+                };
+                const border_width_pixels = 4;
+                const border_h: f32 = border_width_pixels * screen_scale.horizontal;
+                const border_v: f32 = border_width_pixels * screen_scale.vertical;
+                ui_state.video_source_mouse_edge_buffer[i].fromExtent(edges_extent, border_h, border_v);
             }
         }
     }
