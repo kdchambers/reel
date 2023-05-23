@@ -240,39 +240,35 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.window_region.bottom = 1.0;
     ui_state.window_region.top = -1.0;
 
-    ui_state.open_settings_button = IconButton.allocate();
+    ui_state.open_settings_button.init();
     ui_state.open_settings_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
     ui_state.open_settings_button.on_hover_icon_color = RGBA.white;
     ui_state.open_settings_button.background_color = RGBA.transparent;
     ui_state.open_settings_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.open_settings_button.icon = .settings_32px;
 
-    ui_state.open_sidemenu_button = IconButton.allocate();
+    ui_state.open_sidemenu_button.init();
     ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
     ui_state.open_sidemenu_button.background_color = RGBA.transparent;
     ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.open_sidemenu_button.icon = .arrow_back_32px;
     ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
-    // ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
 
-    ui_state.add_source_button = IconButton.allocate();
+    ui_state.add_source_button.init();
     ui_state.add_source_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
     ui_state.add_source_button.on_hover_icon_color = RGBA.white;
     ui_state.add_source_button.background_color = RGBA.transparent;
     ui_state.add_source_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.add_source_button.icon = .add_circle_24px;
 
-    ui_state.select_source_provider_popup = widgets.ListSelectPopup.allocate();
+    ui_state.select_source_provider_popup.init();
     ui_state.select_source_provider_popup.title = "Select Source Provider";
     ui_state.select_source_provider_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_source_provider_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_source_provider_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
     ui_state.select_source_provider_popup.addLabel("wlroots");
 
-    ui_state.video_source_mouse_edge_buffer[0].allocate();
-    ui_state.video_source_mouse_edge_buffer[1].allocate();
-
-    ui_state.select_video_source_popup = widgets.ListSelectPopup.allocate();
+    ui_state.select_video_source_popup.init();
     ui_state.select_video_source_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_video_source_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_video_source_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
@@ -280,9 +276,6 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.add_source_state = .closed;
 
     ui_state.video_source_mouse_event_count = 0;
-    for (&ui_state.video_source_mouse_event_buffer) |*slot| {
-        slot.* = event_system.reserveMouseEventSlot();
-    }
 
     //
     // TODO: Don't hardcode bin count
@@ -534,8 +527,8 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         }
 
         //
-        // Redrawing invalidates all of the hover zones. Disable them here and
-        // they can be overwritten in the following draw fn
+        // Redrawing invalidates all of the hover zones. This clears the internal
+        // mouse events buffer
         //
         event_system.invalidateEvents();
 
