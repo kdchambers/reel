@@ -13,6 +13,7 @@ const render_pass = @import("render_pass.zig");
 const VulkanAllocator = @import("../VulkanBumpAllocator.zig");
 
 const geometry = @import("../geometry.zig");
+const ui_layer = geometry.ui_layer;
 const graphics = @import("../graphics.zig");
 
 const Coordinates2D = geometry.Coordinates2D;
@@ -26,7 +27,7 @@ const RGBA = graphics.RGBA;
 pub const Vertex = extern struct {
     x: f32,
     y: f32,
-    z: f32 = 0.8,
+    z: f32 = ui_layer.middle,
     color: RGBA(u8) = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
 };
 
@@ -119,6 +120,8 @@ pub inline fn drawRoundedRect(
 ) VertexRange {
     const start_vertex_index: u16 = vertices_used;
 
+    assert(points_per_arc >= 8);
+
     //
     // TODO: Implement
     //
@@ -154,44 +157,48 @@ pub inline fn drawRoundedRect(
         //
         // Top Left
         //
-        const arc_center = Coordinates2D(f32){
+        const arc_center = Coordinates3D(f32){
             .x = extent.x + radius.h,
             .y = extent.y - (extent.height - radius.v),
-        };
-        _ = drawArc(arc_center, radius, color, 90, 90, points_per_arc);
-    }
-
-    {
-        //
-        // Bottom Left
-        //
-        const arc_center = Coordinates2D(f32){
-            .x = extent.x + radius.h,
-            .y = extent.y - radius.v,
+            .z = extent.z,
         };
         _ = drawArc(arc_center, radius, color, 180, 90, points_per_arc);
     }
 
     {
         //
+        // Bottom Left
+        //
+        const arc_center = Coordinates3D(f32){
+            .x = extent.x + radius.h,
+            .y = extent.y - radius.v,
+            .z = extent.z,
+        };
+        _ = drawArc(arc_center, radius, color, 90, 90, points_per_arc);
+    }
+
+    {
+        //
         // Top Right
         //
-        const arc_center = Coordinates2D(f32){
+        const arc_center = Coordinates3D(f32){
             .x = extent.x + extent.width - radius.h,
             .y = extent.y - (extent.height - radius.v),
+            .z = extent.z,
         };
-        _ = drawArc(arc_center, radius, color, 0, 90, points_per_arc);
+        _ = drawArc(arc_center, radius, color, 270, 90, points_per_arc);
     }
 
     {
         //
         // Bottom Right
         //
-        const arc_center = Coordinates2D(f32){
+        const arc_center = Coordinates3D(f32){
             .x = extent.x + extent.width - radius.h,
             .y = extent.y - radius.v,
+            .z = extent.z,
         };
-        _ = drawArc(arc_center, radius, color, 270, 90, points_per_arc);
+        _ = drawArc(arc_center, radius, color, 0, 90, points_per_arc);
     }
 
     assert(vertices_used > start_vertex_index);
@@ -247,34 +254,40 @@ pub fn drawArc(
     rotation_length: f32,
     point_count: u16,
 ) VertexRange {
+    assert(point_count >= 8);
+
     const arc_vertices = VertexRange{ .start = vertices_used, .count = point_count + 1 };
     const degreesToRadians = std.math.degreesToRadians;
 
     const base_rotation = degreesToRadians(f32, rotation_begin);
     const rotation_per_point = degreesToRadians(f32, rotation_length / @intToFloat(f32, point_count - 1));
 
-    var vertices = vertices_buffer[vertices_used..];
+    var vertices = vertices_buffer[vertices_used .. vertices_used + point_count + 1];
 
     vertices[0] = Vertex{
         .x = center.x,
         .y = center.y,
+        .z = center.z,
         .color = color,
     };
 
     vertices[1] = Vertex{
         .x = @floatCast(f32, center.x + (radius.h * @cos(base_rotation))),
         .y = @floatCast(f32, center.y + (radius.v * @sin(base_rotation))),
+        .z = center.z,
         .color = color,
     };
 
     var i: u16 = 1;
-    while (i <= point_count) : (i += 1) {
+    while (i < point_count) : (i += 1) {
         const angle_radians: f64 = base_rotation + (rotation_per_point * @intToFloat(f32, i));
         vertices[i + 1] = Vertex{
             .x = @floatCast(f32, center.x + (radius.h * @cos(angle_radians))),
             .y = @floatCast(f32, center.y + (radius.v * @sin(angle_radians))),
+            .z = center.z,
             .color = color,
         };
+
         indices_buffer[indices_used + 0] = vertices_used; // Center
         indices_buffer[indices_used + 1] = vertices_used + i + 0; // Previous
         indices_buffer[indices_used + 2] = vertices_used + i + 1; // Current
