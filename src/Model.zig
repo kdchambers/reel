@@ -104,6 +104,3 @@ video_streams: []VideoStream,
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,
 webcam_stream: WebcamStream,
-
-// Frame containing desktop screencapture + overlayed webcam
-combined_frame: ?[]graphics.RGBA(u8),

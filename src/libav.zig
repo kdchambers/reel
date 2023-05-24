@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const assert = std.debug.assert;
 
 const libav = @cImport({
     @cInclude("libavcodec/avcodec.h");
@@ -53,8 +54,8 @@ fn makeTag(comptime a: u8, comptime b: u8, comptime c: u8, comptime d: u8) u32 {
 pub const error_eof: i32 = makeErrorTag('E', 'O', 'F', ' ');
 
 comptime {
-    std.debug.assert(error_eof == libav.AVERROR_EOF);
-    std.debug.assert(avio_flag_write == libav.AVIO_FLAG_WRITE);
+    assert(error_eof == libav.AVERROR_EOF);
+    assert(avio_flag_write == libav.AVIO_FLAG_WRITE);
 }
 
 pub const CodecContext = libav.AVCodecContext;
@@ -86,6 +87,7 @@ pub extern fn avio_open(
 pub extern fn avio_closep(context: **IOContext) callconv(.C) i32;
 
 pub extern fn av_buffer_ref(buffer: *BufferRef) callconv(.C) ?*BufferRef;
+pub extern fn av_buffer_unref(buffer: **BufferRef) callconv(.C) void;
 pub extern fn av_buffersink_get_hw_frames_ctx(context: *FilterContext) callconv(.C) ?*BufferRef;
 pub extern fn av_buffersink_get_frame(context: *FilterContext, frame: *Frame) callconv(.C) i32;
 
@@ -119,6 +121,54 @@ pub extern fn av_packet_rescale_ts(
 pub extern fn av_packet_unref(packet: *Packet) callconv(.C) void;
 pub extern fn av_interleaved_write_frame(context: *FormatContext, packet: *Packet) callconv(.C) i32;
 pub extern fn av_write_trailer(context: *FormatContext) callconv(.C) i32;
+
+pub extern fn av_hwdevice_ctx_create(
+    device_ctx: **BufferRef,
+    device_type: HWDeviceType,
+    device_name: ?[*:0]const u8,
+    options: ?*Dictionary,
+    flags: i32,
+) callconv(.C) i32;
+
+pub const HWDeviceType = enum(i32) {
+    none,
+    vdpau,
+    cuda,
+    vaapi,
+    dxva2,
+    qsv,
+    videotoolbox,
+    d3d11va,
+    dmr,
+    opencl,
+    mediacodec,
+    vulkan,
+};
+
+pub const Class = opaque {};
+pub const HWDeviceInternal = opaque {};
+
+pub const HWDeviceContext = extern struct {
+    av_class: *Class,
+    internal: *HWDeviceInternal,
+    type: HWDeviceType,
+    hwctx: *anyopaque,
+    free: *const fn (ctx: *HWDeviceContext) callconv(.C) void,
+    user_opaque: *anyopaque,
+};
+
+pub const HWFramesContext = libav.AVHWFramesContext;
+
+pub extern fn av_hwframe_transfer_data(dst: *Frame, src: *const Frame, flags: i32) callconv(.C) i32;
+
+pub extern fn av_hwdevice_find_type_by_name(name: [*:0]const u8) callconv(.C) HWDeviceType;
+
+pub extern fn avcodec_find_encoder_by_name(name: [*:0]const u8) callconv(.C) ?*Codec;
+pub extern fn av_hwframe_ctx_alloc(device_ref: *BufferRef) callconv(.C) ?*BufferRef;
+pub extern fn av_hwframe_get_buffer(hwframe_ctx: *BufferRef, frame: *Frame, flags: i32) callconv(.C) i32;
+pub extern fn av_hwframe_ctx_init(ref: *BufferRef) callconv(.C) i32;
+
+pub const codecFindEncoderByName = avcodec_find_encoder_by_name;
 
 pub extern fn av_opt_set(
     object: *void,
@@ -365,7 +415,6 @@ pub const SampleFormat = enum(i32) {
 };
 
 comptime {
-    const assert = std.debug.assert;
     assert(@enumToInt(SampleFormat.u8) == libav.AV_SAMPLE_FMT_U8);
     assert(@enumToInt(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
     assert(@enumToInt(SampleFormat.s32) == libav.AV_SAMPLE_FMT_S32);
@@ -378,8 +427,6 @@ comptime {
     assert(@enumToInt(SampleFormat.dblp) == libav.AV_SAMPLE_FMT_DBLP);
     assert(@enumToInt(SampleFormat.s64) == libav.AV_SAMPLE_FMT_S64);
     assert(@enumToInt(SampleFormat.s64p) == libav.AV_SAMPLE_FMT_S64P);
-
-    assert(@enumToInt(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
 }
 
 pub const CodecID = enum(u32) {
@@ -910,7 +957,50 @@ pub const CodecID = enum(u32) {
 
 comptime {
     // TODO: More checks
-    std.debug.assert(@enumToInt(CodecID.AAC) == libav.AV_CODEC_ID_AAC);
+    assert(@enumToInt(CodecID.AAC) == libav.AV_CODEC_ID_AAC);
+}
+
+comptime {
+    assert(@enumToInt(PixelFormat.YUV420P) == libav.AV_PIX_FMT_YUV420P);
+    assert(@enumToInt(PixelFormat.YUYV422) == libav.AV_PIX_FMT_YUYV422);
+    assert(@enumToInt(PixelFormat.RGB24) == libav.AV_PIX_FMT_RGB24);
+    assert(@enumToInt(PixelFormat.BGR24) == libav.AV_PIX_FMT_BGR24);
+    assert(@enumToInt(PixelFormat.YUV422P) == libav.AV_PIX_FMT_YUV422P);
+    assert(@enumToInt(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
+    assert(@enumToInt(PixelFormat.YUV410P) == libav.AV_PIX_FMT_YUV410P);
+    assert(@enumToInt(PixelFormat.YUV411P) == libav.AV_PIX_FMT_YUV411P);
+    assert(@enumToInt(PixelFormat.GRAY8) == libav.AV_PIX_FMT_GRAY8);
+    assert(@enumToInt(PixelFormat.MONOWHITE) == libav.AV_PIX_FMT_MONOWHITE);
+    assert(@enumToInt(PixelFormat.MONOBLACK) == libav.AV_PIX_FMT_MONOBLACK);
+    assert(@enumToInt(PixelFormat.PAL8) == libav.AV_PIX_FMT_PAL8);
+    assert(@enumToInt(PixelFormat.YUVJ420P) == libav.AV_PIX_FMT_YUVJ420P);
+    assert(@enumToInt(PixelFormat.YUVJ422P) == libav.AV_PIX_FMT_YUVJ422P);
+    assert(@enumToInt(PixelFormat.YUVJ444P) == libav.AV_PIX_FMT_YUVJ444P);
+    assert(@enumToInt(PixelFormat.UYVY422) == libav.AV_PIX_FMT_UYVY422);
+    assert(@enumToInt(PixelFormat.UYYVYY411) == libav.AV_PIX_FMT_UYYVYY411);
+    assert(@enumToInt(PixelFormat.BGR8) == libav.AV_PIX_FMT_BGR8);
+    assert(@enumToInt(PixelFormat.BGR4) == libav.AV_PIX_FMT_BGR4);
+    assert(@enumToInt(PixelFormat.BGR4_BYTE) == libav.AV_PIX_FMT_BGR4_BYTE);
+    assert(@enumToInt(PixelFormat.RGB8) == libav.AV_PIX_FMT_RGB8);
+    assert(@enumToInt(PixelFormat.RGB4) == libav.AV_PIX_FMT_RGB4);
+    assert(@enumToInt(PixelFormat.RGB4_BYTE) == libav.AV_PIX_FMT_RGB4_BYTE);
+    assert(@enumToInt(PixelFormat.NV12) == libav.AV_PIX_FMT_NV12);
+    assert(@enumToInt(PixelFormat.NV21) == libav.AV_PIX_FMT_NV21);
+    assert(@enumToInt(PixelFormat.ARGB) == libav.AV_PIX_FMT_ARGB);
+    assert(@enumToInt(PixelFormat.RGBA) == libav.AV_PIX_FMT_RGBA);
+    assert(@enumToInt(PixelFormat.ABGR) == libav.AV_PIX_FMT_ABGR);
+    assert(@enumToInt(PixelFormat.BGRA) == libav.AV_PIX_FMT_BGRA);
+    assert(@enumToInt(PixelFormat.GRAY16BE) == libav.AV_PIX_FMT_GRAY16BE);
+    assert(@enumToInt(PixelFormat.GRAY16LE) == libav.AV_PIX_FMT_GRAY16LE);
+    assert(@enumToInt(PixelFormat.YUV440P) == libav.AV_PIX_FMT_YUV440P);
+    assert(@enumToInt(PixelFormat.YUVJ440P) == libav.AV_PIX_FMT_YUVJ440P);
+    assert(@enumToInt(PixelFormat.YUVA420P) == libav.AV_PIX_FMT_YUVA420P);
+    assert(@enumToInt(PixelFormat.RGB48BE) == libav.AV_PIX_FMT_RGB48BE);
+    assert(@enumToInt(PixelFormat.RGB48LE) == libav.AV_PIX_FMT_RGB48LE);
+    assert(@enumToInt(PixelFormat.RGB565BE) == libav.AV_PIX_FMT_RGB565BE);
+
+    assert(@enumToInt(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
+    assert(@enumToInt(PixelFormat.VAAPI) == libav.AV_PIX_FMT_VAAPI);
 }
 
 pub const PixelFormat = enum(i32) {
@@ -959,6 +1049,8 @@ pub const PixelFormat = enum(i32) {
     BGR565LE,
     BGR555BE,
     BGR555LE,
+    VAAPI_MOCO,
+    VAAPI_IDCT,
     VAAPI,
     YUV420P16LE,
     YUV420P16BE,

@@ -53,6 +53,9 @@ var video_filter_sink_context: *libav.FilterContext = undefined;
 var video_filter_graph: *libav.FilterGraph = undefined;
 var hw_frame_context: ?*libav.BufferRef = null;
 var video_frame: *libav.Frame = undefined;
+var hardware_frame: *libav.Frame = undefined;
+
+var hw_device_context: *libav.BufferRef = undefined;
 
 var audio_stream: *libav.Stream = undefined;
 var audio_codec_context: *libav.CodecContext = undefined;
@@ -95,7 +98,7 @@ fn eventLoop() void {
             if (request_close)
                 break :outer;
         }
-        std.time.sleep(std.time.ns_per_ms * 4);
+        std.time.sleep(std.time.ns_per_ms * 1);
         if (request_close)
             break :outer;
     }
@@ -133,6 +136,19 @@ pub fn close() void {
     std.log.info("{d} seconds of video written", .{video_written / 1000.0});
 }
 
+fn getVaapiFormat(_: [*c]libav.CodecContext, pixel_formats: [*c]const i32) callconv(.C) i32 {
+    std.log.info("getVaapiFormat", .{});
+    const formats_ptr = @ptrCast([*]const libav.PixelFormat, pixel_formats);
+    var i: usize = 0;
+    while (formats_ptr[i] != .NONE) {
+        std.log.info("Format: {}", .{formats_ptr[i]});
+        if (formats_ptr[i] == .VAAPI)
+            return @enumToInt(libav.PixelFormat.VAAPI);
+    }
+    assert(false);
+    return @enumToInt(libav.PixelFormat.NONE);
+}
+
 pub fn open(options: RecordOptions) !void {
     context.dimensions = options.dimensions;
     if (builtin.mode == .Debug)
@@ -163,15 +179,16 @@ pub fn open(options: RecordOptions) !void {
         return;
     };
 
-    var ret_code: i32 = 0;
     var format_context_opt: ?*libav.FormatContext = null;
-    ret_code = libav.formatAllocOutputContext2(
-        &format_context_opt,
-        null,
-        output_format.name,
-        output_path,
-    );
-    std.debug.assert(ret_code == 0);
+    {
+        const ret_code = libav.formatAllocOutputContext2(
+            &format_context_opt,
+            null,
+            output_format.name,
+            output_path,
+        );
+        std.debug.assert(ret_code == 0);
+    }
 
     if (format_context_opt) |fc| {
         format_context = fc;
@@ -180,8 +197,8 @@ pub fn open(options: RecordOptions) !void {
         return error.AllocateOutputContextFail;
     }
 
-    const video_codec: *libav.Codec = libav.codecFindEncoder(.h264) orelse {
-        std.log.err("Failed to find h264 encoder", .{});
+    const video_codec: *libav.Codec = libav.codecFindEncoderByName("h264_vaapi") orelse {
+        std.log.err("Failed to find h264 vaapi encoder", .{});
         return error.FindVideoEncoderFail;
     };
 
@@ -203,18 +220,59 @@ pub fn open(options: RecordOptions) !void {
     video_codec_context.color_range = @enumToInt(libav.ColorRange.jpeg);
     video_codec_context.bit_rate = 1024 * 1024 * 8;
     video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
-    // video_codec_context.gop_size = 300;
-    // video_codec_context.max_b_frames = 1;
-    video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.YUV444P);
+    video_codec_context.gop_size = 60;
+    video_codec_context.max_b_frames = 1;
+    video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.VAAPI);
+    video_codec_context.get_format = &getVaapiFormat;
+
+    const ret = libav.av_hwdevice_ctx_create(&hw_device_context, .vaapi, "/dev/dri/renderD128", null, 0);
+    if (ret != 0) {
+        std.log.err("Failed to create hardware device context. Error code: {d}", .{ret});
+        return error.CreateHwDeviceContextFail;
+    }
+
+    assert(hw_device_context.data != null);
+    const alignment = @alignOf(libav.HWDeviceContext);
+    assert(@ptrCast(*const libav.HWDeviceContext, @alignCast(alignment, hw_device_context.data)).type == libav.HWDeviceType.vaapi);
+
+    //
+    // Set HW frame context
+    //
+
+    var hw_frames_ref: *libav.BufferRef = libav.av_hwframe_ctx_alloc(hw_device_context) orelse {
+        std.log.err("Failed to allocate device context", .{});
+        return error.SetupHwDecodingFail;
+    };
+
+    var frames_context = @ptrCast(*libav.HWFramesContext, @alignCast(@alignOf(libav.HWFramesContext), hw_frames_ref.data));
+
+    frames_context.format = @enumToInt(libav.PixelFormat.VAAPI);
+    frames_context.sw_format = @enumToInt(libav.PixelFormat.NV12);
+    frames_context.width = video_codec_context.width;
+    frames_context.height = video_codec_context.height;
+    frames_context.initial_pool_size = 20;
+
+    {
+        const ret_code = libav.av_hwframe_ctx_init(hw_frames_ref);
+        if (ret_code < 0) {
+            libav.av_buffer_unref(&hw_frames_ref);
+            std.log.err("Failed to init VAAPI frame context", .{});
+            return error.InitVaapiFail;
+        }
+    }
+    video_codec_context.hw_frames_ctx = libav.av_buffer_ref(hw_frames_ref) orelse return error.InitVaapiFail;
+
+    libav.av_buffer_unref(&hw_frames_ref);
 
     video_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
+    hardware_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
 
-    if (hw_frame_context) |frame_context| {
-        video_codec_context.hw_frames_ctx = libav.bufferRef(frame_context);
+    if (libav.av_hwframe_get_buffer(video_codec_context.hw_frames_ctx, hardware_frame, 0) < 0) {
+        std.log.err("Failed to get hwframe", .{});
+        return error.InitVaapiFail;
     }
 
     var ffmpeg_options: ?*libav.Dictionary = null;
-
     switch (options.quality) {
         .low => {
             _ = libav.dictSet(&ffmpeg_options, "preset", "ultrafast", 0);
@@ -235,7 +293,7 @@ pub fn open(options: RecordOptions) !void {
 
     if (libav.codecOpen2(video_codec_context, video_codec, &ffmpeg_options) < 0) {
         std.log.err("Failed to open codec", .{});
-        return;
+        return error.OpenVideoCodecFail;
     }
     libav.dictFree(&ffmpeg_options);
 
@@ -263,11 +321,11 @@ pub fn open(options: RecordOptions) !void {
 
     audio_stream = libav.formatNewStream(format_context, audio_codec) orelse {
         std.log.err("Failed to create audio stream", .{});
-        return;
+        return error.CreateNewStreamFail;
     };
     audio_codec_context = libav.codecAllocContext3(audio_codec) orelse {
         std.log.err("Failed to allocate audio context for codec", .{});
-        return;
+        return error.AllocateCodecContextFail;
     };
 
     audio_codec_context.sample_rate = 44100;
@@ -279,7 +337,7 @@ pub fn open(options: RecordOptions) !void {
     var audio_codec_options: ?*libav.Dictionary = null;
     if (libav.codecOpen2(audio_codec_context, audio_codec, &audio_codec_options) < 0) {
         std.log.err("Failed to open audio codec", .{});
-        return;
+        return error.OpenAudioCodecFail;
     }
 
     if (libav.codecParametersFromContext(audio_stream.codecpar, audio_codec_context) < 0) {
@@ -300,25 +358,29 @@ pub fn open(options: RecordOptions) !void {
 
     libav.dumpFormat(format_context, 0, output_path, 1);
 
-    ret_code = libav.ioOpen(
-        &format_context.pb,
-        output_path,
-        libav.avio_flag_write,
-    );
-    if (ret_code < 0) {
-        std.log.err("Failed to open AVIO context", .{});
-        return error.OpenAVIOContextFailed;
+    {
+        const ret_code = libav.ioOpen(
+            &format_context.pb,
+            output_path,
+            libav.avio_flag_write,
+        );
+        if (ret_code < 0) {
+            std.log.err("Failed to open AVIO context", .{});
+            return error.OpenAVIOContextFailed;
+        }
     }
 
-    ret_code = libav.formatWriteHeader(
-        format_context,
-        null,
-    );
-    if (ret_code < 0) {
-        var error_message_buffer: [512]u8 = undefined;
-        _ = libav.strError(ret_code, &error_message_buffer, 512);
-        std.log.err("Failed to write format header to file. Error ({d}): {s}", .{ ret_code, error_message_buffer });
-        return error.WriteFormatHeaderFailed;
+    {
+        const ret_code = libav.formatWriteHeader(
+            format_context,
+            null,
+        );
+        if (ret_code < 0) {
+            var error_message_buffer: [512]u8 = undefined;
+            _ = libav.strError(ret_code, &error_message_buffer, 512);
+            std.log.err("Failed to write format header to file. Error ({d}): {s}", .{ ret_code, error_message_buffer });
+            return error.WriteFormatHeaderFailed;
+        }
     }
 
     std.log.info("video stream timebase: {d} / {d}", .{
@@ -534,7 +596,13 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index
 
     video_frame.pict_type = @enumToInt(libav.PictureType.none);
 
-    try encodeFrame(video_frame);
+    const ret_code = libav.av_hwframe_transfer_data(hardware_frame, video_frame, 0);
+    if (ret_code < 0) {
+        std.log.err("Failed to transfer video frame to hardware frame", .{});
+        return error.HWEncodeFail;
+    }
+
+    try encodeFrame(hardware_frame);
 
     if (audio_buffer.len != 0) {
         try encodeAudioFrames(audio_buffer);

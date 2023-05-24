@@ -121,7 +121,6 @@ var model: Model = .{
         .last_frame_index = std.math.maxInt(u64),
     },
     .canvas_dimensions = .{ .width = 1920, .height = 1080 },
-    .combined_frame = null,
 };
 
 var model_mutex: std.Thread.Mutex = .{};
@@ -341,8 +340,6 @@ pub fn run() !void {
                         webcam_opt = null;
                         const pixels_count: usize = model.webcam_stream.dimensions.width * model.webcam_stream.dimensions.height;
                         gpa.free(model.webcam_stream.last_frame[0..pixels_count]);
-                        gpa.free(model.combined_frame.?);
-                        model.combined_frame = null;
                         model.webcam_stream.last_frame_index = std.math.maxInt(u64);
                         assert(!model.webcam_stream.enabled());
                         std.log.info("Webcam: disabled", .{});
