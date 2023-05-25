@@ -91,9 +91,12 @@ const Frame = struct {
 
 var ring_buffer = RingBuffer(Frame, 4).init;
 
+var last_frame_index: u32 = 0;
+
 fn eventLoop() void {
     outer: while (true) {
         while (ring_buffer.pop()) |entry| {
+            last_frame_index = @intCast(u32, entry.frame_index);
             writeFrame(entry.pixels, entry.audio_buffer, @intCast(u32, entry.frame_index)) catch |err| {
                 std.log.err("Failed to write frame. Error {}", .{err});
             };
@@ -104,7 +107,7 @@ fn eventLoop() void {
         if (request_close)
             break :outer;
     }
-    finishVideoStream();
+    finishVideoStream(last_frame_index);
 }
 
 pub fn write(pixels: [*]const graphics.RGBA(u8), audio_samples: []const f32, frame_index: u64) !void {
@@ -220,8 +223,9 @@ pub fn open(options: RecordOptions) !void {
     video_codec_context.width = @intCast(i32, options.dimensions.width);
     video_codec_context.height = @intCast(i32, options.dimensions.height);
     video_codec_context.color_range = @enumToInt(libav.ColorRange.jpeg);
-    video_codec_context.bit_rate = 1024 * 1024 * 8;
+    video_codec_context.bit_rate = 1024 * 1024 * 16;
     video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
+    video_codec_context.framerate = .{ .num = @intCast(i32, options.fps), .den = 1 };
     video_codec_context.gop_size = 60;
     video_codec_context.max_b_frames = 1;
     video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.VAAPI);
@@ -415,7 +419,7 @@ pub fn open(options: RecordOptions) !void {
     state = .encoding;
 }
 
-fn finishVideoStream() void {
+fn finishVideoStream(frame_index: u32) void {
     //
     // TODO: Don't use encodeFrame here, we need to flush internal buffers
     //       and make sure we get an EOF return code
@@ -461,7 +465,7 @@ fn finishVideoStream() void {
     // Flush video frames
     //
 
-    encodeFrame(null) catch |err| {
+    encodeFrame(null, frame_index) catch |err| {
         std.log.err("Failed to encode frame. Error: {}", .{err});
     };
     _ = libav.writeTrailer(format_context);
@@ -602,14 +606,16 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index
         return error.HWEncodeFail;
     }
 
-    try encodeFrame(hardware_frame);
+    hardware_frame.pts = frame_index;
+
+    try encodeFrame(hardware_frame, frame_index);
 
     if (audio_buffer.len != 0) {
         try encodeAudioFrames(audio_buffer);
     }
 }
 
-fn encodeFrame(frame: ?*libav.Frame) !void {
+fn encodeFrame(frame: ?*libav.Frame, pts: u32) !void {
     var code = libav.codecSendFrame(video_codec_context, frame);
     if (code < 0) {
         var error_message_buffer: [512]u8 = undefined;
@@ -633,10 +639,7 @@ fn encodeFrame(frame: ?*libav.Frame) !void {
             return error.ReceivePacketFailed;
         }
 
-        // std.log.info("Writing video packet. Pts: {d} {d}", .{
-        //     packet.pts,
-        //     @intToFloat(f32, packet.pts) / 60.0,
-        // });
+        packet.pts = pts;
 
         //
         // Finish Frame
