@@ -10,7 +10,9 @@ const geometry = @import("geometry.zig");
 
 const libav = @import("libav.zig");
 
-const RingBuffer = @import("utils.zig").RingBuffer;
+const utils = @import("utils.zig");
+const RingBuffer = utils.RingBuffer;
+const Timer = utils.Timer;
 
 const EAGAIN: i32 = -11;
 const EINVAL: i32 = -22;
@@ -570,25 +572,20 @@ fn encodeAudioFrames(samples: []const f32) !void {
 }
 
 fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index: u32) !void {
+    const timer = Timer.now();
     rgbaToNV12(pixels, context.dimensions, &yuv_output_buffer);
+    timer.durationLog("rgba to nv12");
 
     const pixel_count: u32 = context.dimensions.width * context.dimensions.height;
-
-    // const u_channel_base: u32 = 0;
-    // const y_channel_base: u32 = pixel_count;
-    // const v_channel_base: u32 = pixel_count * 2;
 
     const y_channel_base: u32 = 0;
     const uv_channel_base: u32 = pixel_count;
 
     video_frame.data[0] = &(yuv_output_buffer[y_channel_base]);
     video_frame.data[1] = &(yuv_output_buffer[uv_channel_base]);
-    // video_frame.data[2] = &(yuv_output_buffer[v_channel_base]);
 
-    // const plane_stride: i32 = @divExact(3 * @intCast(i32, context.dimensions.width), 3);
     video_frame.linesize[0] = @intCast(i32, context.dimensions.width);
-    video_frame.linesize[1] = @divExact(plane_stride, 2);
-    // video_frame.linesize[2] = plane_stride;
+    video_frame.linesize[1] = @intCast(i32, context.dimensions.width);
 
     video_frame.format = @enumToInt(libav.PixelFormat.NV12);
     video_frame.width = @intCast(i32, context.dimensions.width);
@@ -655,77 +652,134 @@ fn encodeFrame(frame: ?*libav.Frame) !void {
     }
 }
 
-// Y' = 0.257 * R' + 0.504 * G' + 0.098 * B' + 16
-// Cb' = -0.148 * R' - 0.291 * G' + 0.439 * B + 128'
-// Cr' = 0.439 * R' - 0.368 * G' - 0.071 * B' + 128
+/// Converts image from RGBA format to NV12 (Or YUV420)
+/// Calculations based on:
+/// https://learn.microsoft.com/en-us/windows/win32/medfound/recommended-8-bit-yuv-formats-for-video-rendering
+///      Y = ( (  66 * R + 129 * G +  25 * B + 128) >> 8) +  16
+///      U = ( ( -38 * R -  74 * G + 112 * B + 128) >> 8) + 128
+///      V = ( ( 112 * R -  94 * G -  18 * B + 128) >> 8) + 128
 fn rgbaToNV12(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensions2D(u32), out_buffer: []u8) void {
     const pixel_count = dimensions.width * dimensions.height;
 
+    //
+    // Since we're downsampling vertically by 2, we set all pixels to 0 and add. This prevents
+    // us from needing to jump ahead `width` pixels in the source buffer to fully calculate each
+    // destination y value
+    //
+    @memset(out_buffer, 0);
+
     const y_channel_base: u32 = 0;
+    //
+    // U and V values are stored in the same plane and interleaved. Each U and V value is
+    // calculated from 4 pixels (2x2 downsampling), so this plane will be half the size of
+    // the Y plane
+    //
     const uv_channel_base: u32 = pixel_count;
 
-    const y_const_a = @splat(8, @as(f32, 0.257));
-    const y_const_b = @splat(8, @as(f32, 0.504));
-    const y_const_c = @splat(8, @as(f32, 0.098));
-    const y_const_d = @splat(8, @as(f32, 16));
+    const y_const_a = @splat(8, @as(i32, 66));
+    const y_const_b = @splat(8, @as(i32, 129));
+    const y_const_c = @splat(8, @as(i32, 25));
+    const y_const_d = @splat(8, @as(i32, 128));
+    const y_const_e = @splat(8, @as(i32, 16));
 
-    const u_const_a = @splat(8, @as(f32, -0.148));
-    const u_const_b = @splat(8, @as(f32, -0.291));
-    const u_const_c = @splat(8, @as(f32, 0.439));
-    const u_const_d = @splat(8, @as(f32, 128));
+    const u_const_a = @splat(8, @as(i32, -38));
+    const u_const_b = @splat(8, @as(i32, 74));
+    const u_const_c = @splat(8, @as(i32, 112));
+    const u_const_d = @splat(8, @as(i32, 128));
+    const u_const_e = @splat(8, @as(i32, 128));
 
-    const v_const_a = @splat(8, @as(f32, 0.439));
-    const v_const_b = @splat(8, @as(f32, 0.368));
-    const v_const_c = @splat(8, @as(f32, 0.071));
-    const v_const_d = @splat(8, @as(f32, 128));
+    const v_const_a = @splat(8, @as(i32, 112));
+    const v_const_b = @splat(8, @as(i32, 94));
+    const v_const_c = @splat(8, @as(i32, 18));
+    const v_const_d = @splat(8, @as(i32, 128));
+    const v_const_e = @splat(8, @as(i32, 128));
 
-    const divider = @splat(8, @as(f32, 0.5));
+    const divider = @splat(8, @as(i32, 8));
 
     var i: usize = 0;
     while (i < pixel_count) : (i += 8) {
-        const r = @Vector(8, f32){
-            @intToFloat(f32, pixels[i + 0].r),
-            @intToFloat(f32, pixels[i + 1].r),
-            @intToFloat(f32, pixels[i + 2].r),
-            @intToFloat(f32, pixels[i + 3].r),
-            @intToFloat(f32, pixels[i + 4].r),
-            @intToFloat(f32, pixels[i + 5].r),
-            @intToFloat(f32, pixels[i + 6].r),
-            @intToFloat(f32, pixels[i + 7].r),
+        const r = @Vector(8, i32){
+            pixels[i + 0].r,
+            pixels[i + 1].r,
+            pixels[i + 2].r,
+            pixels[i + 3].r,
+            pixels[i + 4].r,
+            pixels[i + 5].r,
+            pixels[i + 6].r,
+            pixels[i + 7].r,
         };
 
-        const g = @Vector(8, f32){
-            @intToFloat(f32, pixels[i + 0].g),
-            @intToFloat(f32, pixels[i + 1].g),
-            @intToFloat(f32, pixels[i + 2].g),
-            @intToFloat(f32, pixels[i + 3].g),
-            @intToFloat(f32, pixels[i + 4].g),
-            @intToFloat(f32, pixels[i + 5].g),
-            @intToFloat(f32, pixels[i + 6].g),
-            @intToFloat(f32, pixels[i + 7].g),
+        const g = @Vector(8, i32){
+            pixels[i + 0].g,
+            pixels[i + 1].g,
+            pixels[i + 2].g,
+            pixels[i + 3].g,
+            pixels[i + 4].g,
+            pixels[i + 5].g,
+            pixels[i + 6].g,
+            pixels[i + 7].g,
         };
 
-        const b = @Vector(8, f32){
-            @intToFloat(f32, pixels[i + 0].b),
-            @intToFloat(f32, pixels[i + 1].b),
-            @intToFloat(f32, pixels[i + 2].b),
-            @intToFloat(f32, pixels[i + 3].b),
-            @intToFloat(f32, pixels[i + 4].b),
-            @intToFloat(f32, pixels[i + 5].b),
-            @intToFloat(f32, pixels[i + 6].b),
-            @intToFloat(f32, pixels[i + 7].b),
+        const b = @Vector(8, i32){
+            pixels[i + 0].b,
+            pixels[i + 1].b,
+            pixels[i + 2].b,
+            pixels[i + 3].b,
+            pixels[i + 4].b,
+            pixels[i + 5].b,
+            pixels[i + 6].b,
+            pixels[i + 7].b,
         };
 
-        const y_vector: @Vector(8, f32) = (y_const_a * r) + (y_const_b * g) + (y_const_c * b) + y_const_d;
-
+        const y_vector: @Vector(8, i32) = (((y_const_a * r) + (y_const_b * g) + (y_const_c * b) + y_const_d) >> divider) + y_const_e;
         inline for (0..8) |offset|
-            out_buffer[i + y_channel_base + offset] = @floatToInt(u8, y_vector[offset]);
+            out_buffer[i + y_channel_base + offset] = @intCast(u8, y_vector[offset]);
 
-        const u_vector: @Vector(8, f32) = ((u_const_a * r) - (u_const_b * g) + (u_const_c * b) + u_const_d) * divider;
-        const v_vector: @Vector(8, f32) = ((v_const_a * r) - (v_const_b * g) - (v_const_c * b) + v_const_d) * divider;
+        //
+        // The algorithm specifies dividing by 256, but since we also have to downsample the results we divide by 1024 instead
+        //
+        const u_vector: @Vector(8, i32) = (((u_const_a * r) - (u_const_b * g) + (u_const_c * b) + u_const_d) >> divider) + u_const_e;
+        const v_vector: @Vector(8, i32) = (((v_const_a * r) - (v_const_b * g) - (v_const_c * b) + v_const_d) >> divider) + v_const_e;
 
-        inline for (0..8) |offset|
-            out_buffer[i + uv_channel_base + offset] = @floatToInt(u8, u_vector[offset]) + (@floatToInt(u8, v_vector[offset]) >> 4);
+        const dst_uv_x: usize = i % dimensions.width;
+        const dst_uv_y: usize = @divTrunc(i, dimensions.width * 2);
+        const dst_uv_base: usize = uv_channel_base + (dst_uv_y * dimensions.width) + dst_uv_x;
+
+        // inline for (0..8) |offset|
+        //     assert(u_vector[offset] >= 0);
+
+        // inline for (0..8) |offset|
+        //     assert(v_vector[offset] >= 0);
+
+        // const u_0: i32 = @divFloor(u_vector[0], 4) + @divFloor(u_vector[1], 4);
+        // const v_0: i32 = @divFloor(v_vector[0], 4) + @divFloor(v_vector[1], 4);
+        // const u_1: i32 = @divFloor(u_vector[2], 4) + @divFloor(u_vector[3], 4);
+        // const v_1: i32 = @divFloor(v_vector[2], 4) + @divFloor(v_vector[3], 4);
+        // const u_2: i32 = @divFloor(u_vector[4], 4) + @divFloor(u_vector[5], 4);
+        // const v_2: i32 = @divFloor(v_vector[4], 4) + @divFloor(v_vector[5], 4);
+        // const u_3: i32 = @divFloor(u_vector[6], 4) + @divFloor(u_vector[7], 4);
+        // const v_3: i32 = @divFloor(v_vector[6], 4) + @divFloor(v_vector[7], 4);
+
+        // assert(u_0 < 256);
+        // assert(v_0 < 256);
+        // assert(u_1 < 256);
+        // assert(v_1 < 256);
+        // assert(u_2 < 256);
+        // assert(v_2 < 256);
+        // assert(u_3 < 256);
+        // assert(v_3 < 256);
+
+        // @ptrCast(*i32, @alignCast(4, &out_buffer[dst_uv_base])).* += (u_0) + (v_0 >> 8) + (u_1 >> 16) + (v_1 >> 24);
+        // @ptrCast(*i32, @alignCast(4, &out_buffer[dst_uv_base + 4])).* += (u_2) + (v_2 >> 8) + (u_3 >> 16) + (v_3 >> 24);
+
+        inline for (0..4) |offset| {
+            const offset_a: usize = comptime offset * 2;
+            const offset_b: usize = comptime offset_a + 1;
+            out_buffer[dst_uv_base + offset_a] += @intCast(u8, @divFloor(u_vector[offset_a], 4));
+            out_buffer[dst_uv_base + offset_a] += @intCast(u8, @divFloor(u_vector[offset_b], 4));
+            out_buffer[dst_uv_base + offset_b] += @intCast(u8, @divFloor(v_vector[offset_a], 4));
+            out_buffer[dst_uv_base + offset_b] += @intCast(u8, @divFloor(v_vector[offset_b], 4));
+        }
     }
 }
 
