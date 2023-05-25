@@ -86,18 +86,17 @@ var context: struct {
 const Frame = struct {
     pixels: [*]const PixelType,
     audio_buffer: []const f32,
-    frame_index: u64,
+    frame_index: i64,
 };
 
-var ring_buffer = RingBuffer(Frame, 4).init;
+var ring_buffer = RingBuffer(Frame, 8).init;
 
-var last_frame_index: u32 = 0;
+var last_frame_index: i64 = -1;
 
 fn eventLoop() void {
     outer: while (true) {
         while (ring_buffer.pop()) |entry| {
-            last_frame_index = @intCast(u32, entry.frame_index);
-            writeFrame(entry.pixels, entry.audio_buffer, @intCast(u32, entry.frame_index)) catch |err| {
+            writeFrame(entry.pixels, entry.audio_buffer, entry.frame_index) catch |err| {
                 std.log.err("Failed to write frame. Error {}", .{err});
             };
             if (request_close)
@@ -107,17 +106,40 @@ fn eventLoop() void {
         if (request_close)
             break :outer;
     }
-    finishVideoStream(last_frame_index);
+    finishVideoStream(@max(0, last_frame_index));
 }
 
-pub fn write(pixels: [*]const graphics.RGBA(u8), audio_samples: []const f32, frame_index: u64) !void {
-    ring_buffer.push(.{
-        .pixels = pixels,
-        .audio_buffer = audio_samples,
-        .frame_index = frame_index,
-    }) catch {
-        std.log.warn("Buffer full, failed to write frame", .{});
-    };
+pub fn write(pixels: [*]const graphics.RGBA(u8), audio_samples: []const f32, frame_index: i64) !void {
+    assert(frame_index >= 0);
+    assert(frame_index >= last_frame_index);
+    if (frame_index > last_frame_index) {
+        if (last_frame_index + 1 != frame_index) {
+            std.log.warn("Frames skipped. Going from {d} to {d}", .{ last_frame_index, frame_index });
+            const frames_to_fill = (frame_index - last_frame_index);
+            var i: usize = 1;
+            while (i < frames_to_fill) : (i += 1) {
+                std.log.info("Adding (fill) frame {d}", .{last_frame_index + @intCast(i64, i)});
+                ring_buffer.push(.{
+                    .pixels = pixels,
+                    .audio_buffer = &.{},
+                    .frame_index = last_frame_index + @intCast(i64, i),
+                }) catch {
+                    std.log.warn("Buffer full, failed to write frame", .{});
+                };
+            }
+        }
+        last_frame_index = frame_index;
+        std.log.info("Adding frame {d}", .{frame_index});
+        ring_buffer.push(.{
+            .pixels = pixels,
+            .audio_buffer = audio_samples,
+            .frame_index = frame_index,
+        }) catch {
+            std.log.warn("Buffer full, failed to write frame", .{});
+        };
+    } else {
+        std.log.warn("Frame already written for index {d}. Skipping", .{frame_index});
+    }
 }
 
 pub fn close() void {
@@ -131,7 +153,7 @@ pub fn close() void {
 
     libav.filterGraphFree(&video_filter_graph);
 
-    ring_buffer = RingBuffer(Frame, 4).init;
+    ring_buffer = RingBuffer(Frame, 8).init;
 
     const audio_written = @intToFloat(f32, samples_written) / 44100.0;
     std.log.info("{d} seconds of audio written", .{audio_written});
@@ -227,7 +249,7 @@ pub fn open(options: RecordOptions) !void {
     video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
     video_codec_context.framerate = .{ .num = @intCast(i32, options.fps), .den = 1 };
     video_codec_context.gop_size = 60;
-    video_codec_context.max_b_frames = 1;
+    video_codec_context.max_b_frames = 4;
     video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.VAAPI);
     video_codec_context.get_format = &getVaapiFormat;
 
@@ -419,7 +441,7 @@ pub fn open(options: RecordOptions) !void {
     state = .encoding;
 }
 
-fn finishVideoStream(frame_index: u32) void {
+fn finishVideoStream(frame_index: i64) void {
     //
     // TODO: Don't use encodeFrame here, we need to flush internal buffers
     //       and make sure we get an EOF return code
@@ -575,7 +597,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
     std.debug.assert(sample_index == samples.len);
 }
 
-fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index: u32) !void {
+fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index: i64) !void {
     const timer = Timer.now();
     rgbaToNV12(pixels, context.dimensions, &yuv_output_buffer);
     timer.durationLog("rgba to nv12");
@@ -594,6 +616,7 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index
     video_frame.format = @enumToInt(libav.PixelFormat.NV12);
     video_frame.width = @intCast(i32, context.dimensions.width);
     video_frame.height = @intCast(i32, context.dimensions.height);
+    video_frame.pict_type = @enumToInt(libav.PictureType.none);
 
     video_frames_written += 1;
     video_frame.pts = frame_index;
@@ -615,7 +638,7 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index
     }
 }
 
-fn encodeFrame(frame: ?*libav.Frame, pts: u32) !void {
+fn encodeFrame(frame: ?*libav.Frame, pts: i64) !void {
     var code = libav.codecSendFrame(video_codec_context, frame);
     if (code < 0) {
         var error_message_buffer: [512]u8 = undefined;

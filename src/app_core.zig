@@ -464,8 +464,11 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
             } else break :blk sample_buffer[0..sample_multiple];
         };
 
-        const recording_frame_index: u64 = frame_index - recording_frame_index_base;
-        video_encoder.write(video_frame_to_encode, samples_to_encode, recording_frame_index) catch |err| {
+        const current_time_ns = std.time.nanoTimestamp();
+        const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
+        const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
+        const current_frame_index = @divFloor(ms_from_record_start, 16);
+        video_encoder.write(video_frame_to_encode, samples_to_encode, current_frame_index) catch |err| {
             std.log.warn("Failed to write video frame. Error: {}", .{err});
         };
     }
