@@ -570,24 +570,27 @@ fn encodeAudioFrames(samples: []const f32) !void {
 }
 
 fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index: u32) !void {
-    rgbaToPlanarYuv(pixels, context.dimensions, &yuv_output_buffer);
+    rgbaToNV12(pixels, context.dimensions, &yuv_output_buffer);
 
     const pixel_count: u32 = context.dimensions.width * context.dimensions.height;
 
-    const u_channel_base: u32 = 0;
-    const y_channel_base: u32 = pixel_count;
-    const v_channel_base: u32 = pixel_count * 2;
+    // const u_channel_base: u32 = 0;
+    // const y_channel_base: u32 = pixel_count;
+    // const v_channel_base: u32 = pixel_count * 2;
+
+    const y_channel_base: u32 = 0;
+    const uv_channel_base: u32 = pixel_count;
 
     video_frame.data[0] = &(yuv_output_buffer[y_channel_base]);
-    video_frame.data[1] = &(yuv_output_buffer[u_channel_base]);
-    video_frame.data[2] = &(yuv_output_buffer[v_channel_base]);
+    video_frame.data[1] = &(yuv_output_buffer[uv_channel_base]);
+    // video_frame.data[2] = &(yuv_output_buffer[v_channel_base]);
 
-    const plane_stride: i32 = @divExact(3 * @intCast(i32, context.dimensions.width), 3);
-    video_frame.linesize[0] = plane_stride;
-    video_frame.linesize[1] = plane_stride;
-    video_frame.linesize[2] = plane_stride;
+    // const plane_stride: i32 = @divExact(3 * @intCast(i32, context.dimensions.width), 3);
+    video_frame.linesize[0] = @intCast(i32, context.dimensions.width);
+    video_frame.linesize[1] = @divExact(plane_stride, 2);
+    // video_frame.linesize[2] = plane_stride;
 
-    video_frame.format = @enumToInt(libav.PixelFormat.YUV444P);
+    video_frame.format = @enumToInt(libav.PixelFormat.NV12);
     video_frame.width = @intCast(i32, context.dimensions.width);
     video_frame.height = @intCast(i32, context.dimensions.height);
 
@@ -649,6 +652,80 @@ fn encodeFrame(frame: ?*libav.Frame) !void {
             std.log.warn("Interleaved write frame failed", .{});
         }
         libav.packetUnref(&packet);
+    }
+}
+
+// Y' = 0.257 * R' + 0.504 * G' + 0.098 * B' + 16
+// Cb' = -0.148 * R' - 0.291 * G' + 0.439 * B + 128'
+// Cr' = 0.439 * R' - 0.368 * G' - 0.071 * B' + 128
+fn rgbaToNV12(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensions2D(u32), out_buffer: []u8) void {
+    const pixel_count = dimensions.width * dimensions.height;
+
+    const y_channel_base: u32 = 0;
+    const uv_channel_base: u32 = pixel_count;
+
+    const y_const_a = @splat(8, @as(f32, 0.257));
+    const y_const_b = @splat(8, @as(f32, 0.504));
+    const y_const_c = @splat(8, @as(f32, 0.098));
+    const y_const_d = @splat(8, @as(f32, 16));
+
+    const u_const_a = @splat(8, @as(f32, -0.148));
+    const u_const_b = @splat(8, @as(f32, -0.291));
+    const u_const_c = @splat(8, @as(f32, 0.439));
+    const u_const_d = @splat(8, @as(f32, 128));
+
+    const v_const_a = @splat(8, @as(f32, 0.439));
+    const v_const_b = @splat(8, @as(f32, 0.368));
+    const v_const_c = @splat(8, @as(f32, 0.071));
+    const v_const_d = @splat(8, @as(f32, 128));
+
+    const divider = @splat(8, @as(f32, 0.5));
+
+    var i: usize = 0;
+    while (i < pixel_count) : (i += 8) {
+        const r = @Vector(8, f32){
+            @intToFloat(f32, pixels[i + 0].r),
+            @intToFloat(f32, pixels[i + 1].r),
+            @intToFloat(f32, pixels[i + 2].r),
+            @intToFloat(f32, pixels[i + 3].r),
+            @intToFloat(f32, pixels[i + 4].r),
+            @intToFloat(f32, pixels[i + 5].r),
+            @intToFloat(f32, pixels[i + 6].r),
+            @intToFloat(f32, pixels[i + 7].r),
+        };
+
+        const g = @Vector(8, f32){
+            @intToFloat(f32, pixels[i + 0].g),
+            @intToFloat(f32, pixels[i + 1].g),
+            @intToFloat(f32, pixels[i + 2].g),
+            @intToFloat(f32, pixels[i + 3].g),
+            @intToFloat(f32, pixels[i + 4].g),
+            @intToFloat(f32, pixels[i + 5].g),
+            @intToFloat(f32, pixels[i + 6].g),
+            @intToFloat(f32, pixels[i + 7].g),
+        };
+
+        const b = @Vector(8, f32){
+            @intToFloat(f32, pixels[i + 0].b),
+            @intToFloat(f32, pixels[i + 1].b),
+            @intToFloat(f32, pixels[i + 2].b),
+            @intToFloat(f32, pixels[i + 3].b),
+            @intToFloat(f32, pixels[i + 4].b),
+            @intToFloat(f32, pixels[i + 5].b),
+            @intToFloat(f32, pixels[i + 6].b),
+            @intToFloat(f32, pixels[i + 7].b),
+        };
+
+        const y_vector: @Vector(8, f32) = (y_const_a * r) + (y_const_b * g) + (y_const_c * b) + y_const_d;
+
+        inline for (0..8) |offset|
+            out_buffer[i + y_channel_base + offset] = @floatToInt(u8, y_vector[offset]);
+
+        const u_vector: @Vector(8, f32) = ((u_const_a * r) - (u_const_b * g) + (u_const_c * b) + u_const_d) * divider;
+        const v_vector: @Vector(8, f32) = ((v_const_a * r) - (v_const_b * g) - (v_const_c * b) + v_const_d) * divider;
+
+        inline for (0..8) |offset|
+            out_buffer[i + uv_channel_base + offset] = @floatToInt(u8, u_vector[offset]) + (@floatToInt(u8, v_vector[offset]) >> 4);
     }
 }
 
