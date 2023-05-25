@@ -77,7 +77,7 @@ var planar_buffers: [planar_buffer_count][2048]f32 = undefined;
 //
 // TODO: Heap allocate this
 //
-var yuv_output_buffer: [1080 * 1920 * 3]u8 = undefined;
+var yuv_output_buffer: [1080 * 1920 * 2]u8 = undefined;
 
 var context: struct {
     dimensions: geometry.Dimensions2D(u32),
@@ -662,6 +662,63 @@ fn encodeFrame(frame: ?*libav.Frame, pts: u32) !void {
 ///      U = ( ( -38 * R -  74 * G + 112 * B + 128) >> 8) + 128
 ///      V = ( ( 112 * R -  94 * G -  18 * B + 128) >> 8) + 128
 fn rgbaToNV12(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensions2D(u32), out_buffer: []u8) void {
+    const pixel_count = dimensions.width * dimensions.height;
+    const uv_channel_base: u32 = pixel_count;
+    var uv_index: usize = uv_channel_base;
+    var y: usize = 0;
+    while (y < dimensions.height) : (y += 2) {
+        var x: usize = 0;
+        while (x < dimensions.width) : (x += 2) {
+            const index_00: usize = ((y + 0) * dimensions.width) + (x + 0);
+            const index_01: usize = ((y + 0) * dimensions.width) + (x + 1);
+            const index_10: usize = ((y + 1) * dimensions.width) + (x + 0);
+            const index_11: usize = ((y + 1) * dimensions.width) + (x + 1);
+            const p00 = pixels[index_00];
+            const p01 = pixels[index_01];
+            const p10 = pixels[index_10];
+            const p11 = pixels[index_11];
+            const p00_r = @intCast(i32, p00.r);
+            const p00_g = @intCast(i32, p00.g);
+            const p00_b = @intCast(i32, p00.b);
+            const p01_r = @intCast(i32, p01.r);
+            const p01_g = @intCast(i32, p01.g);
+            const p01_b = @intCast(i32, p01.b);
+            const p10_r = @intCast(i32, p10.r);
+            const p10_g = @intCast(i32, p10.g);
+            const p10_b = @intCast(i32, p10.b);
+            const p11_r = @intCast(i32, p11.r);
+            const p11_g = @intCast(i32, p11.g);
+            const p11_b = @intCast(i32, p11.b);
+            const y00: i32 = (((66 * p00_r) + (129 * p00_g) + (25 * p00_b) + 128) >> 8) + 16;
+            const y01: i32 = (((66 * p01_r) + (129 * p01_g) + (25 * p01_b) + 128) >> 8) + 16;
+            const y10: i32 = (((66 * p10_r) + (129 * p10_g) + (25 * p10_b) + 128) >> 8) + 16;
+            const y11: i32 = (((66 * p11_r) + (129 * p11_g) + (25 * p11_b) + 128) >> 8) + 16;
+            out_buffer[index_00] = @intCast(u8, y00);
+            out_buffer[index_01] = @intCast(u8, y01);
+            out_buffer[index_10] = @intCast(u8, y10);
+            out_buffer[index_11] = @intCast(u8, y11);
+            const u_00: i32 = (((-38 * p00_r) - (74 * p00_g) + (112 * p00_b) + 128) >> 8) + 128;
+            const u_01: i32 = (((-38 * p01_r) - (74 * p01_g) + (112 * p00_b) + 128) >> 8) + 128;
+            const u_10: i32 = (((-38 * p10_r) - (74 * p10_g) + (112 * p00_b) + 128) >> 8) + 128;
+            const u_11: i32 = (((-38 * p11_r) - (74 * p11_g) + (112 * p00_b) + 128) >> 8) + 128;
+            const v_00: i32 = (((112 * p00_r) - (94 * p00_g) - (18 * p00_b) + 128) >> 8) + 128;
+            const v_01: i32 = (((112 * p01_r) - (94 * p01_g) - (18 * p01_b) + 128) >> 8) + 128;
+            const v_10: i32 = (((112 * p10_r) - (94 * p10_g) - (18 * p10_b) + 128) >> 8) + 128;
+            const v_11: i32 = (((112 * p11_r) - (94 * p11_g) - (18 * p11_b) + 128) >> 8) + 128;
+            out_buffer[uv_index + 0] = @intCast(u8, @divFloor(u_00 + u_01 + u_10 + u_11, 4));
+            out_buffer[uv_index + 1] = @intCast(u8, @divFloor(v_00 + v_01 + v_10 + v_11, 4));
+            uv_index += 2;
+        }
+    }
+}
+
+/// Converts image from RGBA format to NV12 (Or YUV420)
+/// Calculations based on:
+/// https://learn.microsoft.com/en-us/windows/win32/medfound/recommended-8-bit-yuv-formats-for-video-rendering
+///      Y = ( (  66 * R + 129 * G +  25 * B + 128) >> 8) +  16
+///      U = ( ( -38 * R -  74 * G + 112 * B + 128) >> 8) + 128
+///      V = ( ( 112 * R -  94 * G -  18 * B + 128) >> 8) + 128
+fn rgbaToNV122(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensions2D(u32), out_buffer: []u8) void {
     const pixel_count = dimensions.width * dimensions.height;
 
     //
