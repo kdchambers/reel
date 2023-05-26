@@ -50,9 +50,6 @@ var video_codec_context: *libav.CodecContext = undefined;
 var format_context: *libav.FormatContext = undefined;
 var video_stream: *libav.Stream = undefined;
 var output_format: *libav.OutputFormat = undefined;
-var video_filter_source_context: *libav.FilterContext = undefined;
-var video_filter_sink_context: *libav.FilterContext = undefined;
-var video_filter_graph: *libav.FilterGraph = undefined;
 var hw_frame_context: ?*libav.BufferRef = null;
 var video_frame: *libav.Frame = undefined;
 var hardware_frame: *libav.Frame = undefined;
@@ -83,21 +80,34 @@ var context: struct {
     dimensions: geometry.Dimensions2D(u32),
 } = undefined;
 
-const Frame = struct {
+const VideoFrame = struct {
     pixels: [*]const PixelType,
+    frame_index: i64,
+};
+
+const AudioFrame = struct {
     audio_buffer: []const f32,
     frame_index: i64,
 };
 
-var ring_buffer = RingBuffer(Frame, 8).init;
+var video_ring_buffer = RingBuffer(VideoFrame, 8).init;
+var audio_ring_buffer = RingBuffer(AudioFrame, 8).init;
 
-var last_frame_index: i64 = -1;
+var last_video_frame_index: i64 = -1;
+var last_audio_frame_index: i64 = -1;
 
 fn eventLoop() void {
     outer: while (true) {
-        while (ring_buffer.pop()) |entry| {
-            writeFrame(entry.pixels, entry.audio_buffer, entry.frame_index) catch |err| {
-                std.log.err("Failed to write frame. Error {}", .{err});
+        while (video_ring_buffer.pop()) |entry| {
+            writeVideoFrame(entry.pixels, entry.frame_index) catch |err| {
+                std.log.err("Failed to write video frame. Error {}", .{err});
+            };
+            if (request_close)
+                break :outer;
+        }
+        while (audio_ring_buffer.pop()) |entry| {
+            writeAudioFrame(entry.audio_buffer, entry.frame_index) catch |err| {
+                std.log.err("Failed to write audio frame. Error {}", .{err});
             };
             if (request_close)
                 break :outer;
@@ -106,32 +116,61 @@ fn eventLoop() void {
         if (request_close)
             break :outer;
     }
-    finishVideoStream(@max(0, last_frame_index));
+    finishVideoStream(@max(0, last_video_frame_index));
 }
 
-pub fn write(pixels: [*]const graphics.RGBA(u8), audio_samples: []const f32, frame_index: i64) !void {
+pub fn appendVideoFrame(pixels: [*]const graphics.RGBA(u8), frame_index: i64) !void {
     assert(frame_index >= 0);
-    assert(frame_index >= last_frame_index);
-    if (frame_index > last_frame_index) {
-        if (last_frame_index + 1 != frame_index) {
-            std.log.warn("Frames skipped. Going from {d} to {d}", .{ last_frame_index, frame_index });
-            const frames_to_fill = (frame_index - last_frame_index);
+    assert(frame_index >= last_video_frame_index);
+    if (frame_index > last_video_frame_index) {
+        if (last_video_frame_index + 1 != frame_index) {
+            std.log.warn("Frames skipped. Going from {d} to {d}", .{ last_video_frame_index, frame_index });
+            const frames_to_fill = (frame_index - last_video_frame_index);
             var i: usize = 1;
             while (i < frames_to_fill) : (i += 1) {
-                std.log.info("Adding (fill) frame {d}", .{last_frame_index + @intCast(i64, i)});
-                ring_buffer.push(.{
+                std.log.info("Adding (fill) frame {d}", .{last_video_frame_index + @intCast(i64, i)});
+                video_ring_buffer.push(.{
                     .pixels = pixels,
-                    .audio_buffer = &.{},
-                    .frame_index = last_frame_index + @intCast(i64, i),
+                    .frame_index = last_video_frame_index + @intCast(i64, i),
                 }) catch {
                     std.log.warn("Buffer full, failed to write frame", .{});
                 };
             }
         }
-        last_frame_index = frame_index;
-        std.log.info("Adding frame {d}", .{frame_index});
-        ring_buffer.push(.{
+        last_video_frame_index = frame_index;
+        std.log.info("Adding video frame {d}", .{frame_index});
+        video_ring_buffer.push(.{
             .pixels = pixels,
+            .frame_index = frame_index,
+        }) catch {
+            std.log.warn("Buffer full, failed to write frame", .{});
+        };
+    } else {
+        std.log.warn("Frame already written for index {d}. Skipping", .{frame_index});
+    }
+}
+
+pub fn appendAudioFrame(audio_samples: []const f32, frame_index: i64) !void {
+    assert(frame_index >= 0);
+    assert(frame_index >= last_audio_frame_index);
+    if (frame_index > last_audio_frame_index) {
+        if (last_audio_frame_index + 1 != frame_index) {
+            std.log.warn("Frames skipped. Going from {d} to {d}", .{ last_audio_frame_index, frame_index });
+            const frames_to_fill = (frame_index - last_audio_frame_index);
+            var i: usize = 1;
+            while (i < frames_to_fill) : (i += 1) {
+                std.log.info("Adding (fill) frame {d}", .{last_audio_frame_index + @intCast(i64, i)});
+                audio_ring_buffer.push(.{
+                    .audio_buffer = audio_samples,
+                    .frame_index = last_audio_frame_index + @intCast(i64, i),
+                }) catch {
+                    std.log.warn("Buffer full, failed to write frame", .{});
+                };
+            }
+        }
+        last_audio_frame_index = frame_index;
+        std.log.info("Adding audio frame {d}", .{frame_index});
+        audio_ring_buffer.push(.{
             .audio_buffer = audio_samples,
             .frame_index = frame_index,
         }) catch {
@@ -150,10 +189,6 @@ pub fn close() void {
     request_close = false;
     state = .closed;
     std.log.info("video_encoder: shutdown successful", .{});
-
-    libav.filterGraphFree(&video_filter_graph);
-
-    ring_buffer = RingBuffer(Frame, 8).init;
 
     const audio_written = @intToFloat(f32, samples_written) / 44100.0;
     std.log.info("{d} seconds of audio written", .{audio_written});
@@ -214,7 +249,7 @@ pub fn open(options: RecordOptions) !void {
             output_format.name,
             output_path,
         );
-        std.debug.assert(ret_code == 0);
+        assert(ret_code == 0);
     }
 
     if (format_context_opt) |fc| {
@@ -474,7 +509,7 @@ fn finishVideoStream(frame_index: i64) void {
         //
         libav.packetRescaleTS(&packet, audio_codec_context.time_base, audio_stream.time_base);
         packet.stream_index = audio_stream.index;
-        std.debug.assert(audio_stream.index != video_stream.index);
+        assert(audio_stream.index != video_stream.index);
 
         code = libav.interleavedWriteFrame(format_context, &packet);
         if (code != 0) {
@@ -501,12 +536,12 @@ fn finishVideoStream(frame_index: i64) void {
 }
 
 fn encodeAudioFrames(samples: []const f32) !void {
-    std.debug.assert(samples.len % 2048 == 0);
+    assert(samples.len % 2048 == 0);
 
     audio_frame.format = @enumToInt(libav.SampleFormat.fltp);
     audio_frame.nb_samples = audio_codec_context.frame_size;
 
-    std.debug.assert(audio_codec_context.frame_size == 1024);
+    assert(audio_codec_context.frame_size == 1024);
 
     const sample_multiple: usize = 2048;
     const samples_per_channel: usize = @divExact(sample_multiple, 2);
@@ -537,7 +572,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
             var error_message_buffer: [512]u8 = undefined;
             _ = libav.strError(fill_audio_frame_code, &error_message_buffer, 512);
             std.log.err("Failed to fill audio frame: {d} {s}", .{ fill_audio_frame_code, error_message_buffer });
-            std.debug.assert(false);
+            assert(false);
         }
 
         audio_frame.pts = @intCast(i64, samples_written);
@@ -569,12 +604,12 @@ fn encodeAudioFrames(samples: []const f32) !void {
                 }
 
                 if (receive_packet_code == libav.error_eof) {
-                    std.debug.assert(false);
+                    assert(false);
                     return error.UnexpectedEOF;
                 }
 
                 if (receive_packet_code < 0) {
-                    std.debug.assert(false);
+                    assert(false);
                     return error.RecievePacketFail;
                 }
 
@@ -584,7 +619,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
                 const write_packet_code = libav.interleavedWriteFrame(format_context, &packet);
                 if (write_packet_code != 0) {
                     std.log.warn("Interleaved write frame failed. {d}", .{write_packet_code});
-                    std.debug.assert(false);
+                    assert(false);
                 }
                 libav.packetUnref(&packet);
             }
@@ -594,10 +629,10 @@ fn encodeAudioFrames(samples: []const f32) !void {
         }
     }
 
-    std.debug.assert(sample_index == samples.len);
+    assert(sample_index == samples.len);
 }
 
-fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index: i64) !void {
+fn writeVideoFrame(pixels: [*]const PixelType, frame_index: i64) !void {
     const timer = Timer.now();
     rgbaToNV12(pixels, context.dimensions, &yuv_output_buffer);
     timer.durationLog("rgba to nv12");
@@ -632,10 +667,12 @@ fn writeFrame(pixels: [*]const PixelType, audio_buffer: []const f32, frame_index
     hardware_frame.pts = frame_index;
 
     try encodeFrame(hardware_frame, frame_index);
+}
 
-    if (audio_buffer.len != 0) {
-        try encodeAudioFrames(audio_buffer);
-    }
+fn writeAudioFrame(audio_buffer: []const f32, frame_index: i64) !void {
+    _ = frame_index;
+    assert(audio_buffer.len != 0);
+    try encodeAudioFrames(audio_buffer);
 }
 
 fn encodeFrame(frame: ?*libav.Frame, pts: i64) !void {
@@ -818,9 +855,6 @@ fn rgbaToNV122(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensio
         inline for (0..8) |offset|
             out_buffer[i + y_channel_base + offset] = @intCast(u8, y_vector[offset]);
 
-        //
-        // The algorithm specifies dividing by 256, but since we also have to downsample the results we divide by 1024 instead
-        //
         const u_vector: @Vector(8, i32) = (((u_const_a * r) - (u_const_b * g) + (u_const_c * b) + u_const_d) >> divider) + u_const_e;
         const v_vector: @Vector(8, i32) = (((v_const_a * r) - (v_const_b * g) - (v_const_c * b) + v_const_d) >> divider) + v_const_e;
 
