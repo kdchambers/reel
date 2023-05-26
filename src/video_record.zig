@@ -87,7 +87,6 @@ const VideoFrame = struct {
 
 const AudioFrame = struct {
     audio_buffer: []const f32,
-    frame_index: i64,
 };
 
 var video_ring_buffer = RingBuffer(VideoFrame, 8).init;
@@ -106,7 +105,7 @@ fn eventLoop() void {
                 break :outer;
         }
         while (audio_ring_buffer.pop()) |entry| {
-            writeAudioFrame(entry.audio_buffer, entry.frame_index) catch |err| {
+            writeAudioFrame(entry.audio_buffer) catch |err| {
                 std.log.err("Failed to write audio frame. Error {}", .{err});
             };
             if (request_close)
@@ -128,7 +127,6 @@ pub fn appendVideoFrame(pixels: [*]const graphics.RGBA(u8), frame_index: i64) !v
             const frames_to_fill = (frame_index - last_video_frame_index);
             var i: usize = 1;
             while (i < frames_to_fill) : (i += 1) {
-                std.log.info("Adding (fill) frame {d}", .{last_video_frame_index + @intCast(i64, i)});
                 video_ring_buffer.push(.{
                     .pixels = pixels,
                     .frame_index = last_video_frame_index + @intCast(i64, i),
@@ -138,7 +136,6 @@ pub fn appendVideoFrame(pixels: [*]const graphics.RGBA(u8), frame_index: i64) !v
             }
         }
         last_video_frame_index = frame_index;
-        std.log.info("Adding video frame {d}", .{frame_index});
         video_ring_buffer.push(.{
             .pixels = pixels,
             .frame_index = frame_index,
@@ -150,35 +147,13 @@ pub fn appendVideoFrame(pixels: [*]const graphics.RGBA(u8), frame_index: i64) !v
     }
 }
 
-pub fn appendAudioFrame(audio_samples: []const f32, frame_index: i64) !void {
-    assert(frame_index >= 0);
-    assert(frame_index >= last_audio_frame_index);
-    if (frame_index > last_audio_frame_index) {
-        if (last_audio_frame_index + 1 != frame_index) {
-            std.log.warn("Frames skipped. Going from {d} to {d}", .{ last_audio_frame_index, frame_index });
-            const frames_to_fill = (frame_index - last_audio_frame_index);
-            var i: usize = 1;
-            while (i < frames_to_fill) : (i += 1) {
-                std.log.info("Adding (fill) frame {d}", .{last_audio_frame_index + @intCast(i64, i)});
-                audio_ring_buffer.push(.{
-                    .audio_buffer = audio_samples,
-                    .frame_index = last_audio_frame_index + @intCast(i64, i),
-                }) catch {
-                    std.log.warn("Buffer full, failed to write frame", .{});
-                };
-            }
-        }
-        last_audio_frame_index = frame_index;
-        std.log.info("Adding audio frame {d}", .{frame_index});
-        audio_ring_buffer.push(.{
-            .audio_buffer = audio_samples,
-            .frame_index = frame_index,
-        }) catch {
-            std.log.warn("Buffer full, failed to write frame", .{});
-        };
-    } else {
-        std.log.warn("Frame already written for index {d}. Skipping", .{frame_index});
-    }
+pub fn appendAudioFrame(audio_samples: []const f32) !void {
+    assert(audio_samples.len > 0);
+    audio_ring_buffer.push(.{
+        .audio_buffer = audio_samples,
+    }) catch {
+        std.log.warn("Buffer full, failed to write frame", .{});
+    };
 }
 
 pub fn close() void {
@@ -633,9 +608,9 @@ fn encodeAudioFrames(samples: []const f32) !void {
 }
 
 fn writeVideoFrame(pixels: [*]const PixelType, frame_index: i64) !void {
-    const timer = Timer.now();
+    // const timer = Timer.now();
     rgbaToNV12(pixels, context.dimensions, &yuv_output_buffer);
-    timer.durationLog("rgba to nv12");
+    // timer.durationLog("rgba to nv12");
 
     const pixel_count: u32 = context.dimensions.width * context.dimensions.height;
 
@@ -669,8 +644,7 @@ fn writeVideoFrame(pixels: [*]const PixelType, frame_index: i64) !void {
     try encodeFrame(hardware_frame, frame_index);
 }
 
-fn writeAudioFrame(audio_buffer: []const f32, frame_index: i64) !void {
-    _ = frame_index;
+fn writeAudioFrame(audio_buffer: []const f32) !void {
     assert(audio_buffer.len != 0);
     try encodeAudioFrames(audio_buffer);
 }

@@ -108,7 +108,7 @@ pub fn sync() bool {
     //
     _ = display.flush();
 
-    const timeout_milliseconds = 4;
+    const timeout_milliseconds = 0;
     var pollfd = linux.pollfd{
         .fd = wayland_fd,
         .events = linux.POLL.IN,
@@ -165,6 +165,7 @@ fn outputListener(output: *wl.Output, event: wl.Output.Event, index: *const u16)
             outputs.buffer[index.*].refresh_rate = mode.refresh;
             outputs.buffer[index.*].dimensions.width = mode.width;
             outputs.buffer[index.*].dimensions.height = mode.height;
+            std.log.info("Refresh rate: {d}", .{mode.refresh});
         },
         .scale => |scale| {
             outputs.buffer[index.*].scale_factor = scale.factor;
