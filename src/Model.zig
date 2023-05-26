@@ -36,6 +36,7 @@ pub const RecordingContext = struct {
     pub const State = enum {
         idle,
         sync,
+        closing,
         recording,
         paused,
     };
