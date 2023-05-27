@@ -233,7 +233,7 @@ pub fn draw(
                 start_button_region.width = 120.0 * screen_scale.horizontal;
 
                 ui_state.activity_start_button.label = switch(model.recording_context.state) {
-                    .recording => "Stop",
+                    .closing, .recording => "Stop",
                     .idle, .sync => "Record",
                     .paused => "Resume",
                 };
