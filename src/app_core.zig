@@ -207,12 +207,12 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 
 pub fn run() !void {
     const input_fps = 60;
-    const ns_per_frame = @divFloor(std.time.ns_per_s, input_fps);
-
-    _ = wayland_core.sync();
+    const ns_per_frame: u64 = @divFloor(std.time.ns_per_s, input_fps);
 
     app_loop: while (true) {
         const frame_timer = Timer.now();
+
+        _ = wayland_core.sync();
 
         if (webcam_opt) |*webcam| {
             if (try webcam.getFrame(model.webcam_stream.last_frame, 0, 0, model.webcam_stream.dimensions.width)) {
@@ -220,6 +220,7 @@ pub fn run() !void {
             }
         }
 
+        const frontend_timer = Timer.now();
         model_mutex.lock();
         var update_decoder = update_encoder.decoder();
         var request_buffer = frontend_interface.update(&model, &update_decoder) catch |err| {
@@ -227,6 +228,7 @@ pub fn run() !void {
             return;
         };
         model_mutex.unlock();
+        frontend_timer.durationLog("Frontend");
 
         update_encoder_mutex.lock();
         update_encoder.reset();
@@ -357,19 +359,12 @@ pub fn run() !void {
         }
 
         var frame_duration_ns = frame_timer.duration();
-        const default_sleep_interval = 4 * std.time.ns_per_ms;
-        while (frame_duration_ns < ns_per_frame) {
-            const remaining = ns_per_frame - frame_duration_ns;
-            const before_sync = std.time.nanoTimestamp();
-            _ = wayland_core.sync();
-            const after_sync = std.time.nanoTimestamp();
-            const sync_duration = @divFloor(@intCast(u64, after_sync - before_sync), std.time.ns_per_us);
-            if(sync_duration >= 500) {
-                std.log.info("Sync took {d}us", .{sync_duration});
-            }
-            const time_to_sleep = @min(default_sleep_interval, remaining);
-            std.time.sleep(time_to_sleep);
-            frame_duration_ns += time_to_sleep;
+        if (frame_duration_ns < ns_per_frame) {
+            const remaining_ns = ns_per_frame - frame_duration_ns;
+            // std.log.info("Frame duration: {d} ms", .{16 - @divFloor(remaining_ns, std.time.ns_per_ms)});
+            std.time.sleep(remaining_ns);
+        } else {
+            std.log.warn("Frame overbudget", .{});
         }
     }
 
@@ -480,7 +475,8 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
         const current_time_ns = std.time.nanoTimestamp();
         const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
         const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
-        const current_frame_index = @divFloor(ms_from_record_start, 16);
+        const ms_per_frame: f64 = 1000.0 / 60.0;
+        const current_frame_index = @floatToInt(i64, @floor(@intToFloat(f64, ms_from_record_start) / ms_per_frame));
         last_video_frame_written_ns = current_time_ns;
 
         video_encoder.appendVideoFrame(video_frame_to_encode, current_frame_index) catch |err| {
