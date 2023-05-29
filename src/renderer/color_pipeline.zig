@@ -228,13 +228,13 @@ pub inline fn drawTriangle(
     const vertex_index = vertices_used;
     var tri_ptr = @ptrCast(*[3]Vertex, &vertices_buffer[vertices_used]);
     tri_ptr[0].x = p0.x;
-    tri_ptr[0].y = p0.x;
+    tri_ptr[0].y = p0.y;
     tri_ptr[0].z = depth;
     tri_ptr[1].x = p1.x;
-    tri_ptr[1].y = p1.x;
+    tri_ptr[1].y = p1.y;
     tri_ptr[1].z = depth;
     tri_ptr[2].x = p2.x;
-    tri_ptr[2].y = p2.x;
+    tri_ptr[2].y = p2.y;
     tri_ptr[2].z = depth;
     tri_ptr[0].color = color;
     tri_ptr[1].color = color;
