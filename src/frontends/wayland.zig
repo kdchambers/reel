@@ -162,8 +162,6 @@ var record_button_color_hover = RGBA{ .r = 25, .g = 25, .b = 25 };
 
 const window_title = "reel";
 
-var gpu_texture_mutex: std.Thread.Mutex = undefined;
-
 pub var mouse_coordinates: geometry.Coordinates2D(f64) = undefined;
 
 const initial_screen_dimensions = struct {
@@ -600,9 +598,6 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         if (is_render_requested) {
             is_render_requested = false;
             pending_swapchain_images_count -= 1;
-
-            gpu_texture_mutex.lock();
-            defer gpu_texture_mutex.unlock();
 
             renderer.renderFrame() catch
                 return error.VulkanRendererRenderFrameFail;
