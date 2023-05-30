@@ -255,8 +255,8 @@ pub fn draw(
                 format_button_region.margin.left = 10.0 * screen_scale.horizontal;
                 format_button_region.width = 120.0 * screen_scale.horizontal;
                 format_button_region.height = 30.0 * screen_scale.vertical;
-                ui_state.record_format.draw(
-                    format_button_region.toExtent(),
+                ui_state.record_format_selector.draw(
+                    format_button_region.placement(),
                     screen_scale,
                 );
             },

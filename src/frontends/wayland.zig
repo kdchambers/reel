@@ -275,11 +275,12 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.activity_start_button.init();
 
-    ui_state.record_format.init();
-    ui_state.record_format.background_color = RGBA.fromInt(42, 45, 51, 255);
-    ui_state.record_format.background_color_hovered = RGBA.fromInt(45, 48, 55, 255);
-    ui_state.record_format.accent_color = RGBA.fromInt(155, 155, 155, 255);
-    ui_state.record_format.model.labels = &UIState.format_labels;
+    ui_state.record_format_selector.init();
+    ui_state.record_format_selector.labels = &UIState.format_labels;
+    ui_state.record_format_selector.background_color = RGBA.fromInt(66, 66, 66, 255);
+    ui_state.record_format_selector.border_color = RGBA.fromInt(166, 166, 166, 255);
+    ui_state.record_format_selector.active_background_color = RGBA.fromInt(56, 56, 56, 255);
+    ui_state.record_format_selector.hovered_background_color = RGBA.fromInt(56, 56, 56, 255);
 
     ui_state.add_source_state = .closed;
 
@@ -349,10 +350,10 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     }
 
     {
-        const response = ui_state.record_format.update();
+        const response = ui_state.record_format_selector.update();
         if (response.visual_change)
             is_render_requested = true;
-        if (response.active_index != null or response.redraw)
+        if (response.active_index != null)
             is_draw_required = true;
     }
 
