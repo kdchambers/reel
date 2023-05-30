@@ -59,6 +59,7 @@ pub const updateQuadRangeColor = color_pipeline.updateQuadRangeColor;
 
 pub const Icon = icon_pipeline.Icon;
 
+pub const calculateRenderedDimensions = icon_pipeline.calculateRenderedDimensions;
 pub const drawIcon = icon_pipeline.drawIcon;
 pub const drawGreyscale = icon_pipeline.drawGreyscale;
 pub const drawText = icon_pipeline.drawText;

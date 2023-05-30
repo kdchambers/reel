@@ -97,6 +97,7 @@ pub const Font = fontana.Font(.{
     .type_overrides = .{
         .Extent2DPixel = Extent2D(u32),
         .Extent2DNative = Extent2D(f32),
+        .Dimensions2DNative = Dimensions2D(f32),
         .Coordinates2DNative = Coordinates2D(f32),
         .Scale2D = ScaleFactor2D(f32),
     },
@@ -285,6 +286,14 @@ const PenSize = enum {
     large,
 };
 
+pub fn calculateRenderedDimensions(text: []const u8, pen_size: PenSize) Dimensions2D(f32) {
+    return switch (pen_size) {
+        .small => pen_small.calculateRenderDimensions(text),
+        .medium => pen_medium.calculateRenderDimensions(text),
+        else => unreachable,
+    };
+}
+
 pub fn overwriteText(
     vertex_range: renderer.VertexRange,
     text: []const u8,
@@ -378,7 +387,6 @@ pub fn drawText(
         .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
         else => unreachable,
     }
-
     return .{
         .written_extent = extent.to2D(),
         .vertex_start = 0,
