@@ -20,14 +20,11 @@ const MouseEventEntry = event_system.MouseEventEntry;
 //
 
 pub const format_labels = [_][]const u8{
-    @tagName(VideoFormat.mp4),
-    @tagName(VideoFormat.avi),
-    // @tagName(VideoFormat.mkv),
+    "MP4",
+    "AVI",
 };
 
 pub const image_format_labels = [_][]const u8{
-    // @tagName(ImageFormat.bmp),
-    // @tagName(ImageFormat.jpg),
     @tagName(ImageFormat.png),
     @tagName(ImageFormat.qoi),
 };
@@ -178,6 +175,8 @@ select_video_source_popup: widgets.ListSelectPopup,
 
 activity_section: widgets.TabbedSection,
 activity_start_button: widgets.Button,
+
+record_format: widgets.Dropdown,
 
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),

@@ -275,6 +275,12 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.activity_start_button.init();
 
+    ui_state.record_format.init();
+    ui_state.record_format.background_color = RGBA.fromInt(42, 45, 51, 255);
+    ui_state.record_format.background_color_hovered = RGBA.fromInt(45, 48, 55, 255);
+    ui_state.record_format.accent_color = RGBA.fromInt(155, 155, 155, 255);
+    ui_state.record_format.model.labels = &UIState.format_labels;
+
     ui_state.add_source_state = .closed;
 
     ui_state.video_source_mouse_event_count = 0;
@@ -340,6 +346,14 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 .source_index = @intCast(u16, i),
             };
         }
+    }
+
+    {
+        const response = ui_state.record_format.update();
+        if (response.visual_change)
+            is_render_requested = true;
+        if (response.active_index != null or response.redraw)
+            is_draw_required = true;
     }
 
     {

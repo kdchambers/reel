@@ -232,7 +232,7 @@ pub fn draw(
                 start_button_region.height = 32.0 * screen_scale.vertical;
                 start_button_region.width = 120.0 * screen_scale.horizontal;
 
-                ui_state.activity_start_button.label = switch(model.recording_context.state) {
+                ui_state.activity_start_button.label = switch (model.recording_context.state) {
                     .closing, .recording => "Stop",
                     .idle, .sync => "Record",
                     .paused => "Resume",
@@ -246,6 +246,18 @@ pub fn draw(
                     start_button_region.toExtent(),
                     screen_scale,
                     .{ .rounding_radius = 4.0 },
+                );
+
+                var format_button_region = Region{};
+                format_button_region.anchor.left = region.left();
+                format_button_region.anchor.top = region.top();
+                format_button_region.margin.top = 10.0 * screen_scale.vertical;
+                format_button_region.margin.left = 10.0 * screen_scale.horizontal;
+                format_button_region.width = 140.0 * screen_scale.horizontal;
+                format_button_region.height = 34.0 * screen_scale.vertical;
+                ui_state.record_format.draw(
+                    format_button_region.toExtent(),
+                    screen_scale,
                 );
             },
             .stream => {

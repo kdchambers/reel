@@ -231,6 +231,7 @@ pub fn handleMouseMovement(position: *const geometry.Coordinates2D(f64)) MouseMo
             const is_within_extent = (position.x >= extent.x and position.x <= (extent.x + extent.width) and
                 position.y <= extent.y and position.y >= (extent.y - extent.height));
             if (is_within_extent and !entry.flags.hover_active and entry.z_layer <= min_exit_z_layer) {
+                assert(entry.z_layer < 255);
                 assert(entry.z_layer != min_enter_z_layer);
                 //
                 // We're entering a new hover zone

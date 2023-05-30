@@ -8,6 +8,7 @@ pub const init = base.init;
 pub const Button = base.Button;
 pub const ImageButton = base.ImageButton;
 pub const IconButton = base.IconButton;
+pub const Dropdown = base.Dropdown;
 pub const ListSelectPopup = base.ListSelectPopup;
 pub const TabbedSection = base.TabbedSection;
 
