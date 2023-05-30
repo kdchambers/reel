@@ -109,7 +109,8 @@ const pen_options = fontana.PenOptions{
     .pixel_format = .r8,
     .PixelType = u8,
 };
-pub var pen: Font.PenConfig(pen_options) = undefined;
+pub var pen_medium: Font.PenConfig(pen_options) = undefined;
+pub var pen_small: Font.PenConfig(pen_options) = undefined;
 
 // const asset_path_font = "assets/Roboto-Regular.ttf";
 const asset_path_font = "assets/Lato-Regular.ttf";
@@ -140,7 +141,7 @@ fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
     {
         const points_per_pixel = 100;
         const font_point_size: f64 = 12.0;
-        pen = font.createPen(
+        pen_medium = font.createPen(
             pen_options,
             allocator,
             font_point_size,
@@ -151,7 +152,23 @@ fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
             &texture_atlas,
         ) catch return error.FontPenInitFail;
     }
-    errdefer pen.deinit(allocator);
+    errdefer pen_medium.deinit(allocator);
+
+    {
+        const points_per_pixel = 100;
+        const font_point_size: f64 = 10.0;
+        pen_small = font.createPen(
+            pen_options,
+            allocator,
+            font_point_size,
+            points_per_pixel,
+            atlas_codepoints,
+            font_texture.width,
+            font_texture.pixels.ptr,
+            &texture_atlas,
+        ) catch return error.FontPenInitFail;
+    }
+    errdefer pen_small.deinit(allocator);
 
     for (icon_path_list, 0..) |icon_path, i| {
         var image = zigimg.Image.fromFilePath(allocator, icon_path) catch return error.LoadAssetFail;
@@ -281,15 +298,17 @@ pub fn overwriteText(
     //
     // TODO: Clear vertex range
     //
-    assert(pen_size == .small);
+    assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = BufferTextWriterInterface{
         .color = color,
         .vertex_start = vertex_range.start,
         .capacity = vertex_range.count,
     };
-    if (horizontal_anchor == .middle and vertical_anchor == .middle) {
-        pen.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable;
-    } else unreachable;
+    switch (pen_size) {
+        .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+        .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+        else => unreachable,
+    }
 
     return .{
         .written_extent = extent.to2D(),
@@ -352,11 +371,13 @@ pub fn drawText(
     horizontal_anchor: HorizontalAnchor,
     vertical_anchor: VerticalAnchor,
 ) DrawTextResult {
-    assert(pen_size == .small);
+    assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = TextWriterInterface{ .color = color, .z = extent.z };
-    if (horizontal_anchor == .middle and vertical_anchor == .middle) {
-        pen.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable;
-    } else unreachable;
+    switch (pen_size) {
+        .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+        .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+        else => unreachable,
+    }
 
     return .{
         .written_extent = extent.to2D(),
