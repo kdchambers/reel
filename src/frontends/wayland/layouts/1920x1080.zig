@@ -119,7 +119,7 @@ pub fn draw(
             };
             const header_bar_color = RGBA{ .r = 30, .g = 33, .b = 39, .a = 255 };
             _ = renderer.drawQuad(header_bar_extent, header_bar_color, .bottom_left);
-            _ = renderer.drawText("Sources", header_bar_text_extent, screen_scale, .medium, RGBA.white, .middle, .middle);
+            _ = renderer.drawText("Sources", header_bar_text_extent, screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
 
             {
                 const add_circle_placement = Coordinates3D(f32){
@@ -144,7 +144,7 @@ pub fn draw(
                     };
                     std.log.info("Source stream: {d}", .{stream.source_index});
                     const source_name = model.video_source_providers[stream.provider_index].sources.?[stream.source_index].name;
-                    _ = renderer.drawText(source_name, extent, screen_scale, .medium, RGBA.white, .middle, .middle);
+                    _ = renderer.drawText(source_name, extent, screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
                 }
             }
 
@@ -248,23 +248,43 @@ pub fn draw(
                     .{ .rounding_radius = 4.0 },
                 );
 
+                var format_label_region = Region{};
+                format_label_region.anchor.left = region.left();
+                format_label_region.anchor.top = region.top();
+                format_label_region.margin.top = 10.0 * screen_scale.vertical;
+                format_label_region.margin.left = 10.0 * screen_scale.horizontal;
+                format_label_region.width = 80.0 * screen_scale.horizontal;
+                format_label_region.height = 30.0 * screen_scale.vertical;
+
+                _ = renderer.drawText(
+                    "File Format",
+                    format_label_region.toExtent(),
+                    screen_scale,
+                    .small,
+                    .regular,
+                    RGBA.fromInt(210, 210, 210, 255),
+                    .middle,
+                    .middle,
+                );
+
                 var format_button_region = Region{};
                 format_button_region.anchor.left = region.left();
                 format_button_region.anchor.top = region.top();
-                format_button_region.margin.top = 10.0 * screen_scale.vertical;
+                format_button_region.margin.top = 40.0 * screen_scale.vertical;
                 format_button_region.margin.left = 10.0 * screen_scale.horizontal;
                 format_button_region.width = 120.0 * screen_scale.horizontal;
                 format_button_region.height = 30.0 * screen_scale.vertical;
+
                 ui_state.record_format_selector.draw(
                     format_button_region.placement(),
                     screen_scale,
                 );
             },
             .stream => {
-                _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .medium, RGBA.white, .middle, .middle);
+                _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
             },
             .screenshot => {
-                _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .medium, RGBA.white, .middle, .middle);
+                _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
             },
         }
     }
