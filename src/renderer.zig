@@ -56,6 +56,7 @@ pub const drawCircle = color_pipeline.drawCircle;
 pub const drawArc = color_pipeline.drawArc;
 pub const updateQuadColor = color_pipeline.updateQuadColor;
 pub const updateQuadRangeColor = color_pipeline.updateQuadRangeColor;
+pub const updateVertexRangeColor = color_pipeline.updateVertexRangeColor;
 
 pub const Icon = icon_pipeline.Icon;
 

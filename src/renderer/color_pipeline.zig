@@ -89,6 +89,12 @@ pub inline fn updateQuadRangeColor(vertex_index: u32, quad_count: u16, color: RG
     }
 }
 
+pub inline fn updateVertexRangeColor(range: VertexRange, color: RGBA(u8)) void {
+    for (vertices_buffer[range.start .. range.start + range.count]) |*vertex| {
+        vertex.color = color;
+    }
+}
+
 pub inline fn drawQuad(extent: Extent3D(f32), color: RGBA(u8), comptime anchor_point: graphics.AnchorPoint) u16 {
     const vertex_index = vertices_used;
     var quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
