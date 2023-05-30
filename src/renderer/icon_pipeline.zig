@@ -23,8 +23,6 @@ const ScaleFactor2D = geometry.ScaleFactor2D;
 const graphics = @import("../graphics.zig");
 const RGBA = graphics.RGBA;
 const TextureGreyscale = graphics.TextureGreyscale;
-const TextWriterInterface = graphics.TextWriterInterface;
-const BufferTextWriterInterface = graphics.BufferTextWriterInterface;
 
 const zigimg = @import("zigimg");
 const renderer = @import("../renderer.zig");
@@ -113,7 +111,6 @@ const pen_options = fontana.PenOptions{
 pub var pen_medium: Font.PenConfig(pen_options) = undefined;
 pub var pen_small: Font.PenConfig(pen_options) = undefined;
 
-// const asset_path_font = "assets/Roboto-Regular.ttf";
 const asset_path_font = "assets/Lato-Regular.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 
@@ -286,7 +283,13 @@ const PenSize = enum {
     large,
 };
 
+const PenWeight = enum {
+    light,
+    regular,
+};
+
 pub fn calculateRenderedDimensions(text: []const u8, pen_size: PenSize) Dimensions2D(f32) {
+    // TODO: Add pen weight
     return switch (pen_size) {
         .small => pen_small.calculateRenderDimensions(text),
         .medium => pen_medium.calculateRenderDimensions(text),
@@ -300,6 +303,7 @@ pub fn overwriteText(
     extent: Extent3D(f32),
     screen_scale: ScaleFactor2D(f32),
     pen_size: PenSize,
+    pen_weight: PenWeight,
     color: RGBA(u8),
     horizontal_anchor: HorizontalAnchor,
     vertical_anchor: VerticalAnchor,
@@ -313,10 +317,13 @@ pub fn overwriteText(
         .vertex_start = vertex_range.start,
         .capacity = vertex_range.count,
     };
-    switch (pen_size) {
-        .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
-        .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
-        else => unreachable,
+    switch (pen_weight) {
+        .light => unreachable,
+        .regular => switch (pen_size) {
+            .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+            .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+            else => unreachable,
+        },
     }
 
     return .{
@@ -376,22 +383,126 @@ pub fn drawText(
     extent: Extent3D(f32),
     screen_scale: ScaleFactor2D(f32),
     pen_size: PenSize,
+    pen_weight: PenWeight,
     color: RGBA(u8),
     horizontal_anchor: HorizontalAnchor,
     vertical_anchor: VerticalAnchor,
 ) DrawTextResult {
     assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = TextWriterInterface{ .color = color, .z = extent.z };
-    switch (pen_size) {
-        .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
-        .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
-        else => unreachable,
+    switch (pen_weight) {
+        .light => unreachable,
+        .regular => switch (pen_size) {
+            .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+            .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+            else => unreachable,
+        },
     }
     return .{
         .written_extent = extent.to2D(),
         .vertex_start = 0,
         .vertex_count = 0,
     };
+}
+
+//
+// Default interface for Fontana font
+//
+const TextWriterInterface = struct {
+    z: f32 = 0.8,
+    color: RGBA(u8),
+
+    pub fn write(
+        self: *@This(),
+        screen_extent: geometry.Extent2D(f32),
+        texture_extent: geometry.Extent2D(f32),
+    ) f32 {
+        const increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
+        const threshold: f32 = increment / 4.0;
+        const snapped_x = snap(screen_extent.x, increment, threshold);
+        const truncated_extent = geometry.Extent3D(f32){
+            //
+            // X values can land on any part of the pixel and lead to awkward blending
+            // of the glyph bitmap onto the screen. The best we can do for now is snap
+            // the x value to the nearest pixel bound only if it's close.
+            //
+            .x = snapped_x,
+            //
+            // Since Y values are more stable, we clamp everything to the nearest pixel
+            //
+            .y = roundDown(screen_extent.y, 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height)),
+            .z = self.z,
+            .width = screen_extent.width,
+            .height = screen_extent.height,
+        };
+        _ = renderer.drawGreyscale(
+            truncated_extent,
+            texture_extent,
+            self.color,
+            .bottom_left,
+        );
+        //
+        // Return an adjustment for x that can be used to make sure the next
+        // glyph gets rendered to a better horizontal position
+        //
+        return snapped_x - screen_extent.x;
+    }
+};
+
+const BufferTextWriterInterface = struct {
+    z: f32 = 0.8,
+    color: RGBA(u8),
+    vertex_start: u16,
+    capacity: u16,
+    used: u16 = 0,
+
+    pub fn write(
+        self: *@This(),
+        screen_extent: geometry.Extent2D(f32),
+        texture_extent: geometry.Extent2D(f32),
+    ) !void {
+        assert(self.used < self.capacity);
+        //
+        // See comments in TextWriterInterface for notes on pixel snapping / clamping
+        //
+        const increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
+        const threshold: f32 = increment / 4.0;
+        const snapped_x = snap(screen_extent.x, increment, threshold);
+        const truncated_extent = geometry.Extent3D(f32){
+            .x = snapped_x,
+            .y = roundDown(screen_extent.y, 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height)),
+            .z = self.z,
+            .width = screen_extent.width,
+            .height = screen_extent.height,
+        };
+        _ = renderer.overwriteGreyscale(
+            self.vertex_start + (self.used * 4),
+            truncated_extent,
+            texture_extent,
+            self.color,
+            .bottom_left,
+        );
+        self.used += 1;
+    }
+};
+
+inline fn snap(value: f32, increment: f32, threshold: f32) f32 {
+    const overshoot: f32 = @rem(value, increment);
+    if (overshoot <= threshold)
+        return value - overshoot;
+    if ((increment - overshoot) <= threshold)
+        return value + (increment - overshoot);
+    return value;
+}
+
+inline fn roundDown(value: f32, round_interval: f32) f32 {
+    const rem = @rem(value, round_interval);
+    return if (rem != 0) value - rem else value;
+}
+
+inline fn roundUp(value: f32, round_interval: f32) f32 {
+    const rem = @rem(value, round_interval);
+    return if (rem != 0) value + (round_interval - rem) else value;
 }
 
 pub fn drawGreyscale(

@@ -101,7 +101,7 @@ var gpu_memory_allocator: VulkanAllocator = undefined;
 
 var command_buffers: []vk.CommandBuffer = undefined;
 
-var swapchain_dimensions: Dimensions2D(u32) = undefined;
+pub var swapchain_dimensions: Dimensions2D(u32) = undefined;
 var swapchain: vk.SwapchainKHR = undefined;
 var swapchain_images: []vk.Image = undefined;
 var swapchain_image_views: []vk.ImageView = undefined;
