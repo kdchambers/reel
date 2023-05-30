@@ -282,6 +282,13 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_format_selector.active_background_color = RGBA.fromInt(56, 56, 56, 255);
     ui_state.record_format_selector.hovered_background_color = RGBA.fromInt(56, 56, 56, 255);
 
+    ui_state.record_quality_selector.init();
+    ui_state.record_quality_selector.labels = &UIState.recording_quality_labels;
+    ui_state.record_quality_selector.background_color = RGBA.fromInt(66, 66, 66, 255);
+    ui_state.record_quality_selector.border_color = RGBA.fromInt(166, 166, 166, 255);
+    ui_state.record_quality_selector.active_background_color = RGBA.fromInt(56, 56, 56, 255);
+    ui_state.record_quality_selector.hovered_background_color = RGBA.fromInt(56, 56, 56, 255);
+
     ui_state.add_source_state = .closed;
 
     ui_state.video_source_mouse_event_count = 0;
@@ -351,6 +358,14 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
 
     {
         const response = ui_state.record_format_selector.update();
+        if (response.visual_change)
+            is_render_requested = true;
+        if (response.active_index != null)
+            is_draw_required = true;
+    }
+
+    {
+        const response = ui_state.record_quality_selector.update();
         if (response.visual_change)
             is_render_requested = true;
         if (response.active_index != null)

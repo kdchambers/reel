@@ -252,7 +252,7 @@ pub fn draw(
                 format_label_region.anchor.left = region.left();
                 format_label_region.anchor.top = region.top();
                 format_label_region.margin.top = 10.0 * screen_scale.vertical;
-                format_label_region.margin.left = 10.0 * screen_scale.horizontal;
+                format_label_region.margin.left = 20.0 * screen_scale.horizontal;
                 format_label_region.width = 80.0 * screen_scale.horizontal;
                 format_label_region.height = 30.0 * screen_scale.vertical;
 
@@ -268,10 +268,9 @@ pub fn draw(
                 );
 
                 var format_button_region = Region{};
-                format_button_region.anchor.left = region.left();
+                format_button_region.anchor.left = format_label_region.left();
                 format_button_region.anchor.top = region.top();
                 format_button_region.margin.top = 40.0 * screen_scale.vertical;
-                format_button_region.margin.left = 10.0 * screen_scale.horizontal;
                 format_button_region.width = 120.0 * screen_scale.horizontal;
                 format_button_region.height = 30.0 * screen_scale.vertical;
 
@@ -279,6 +278,31 @@ pub fn draw(
                     format_button_region.placement(),
                     screen_scale,
                 );
+
+                var quality_label_region = Region{};
+                quality_label_region.anchor.left = format_button_region.right();
+                quality_label_region.anchor.bottom = format_label_region.bottom();
+                quality_label_region.margin.left = 40.0 * screen_scale.horizontal;
+                quality_label_region.width = 60.0 * screen_scale.horizontal;
+                quality_label_region.height = 30.0 * screen_scale.vertical;
+
+                _ = renderer.drawText(
+                    "Quality",
+                    quality_label_region.toExtent(),
+                    screen_scale,
+                    .small,
+                    .regular,
+                    RGBA.fromInt(210, 210, 210, 255),
+                    .middle,
+                    .middle,
+                );
+
+                var quality_selector_region = Region{};
+                quality_selector_region.anchor.left = quality_label_region.left();
+                quality_selector_region.anchor.top = quality_label_region.bottom();
+                quality_selector_region.width = 120.0 * screen_scale.horizontal;
+                quality_selector_region.height = 30.0 * screen_scale.vertical;
+                ui_state.record_quality_selector.draw(quality_selector_region.placement(), screen_scale);
             },
             .stream => {
                 _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .middle, .middle);

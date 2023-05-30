@@ -46,7 +46,7 @@ pub const Region = struct {
 
     pub inline fn top(self: @This()) f32 {
         const base = self.anchor.top orelse self.anchor.bottom.? - self.margin.bottom - self.height.?;
-        return base - self.margin.top;
+        return base + self.margin.top;
     }
 
     pub inline fn bottom(self: @This()) f32 {

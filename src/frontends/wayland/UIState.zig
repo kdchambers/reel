@@ -24,6 +24,12 @@ pub const format_labels = [_][]const u8{
     "AVI",
 };
 
+pub const recording_quality_labels = [_][]const u8 {
+    "low",
+    "medium",
+    "high",
+};
+
 pub const image_format_labels = [_][]const u8{
     @tagName(ImageFormat.png),
     @tagName(ImageFormat.qoi),
@@ -177,6 +183,7 @@ activity_section: widgets.TabbedSection,
 activity_start_button: widgets.Button,
 
 record_format_selector: widgets.Selector,
+record_quality_selector: widgets.Selector,
 
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),
