@@ -31,6 +31,132 @@ const TextWriterInterface = graphics.TextWriterInterface;
 
 pub const MouseEventEntry = event_system.MouseEventEntry;
 
+pub const Slider = struct {
+    step_count: u16,
+    active_index: u16,
+    drag_active: bool,
+    background_color: RGBA(u8),
+    knob_outer_color: RGBA(u8),
+    knob_inner_color: RGBA(u8),
+    mouse_event_slot: mini_heap.Index(MouseEventEntry),
+    knob_vertex_range: renderer.VertexRange,
+
+    drag_start_mouse_x: f32,
+    drag_start_x: f32,
+    drag_interval: f32,
+    drag_count: f32,
+    drag_start_active_index: u16,
+
+    pub fn init(self: *@This()) void {
+        self.active_index = 0;
+        self.drag_active = false;
+    }
+
+    pub const Response = struct {
+        visual_change: bool = false,
+        active_index: ?u16 = null,
+    };
+
+    pub fn update(self: *@This(), mouse_x: f32, left_mouse_active: bool) Response {
+        var response = Response{};
+        var event_ptr = self.mouse_event_slot.getPtr();
+        if (self.drag_active) {
+            const x_diff: f32 = mouse_x - self.drag_start_mouse_x;
+            const relative_x = x_diff - self.drag_start_x;
+            const index = @floatToInt(i32, @floor((relative_x + (self.drag_interval / 2.0)) / self.drag_interval));
+            if (index >= 0 and index < self.step_count and index != self.active_index) {
+                const index_diff: i32 = index - self.active_index;
+                const x_shift = @intToFloat(f32, index_diff) * self.drag_interval;
+                self.active_index = @intCast(u16, index);
+                response.active_index = self.active_index;
+                renderer.updateVertexRangeHPosition(
+                    self.knob_vertex_range,
+                    x_shift,
+                );
+            }
+            if (!left_mouse_active) {
+                self.drag_active = false;
+            }
+        } else {
+            if (event_ptr.state.pending_left_click_release) {
+                event_ptr.state.pending_left_click_release = false;
+                self.drag_active = true;
+                self.drag_start_active_index = self.active_index;
+                self.drag_start_mouse_x = mouse_x;
+            }
+        }
+        event_ptr.state.clear();
+        return response;
+    }
+
+    pub fn draw(
+        self: *@This(),
+        placement: Coordinates3D(f32),
+        width: f32,
+        screen_scale: ScaleFactor2D(f32),
+    ) void {
+        assert(self.step_count > 2);
+        const bar_height: f32 = 8.0 * screen_scale.vertical;
+        const background_extent = Extent3D(f32){
+            .x = placement.x,
+            .y = placement.y,
+            .z = placement.z,
+            .width = width,
+            .height = bar_height,
+        };
+        _ = renderer.drawQuad(background_extent, self.background_color, .bottom_left);
+        const value_interval: f32 = width / @intToFloat(f32, self.step_count - 1);
+        const point_size_pixels: f32 = 2.0;
+        const point_width: f32 = point_size_pixels * screen_scale.horizontal;
+        const point_height: f32 = point_size_pixels * screen_scale.vertical;
+        const point_y_placement: f32 = placement.y - ((bar_height / 2.0) - (point_height / 2.0));
+        for (self.active_index..self.step_count - 2) |i| {
+            const point_extent = Extent3D(f32){
+                .x = placement.x + @intToFloat(f32, i + 1) * value_interval,
+                .y = point_y_placement,
+                .z = placement.z,
+                .width = point_width,
+                .height = point_height,
+            };
+            _ = renderer.drawQuad(point_extent, RGBA(u8).black, .bottom_left);
+        }
+
+        self.drag_interval = value_interval;
+        self.drag_count = @intToFloat(f32, self.step_count - 2);
+
+        const knob_placement_center = Coordinates3D(f32){
+            .x = placement.x + @intToFloat(f32, self.active_index) * value_interval,
+            .y = point_y_placement,
+            .z = placement.z,
+        };
+        const knob_radius_pixels: f32 = 10.0;
+        const knob_radius = Radius2D(f32){
+            .h = knob_radius_pixels * screen_scale.horizontal,
+            .v = knob_radius_pixels * screen_scale.vertical,
+        };
+        const outer_vertex_range = renderer.drawCircle(knob_placement_center, knob_radius, self.knob_outer_color, 48);
+
+        const knob_inner_radius_pixels: f32 = 7.0;
+        const knob_inner_radius = Radius2D(f32){
+            .h = knob_inner_radius_pixels * screen_scale.horizontal,
+            .v = knob_inner_radius_pixels * screen_scale.vertical,
+        };
+        const inner_vertex_range = renderer.drawCircle(knob_placement_center, knob_inner_radius, self.knob_inner_color, 32);
+        self.knob_vertex_range = .{
+            .start = outer_vertex_range.start,
+            .count = outer_vertex_range.count + inner_vertex_range.count,
+        };
+        const knob_hover_extent = Extent3D(f32){
+            .x = knob_placement_center.x - knob_radius.h,
+            .y = knob_placement_center.y + knob_radius.v,
+            .z = placement.z,
+            .width = knob_radius.h * 2.0,
+            .height = knob_radius.v * 2.0,
+        };
+        self.mouse_event_slot = event_system.writeMouseEventSlot(knob_hover_extent, .{});
+    }
+};
+
 pub const Selector = struct {
     const max_label_count = 8;
 
