@@ -119,7 +119,7 @@ pub fn draw(
             };
             const header_bar_color = RGBA{ .r = 30, .g = 33, .b = 39, .a = 255 };
             _ = renderer.drawQuad(header_bar_extent, header_bar_color, .bottom_left);
-            _ = renderer.drawText("Sources", header_bar_text_extent, screen_scale, .small, RGBA.white, .middle, .middle);
+            _ = renderer.drawText("Sources", header_bar_text_extent, screen_scale, .medium, RGBA.white, .middle, .middle);
 
             {
                 const add_circle_placement = Coordinates3D(f32){
@@ -144,7 +144,7 @@ pub fn draw(
                     };
                     std.log.info("Source stream: {d}", .{stream.source_index});
                     const source_name = model.video_source_providers[stream.provider_index].sources.?[stream.source_index].name;
-                    _ = renderer.drawText(source_name, extent, screen_scale, .small, RGBA.white, .middle, .middle);
+                    _ = renderer.drawText(source_name, extent, screen_scale, .medium, RGBA.white, .middle, .middle);
                 }
             }
 
@@ -253,18 +253,18 @@ pub fn draw(
                 format_button_region.anchor.top = region.top();
                 format_button_region.margin.top = 10.0 * screen_scale.vertical;
                 format_button_region.margin.left = 10.0 * screen_scale.horizontal;
-                format_button_region.width = 140.0 * screen_scale.horizontal;
-                format_button_region.height = 34.0 * screen_scale.vertical;
+                format_button_region.width = 120.0 * screen_scale.horizontal;
+                format_button_region.height = 30.0 * screen_scale.vertical;
                 ui_state.record_format.draw(
                     format_button_region.toExtent(),
                     screen_scale,
                 );
             },
             .stream => {
-                _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
+                _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .medium, RGBA.white, .middle, .middle);
             },
             .screenshot => {
-                _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .small, RGBA.white, .middle, .middle);
+                _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .medium, RGBA.white, .middle, .middle);
             },
         }
     }
