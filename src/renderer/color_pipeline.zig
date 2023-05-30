@@ -272,6 +272,11 @@ pub fn drawArc(
 ) VertexRange {
     assert(point_count >= 8);
 
+    {
+        const remaining_indices = indices_buffer.len - indices_used;
+        assert(remaining_indices >= point_count * 3);
+    }
+
     const arc_vertices = VertexRange{ .start = vertices_used, .count = point_count + 1 };
     const degreesToRadians = std.math.degreesToRadians;
 

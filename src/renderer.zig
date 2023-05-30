@@ -30,7 +30,7 @@ const icon_quad_capacity = 512;
 const icon_vertex_buffer_capacity = icon_quad_capacity * 4;
 const icon_index_buffer_capacity = icon_quad_capacity * 6;
 
-const color_quad_capacity = 126;
+const color_quad_capacity = 256;
 const color_vertex_buffer_capacity = color_quad_capacity * 5;
 const color_index_buffer_capacity = color_quad_capacity * 6;
 
