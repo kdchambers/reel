@@ -67,7 +67,7 @@ pub const Slider = struct {
         if (self.drag_active) {
             const x_diff: f32 = mouse_x - self.drag_start_mouse_x;
             const relative_x = x_diff - self.drag_start_x;
-            const index = @floatToInt(i32, @floor((relative_x + (self.drag_interval / 2.0)) / self.drag_interval));
+            const index = self.drag_start_active_index + @floatToInt(i32, @floor((relative_x + (self.drag_interval / 2.0)) / self.drag_interval));
             if (index >= 0 and index < self.label_buffer.len and index != self.active_index) {
                 const index_diff: i32 = index - self.active_index;
                 const x_shift = @intToFloat(f32, index_diff) * self.drag_interval;
@@ -77,6 +77,7 @@ pub const Slider = struct {
                     self.knob_vertex_range,
                     x_shift,
                 );
+                event_ptr.extent.x += x_shift;
                 renderer.overwriteText(
                     self.value_vertex_range,
                     self.label_buffer[self.active_index],
