@@ -121,7 +121,7 @@ pub fn draw(
             };
             const header_bar_color = RGBA{ .r = 30, .g = 33, .b = 39, .a = 255 };
             _ = renderer.drawQuad(header_bar_extent, header_bar_color, .bottom_left);
-            _ = renderer.drawText("Sources", header_bar_text_extent, screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
+            _ = renderer.drawText("Sources", header_bar_text_extent, screen_scale, .medium, .regular, RGBA.white, .center);
 
             {
                 const add_circle_placement = Coordinates3D(f32){
@@ -146,7 +146,7 @@ pub fn draw(
                     };
                     std.log.info("Source stream: {d}", .{stream.source_index});
                     const source_name = model.video_source_providers[stream.provider_index].sources.?[stream.source_index].name;
-                    _ = renderer.drawText(source_name, extent, screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
+                    _ = renderer.drawText(source_name, extent, screen_scale, .medium, .regular, RGBA.white, .center);
                 }
             }
 
@@ -265,8 +265,7 @@ pub fn draw(
                     .small,
                     .regular,
                     RGBA.fromInt(210, 210, 210, 255),
-                    .middle,
-                    .middle,
+                    .center,
                 );
 
                 var format_button_region = Region{};
@@ -295,8 +294,7 @@ pub fn draw(
                     .small,
                     .regular,
                     RGBA.fromInt(210, 210, 210, 255),
-                    .middle,
-                    .middle,
+                    .center,
                 );
 
                 var quality_selector_region = Region{};
@@ -317,10 +315,10 @@ pub fn draw(
                 ui_state.record_bitrate_slider.draw(bitrate_slider_region.toExtent(), screen_scale, UIState.bitrate_value_label_max_length);
             },
             .stream => {
-                _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
+                _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .center);
             },
             .screenshot => {
-                _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .middle, .middle);
+                _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .center);
             },
         }
     }

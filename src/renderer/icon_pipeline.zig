@@ -269,8 +269,17 @@ pub fn Bounds(comptime Type: type) type {
     };
 }
 
-pub const HorizontalAnchor = enum { left, right, middle };
-pub const VerticalAnchor = enum { top, bottom, middle };
+pub const LayoutAnchor = enum {
+    top_right,
+    top_middle,
+    top_left,
+    middle_right,
+    center,
+    middle_left,
+    bottom_right,
+    bottom_middle,
+    bottom_left,
+};
 
 const DrawTextResult = struct {
     written_extent: Extent2D(f32),
@@ -317,8 +326,7 @@ pub fn overwriteText(
     pen_size: PenSize,
     pen_weight: PenWeight,
     color: RGBA(u8),
-    horizontal_anchor: HorizontalAnchor,
-    vertical_anchor: VerticalAnchor,
+    comptime layout_anchor: LayoutAnchor,
 ) void {
     assert(vertex_range.count % 4 == 0);
     assert(vertex_range.count >= text.len * 4);
@@ -347,22 +355,16 @@ pub fn overwriteText(
     const horizontal_free_space = extent.width - dimensions.width;
     const vertical_free_space = extent.height - dimensions.height;
 
-    const text_placement: Coordinates2D(f32) = switch (horizontal_anchor) {
-        .left => switch (vertical_anchor) {
-            .top => .{ .x = extent.x, .y = extent.y - vertical_free_space },
-            .middle => .{ .x = extent.x, .y = extent.y - (vertical_free_space / 2.0) },
-            .bottom => .{ .x = extent.x, .y = extent.y },
-        },
-        .middle => switch (vertical_anchor) {
-            .top => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - vertical_free_space },
-            .middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - (vertical_free_space / 2.0) },
-            .bottom => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
-        },
-        .right => switch (vertical_anchor) {
-            .top => .{ .x = extent.x + horizontal_free_space, .y = extent.y - vertical_free_space },
-            .middle => .{ .x = extent.x + horizontal_free_space, .y = extent.y - (vertical_free_space / 2.0) },
-            .bottom => .{ .x = extent.x + horizontal_free_space, .y = extent.y },
-        },
+    const text_placement: Coordinates2D(f32) = switch (comptime layout_anchor) {
+        .top_right => .{ .x = extent.x + horizontal_free_space, .y = extent.y - vertical_free_space },
+        .top_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - vertical_free_space },
+        .top_left => .{ .x = extent.x, .y = extent.y - vertical_free_space },
+        .middle_right => .{ .x = extent.x + horizontal_free_space, .y = extent.y - (vertical_free_space / 2.0) },
+        .center => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - (vertical_free_space / 2.0) },
+        .middle_left => .{ .x = extent.x, .y = extent.y - (vertical_free_space / 2.0) },
+        .bottom_right => .{ .x = extent.x + horizontal_free_space, .y = extent.y },
+        .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
+        .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
     pen_ptr.write(text, text_placement, screen_scale, &text_writer_interface) catch unreachable;
 }
@@ -419,8 +421,7 @@ pub fn drawText(
     pen_size: PenSize,
     pen_weight: PenWeight,
     color: RGBA(u8),
-    horizontal_anchor: HorizontalAnchor,
-    vertical_anchor: VerticalAnchor,
+    comptime layout_anchor: LayoutAnchor,
 ) DrawTextResult {
     const pre_vertices_used = vertices_used;
     var text_writer_interface = TextWriterInterface{ .color = color, .z = extent.z };
@@ -443,22 +444,16 @@ pub fn drawText(
     const horizontal_free_space = extent.width - dimensions.width;
     const vertical_free_space = extent.height - dimensions.height;
 
-    const text_placement: Coordinates2D(f32) = switch (horizontal_anchor) {
-        .left => switch (vertical_anchor) {
-            .top => .{ .x = extent.x, .y = extent.y - vertical_free_space },
-            .middle => .{ .x = extent.x, .y = extent.y - (vertical_free_space / 2.0) },
-            .bottom => .{ .x = extent.x, .y = extent.y },
-        },
-        .middle => switch (vertical_anchor) {
-            .top => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - vertical_free_space },
-            .middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - (vertical_free_space / 2.0) },
-            .bottom => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
-        },
-        .right => switch (vertical_anchor) {
-            .top => .{ .x = extent.x + horizontal_free_space, .y = extent.y - vertical_free_space },
-            .middle => .{ .x = extent.x + horizontal_free_space, .y = extent.y - (vertical_free_space / 2.0) },
-            .bottom => .{ .x = extent.x + horizontal_free_space, .y = extent.y },
-        },
+    const text_placement: Coordinates2D(f32) = switch (comptime layout_anchor) {
+        .top_right => .{ .x = extent.x + horizontal_free_space, .y = extent.y - vertical_free_space },
+        .top_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - vertical_free_space },
+        .top_left => .{ .x = extent.x, .y = extent.y - vertical_free_space },
+        .middle_right => .{ .x = extent.x + horizontal_free_space, .y = extent.y - (vertical_free_space / 2.0) },
+        .center => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - (vertical_free_space / 2.0) },
+        .middle_left => .{ .x = extent.x, .y = extent.y - (vertical_free_space / 2.0) },
+        .bottom_right => .{ .x = extent.x + horizontal_free_space, .y = extent.y },
+        .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
+        .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
     pen_ptr.write(text, text_placement, screen_scale, &text_writer_interface) catch unreachable;
 

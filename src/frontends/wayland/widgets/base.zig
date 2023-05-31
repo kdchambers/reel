@@ -86,8 +86,7 @@ pub const Slider = struct {
                     .small,
                     .regular,
                     RGBA(u8).white,
-                    .middle,
-                    .middle,
+                    .top_right,
                 );
             }
             if (!left_mouse_active) {
@@ -129,17 +128,15 @@ pub const Slider = struct {
             .small,
             .regular,
             RGBA(u8).white,
-            .middle,
-            .middle,
+            .center,
         );
 
         const value_label_height = 40.0 * screen_scale.vertical;
-        const value_label_width = 60.0 * screen_scale.horizontal;
         const value_label_extent = Extent3D(f32){
-            .x = extent.x + extent.width - value_label_width,
+            .x = extent.x,
             .y = extent.y - extent.height + value_label_height,
             .z = extent.z,
-            .width = value_label_width,
+            .width = extent.width,
             .height = value_label_height,
         };
         self.value_extent = value_label_extent;
@@ -152,8 +149,7 @@ pub const Slider = struct {
             .small,
             .regular,
             RGBA(u8).white,
-            .middle,
-            .middle,
+            .top_right,
         );
 
         const bar_height: f32 = 8.0 * screen_scale.vertical;
@@ -364,8 +360,7 @@ pub const Selector = struct {
                 .small,
                 .regular,
                 RGBA(u8).white,
-                .middle,
-                .middle,
+                .center
             );
         }
 
@@ -405,8 +400,7 @@ pub const Selector = struct {
                     .small,
                     .regular,
                     RGBA(u8).white,
-                    .middle,
-                    .middle,
+                    .center
                 );
                 event_system.overwriteMouseEventSlot(&self.mouse_event_slots.get()[i], middle_section_extent, .{});
             }
@@ -470,8 +464,7 @@ pub const Selector = struct {
                 .small,
                 .regular,
                 RGBA(u8).white,
-                .middle,
-                .middle,
+                .center
             );
         }
     }
@@ -534,7 +527,7 @@ pub const ListSelectPopup = struct {
             .width = width,
             .height = item_height,
         };
-        _ = renderer.drawText(self.title, title_extent, screen_scale, .medium, .regular, RGBA(u8).white, .middle, .middle);
+        _ = renderer.drawText(self.title, title_extent, screen_scale, .medium, .regular, RGBA(u8).white, .center);
 
         self.mouse_event_slots = event_system.reserveMouseEventSlots(self.label_count);
         for (self.label_buffer[0..self.label_count], self.mouse_event_slots.get(), 0..) |option_label, *mouse_slot, i| {
@@ -546,7 +539,7 @@ pub const ListSelectPopup = struct {
                 .height = item_height,
             };
             self.vertex_index_buffer[i] = renderer.drawQuad(item_extent, self.item_background_color, .bottom_left);
-            _ = renderer.drawText(option_label, item_extent, screen_scale, .medium, .regular, RGBA(u8).white, .middle, .middle);
+            _ = renderer.drawText(option_label, item_extent, screen_scale, .medium, .regular, RGBA(u8).white, .center);
             event_system.overwriteMouseEventSlot(mouse_slot, item_extent, .{});
         }
     }
@@ -704,7 +697,7 @@ pub const TabbedSection = struct {
             };
             event_system.overwriteMouseEventSlot(mouse_slot, box_extent, .{ .enable_hover = true });
 
-            _ = renderer.drawText(title, text_extent, screen_scale, .medium, .regular, RGBA(u8).white, .middle, .middle);
+            _ = renderer.drawText(title, text_extent, screen_scale, .medium, .regular, RGBA(u8).white, .center);
 
             current_x_offset += (box_width + border_h);
         }
@@ -915,7 +908,7 @@ pub const Dropdown = struct {
         self.mouse_event_slot = event_system.writeMouseEventSlot(extent, .{});
 
         const active_label = self.model.labels[self.model.selected_index];
-        _ = renderer.drawText(active_label, label_extent, screen_scale, .small, .regular, RGBA(u8).white, .middle, .middle);
+        _ = renderer.drawText(active_label, label_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
 
         const triangle_height: f32 = extent.height / 4.0;
         const triangle_height_pixels = triangle_height / screen_scale.vertical;
@@ -953,7 +946,7 @@ pub const Dropdown = struct {
                 };
                 event_system.overwriteMouseEventSlot(slot, item_extent, .{});
                 self.vertex_index_buffer[i] = renderer.drawQuad(item_extent, self.background_color, .bottom_left);
-                _ = renderer.drawText(label, item_extent, screen_scale, .small, .regular, RGBA(u8).white, .middle, .middle);
+                _ = renderer.drawText(label, item_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
             }
         }
     }
@@ -1096,7 +1089,7 @@ pub const Button = struct {
             self.vertex_count = 4;
             self.vertex_index = renderer.drawQuad(extent, self.color, .bottom_left);
         }
-        _ = renderer.drawText(self.label, extent, screen_scale, .medium, .regular, self.text_color, .middle, .middle);
+        _ = renderer.drawText(self.label, extent, screen_scale, .medium, .regular, self.text_color, .center);
         self.mouse_event_slot = event_system.writeMouseEventSlot(extent, .{});
     }
 
