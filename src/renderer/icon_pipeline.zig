@@ -323,21 +323,48 @@ pub fn overwriteText(
     assert(vertex_range.count % 4 == 0);
     assert(vertex_range.count >= text.len * 4);
     @memset(vertices_buffer[vertex_range.start..vertex_range.end()], Vertex.null_value);
-    assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = BufferTextWriterInterface{
         .z = extent.z,
         .color = color,
         .vertex_start = vertex_range.start,
         .capacity = @intCast(u16, text.len),
     };
-    switch (pen_weight) {
+    const pen_ptr = switch (pen_weight) {
         .light => unreachable,
         .regular => switch (pen_size) {
-            .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
-            .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+            .small => &pen_small,
+            .medium => &pen_medium,
             else => unreachable,
         },
-    }
+    };
+    const pixel_dimensions = pen_ptr.calculateRenderDimensions(text);
+    const dimensions = Dimensions2D(f32){
+        .width = pixel_dimensions.width * screen_scale.horizontal,
+        .height = pixel_dimensions.height * screen_scale.vertical,
+    };
+    assert(extent.width >= dimensions.width);
+    assert(extent.height >= dimensions.height);
+    const horizontal_free_space = extent.width - dimensions.width;
+    const vertical_free_space = extent.height - dimensions.height;
+
+    const text_placement: Coordinates2D(f32) = switch (horizontal_anchor) {
+        .left => switch (vertical_anchor) {
+            .top => .{ .x = extent.x, .y = extent.y - vertical_free_space },
+            .middle => .{ .x = extent.x, .y = extent.y - (vertical_free_space / 2.0) },
+            .bottom => .{ .x = extent.x, .y = extent.y },
+        },
+        .middle => switch (vertical_anchor) {
+            .top => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - vertical_free_space },
+            .middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - (vertical_free_space / 2.0) },
+            .bottom => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
+        },
+        .right => switch (vertical_anchor) {
+            .top => .{ .x = extent.x + horizontal_free_space, .y = extent.y - vertical_free_space },
+            .middle => .{ .x = extent.x + horizontal_free_space, .y = extent.y - (vertical_free_space / 2.0) },
+            .bottom => .{ .x = extent.x + horizontal_free_space, .y = extent.y },
+        },
+    };
+    pen_ptr.write(text, text_placement, screen_scale, &text_writer_interface) catch unreachable;
 }
 
 pub fn drawIcon(
@@ -396,16 +423,45 @@ pub fn drawText(
     vertical_anchor: VerticalAnchor,
 ) DrawTextResult {
     const pre_vertices_used = vertices_used;
-    assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = TextWriterInterface{ .color = color, .z = extent.z };
-    switch (pen_weight) {
+    const pen_ptr = switch (pen_weight) {
         .light => unreachable,
         .regular => switch (pen_size) {
-            .small => pen_small.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
-            .medium => pen_medium.writeCentered(text, extent.to2D(), screen_scale, &text_writer_interface) catch unreachable,
+            .small => &pen_small,
+            .medium => &pen_medium,
             else => unreachable,
         },
-    }
+    };
+
+    const pixel_dimensions = pen_ptr.calculateRenderDimensions(text);
+    const dimensions = Dimensions2D(f32){
+        .width = pixel_dimensions.width * screen_scale.horizontal,
+        .height = pixel_dimensions.height * screen_scale.vertical,
+    };
+    assert(extent.width >= dimensions.width);
+    assert(extent.height >= dimensions.height);
+    const horizontal_free_space = extent.width - dimensions.width;
+    const vertical_free_space = extent.height - dimensions.height;
+
+    const text_placement: Coordinates2D(f32) = switch (horizontal_anchor) {
+        .left => switch (vertical_anchor) {
+            .top => .{ .x = extent.x, .y = extent.y - vertical_free_space },
+            .middle => .{ .x = extent.x, .y = extent.y - (vertical_free_space / 2.0) },
+            .bottom => .{ .x = extent.x, .y = extent.y },
+        },
+        .middle => switch (vertical_anchor) {
+            .top => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - vertical_free_space },
+            .middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y - (vertical_free_space / 2.0) },
+            .bottom => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
+        },
+        .right => switch (vertical_anchor) {
+            .top => .{ .x = extent.x + horizontal_free_space, .y = extent.y - vertical_free_space },
+            .middle => .{ .x = extent.x + horizontal_free_space, .y = extent.y - (vertical_free_space / 2.0) },
+            .bottom => .{ .x = extent.x + horizontal_free_space, .y = extent.y },
+        },
+    };
+    pen_ptr.write(text, text_placement, screen_scale, &text_writer_interface) catch unreachable;
+
     const post_vertices_used = vertices_used;
     assert(post_vertices_used > pre_vertices_used);
     const vertex_count = post_vertices_used - pre_vertices_used;
@@ -470,8 +526,8 @@ const BufferTextWriterInterface = struct {
 
     pub fn write(
         self: *@This(),
-        screen_extent: geometry.Extent2D(f32),
-        texture_extent: geometry.Extent2D(f32),
+        screen_extent: Extent2D(f32),
+        texture_extent: Extent2D(f32),
     ) f32 {
         assert(self.used < self.capacity);
         //
@@ -480,7 +536,7 @@ const BufferTextWriterInterface = struct {
         const increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
         const threshold: f32 = increment / 4.0;
         const snapped_x = snap(screen_extent.x, increment, threshold);
-        const truncated_extent = geometry.Extent3D(f32){
+        const truncated_extent = Extent3D(f32){
             .x = snapped_x,
             .y = roundDown(screen_extent.y, 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height)),
             .z = self.z,
