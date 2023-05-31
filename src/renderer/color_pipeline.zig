@@ -131,6 +131,10 @@ pub inline fn overwriteQuad(
 pub const VertexRange = packed struct(u32) {
     start: u16,
     count: u16,
+
+    pub inline fn end(self: @This()) usize {
+        return self.start + self.count;
+    }
 };
 
 pub inline fn drawRoundedRect(

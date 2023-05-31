@@ -50,6 +50,15 @@ var vertices_used: u16 = 0;
 var indices_used: u16 = 0;
 
 pub const Vertex = extern struct {
+    const null_value = Vertex{
+        .x = -2.0,
+        .y = -2.0,
+        .z = -2.0,
+        .u = 0.0,
+        .v = 0.0,
+        .color = RGBA(u8).fromInt(0, 0, 0, 0),
+    };
+
     x: f32,
     y: f32,
     z: f32 = geometry.ui_layer.middle,
@@ -308,9 +317,7 @@ pub fn overwriteText(
     horizontal_anchor: HorizontalAnchor,
     vertical_anchor: VerticalAnchor,
 ) DrawTextResult {
-    //
-    // TODO: Clear vertex range
-    //
+    @memset(vertices_buffer[vertex_range.start..vertex_range.end()], Vertex.null_value);
     assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = BufferTextWriterInterface{
         .color = color,
