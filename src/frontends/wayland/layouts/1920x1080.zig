@@ -17,7 +17,9 @@ const ScaleFactor2D = geometry.ScaleFactor2D;
 
 const ui_root = @import("../../wayland.zig");
 
-const Region = @import("../layout.zig").Region;
+const layout = @import("../layout.zig");
+const Region = layout.Region;
+const Placement = layout.Placement;
 
 const renderer = @import("../../../renderer.zig");
 
@@ -303,6 +305,51 @@ pub fn draw(
                 quality_selector_region.width = 120.0 * screen_scale.horizontal;
                 quality_selector_region.height = 30.0 * screen_scale.vertical;
                 ui_state.record_quality_selector.draw(quality_selector_region.placement(), screen_scale);
+
+                var bitrate_slider_placement = Placement{};
+                bitrate_slider_placement.z = 0.0;
+                bitrate_slider_placement.anchor.top = quality_selector_region.bottom();
+                bitrate_slider_placement.anchor.left = region.left();
+                bitrate_slider_placement.margin.left = 26.0 * screen_scale.horizontal;
+                bitrate_slider_placement.margin.top = 80.0 * screen_scale.vertical;
+
+                ui_state.record_bitrate_slider.draw(bitrate_slider_placement.placement(), 400.0 * screen_scale.horizontal, screen_scale);
+
+                var bitrate_label_region = Region{};
+                bitrate_label_region.anchor.left = bitrate_slider_placement.left();
+                bitrate_label_region.anchor.bottom = bitrate_slider_placement.top();
+                bitrate_label_region.margin.left = -12.0 * screen_scale.horizontal;
+                bitrate_label_region.margin.bottom = 15.0 * screen_scale.vertical;
+                bitrate_label_region.height = 30.0 * screen_scale.vertical;
+                bitrate_label_region.width = 60.0 * screen_scale.horizontal;
+                _ = renderer.drawText(
+                    "Bit Rate",
+                    bitrate_label_region.toExtent(),
+                    screen_scale,
+                    .small,
+                    .regular,
+                    RGBA.fromInt(210, 210, 210, 255),
+                    .middle,
+                    .middle,
+                );
+
+                var bitrate_value_region = Region{};
+                bitrate_value_region.anchor.left = bitrate_slider_placement.left();
+                bitrate_value_region.anchor.bottom = bitrate_slider_placement.top();
+                bitrate_value_region.margin.left = 350.0 * screen_scale.horizontal;
+                bitrate_value_region.margin.bottom = 15.0 * screen_scale.vertical;
+                bitrate_value_region.height = 30.0 * screen_scale.vertical;
+                bitrate_value_region.width = 60.0 * screen_scale.horizontal;
+                _ = renderer.drawText(
+                    UIState.bitrate_values[ui_state.record_bitrate_slider.active_index],
+                    bitrate_value_region.toExtent(),
+                    screen_scale,
+                    .small,
+                    .regular,
+                    RGBA.fromInt(210, 210, 210, 255),
+                    .middle,
+                    .middle,
+                );
             },
             .stream => {
                 _ = renderer.drawText("Stream", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .middle, .middle);

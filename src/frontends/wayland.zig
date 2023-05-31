@@ -289,6 +289,12 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_quality_selector.active_background_color = RGBA.fromInt(56, 56, 56, 255);
     ui_state.record_quality_selector.hovered_background_color = RGBA.fromInt(56, 56, 56, 255);
 
+    ui_state.record_bitrate_slider.init();
+    ui_state.record_bitrate_slider.background_color = RGBA.fromInt(57, 59, 63, 255);
+    ui_state.record_bitrate_slider.knob_outer_color = RGBA.white;
+    ui_state.record_bitrate_slider.knob_inner_color = RGBA.fromInt(17, 20, 26, 255);
+    ui_state.record_bitrate_slider.step_count = 10;
+
     ui_state.add_source_state = .closed;
 
     ui_state.video_source_mouse_event_count = 0;
@@ -354,6 +360,13 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 .source_index = @intCast(u16, i),
             };
         }
+    }
+
+    {
+        const mouse_x_coordinate = @floatCast(f32, mouse_coordinates.x) * screen_scale.horizontal;
+        const response = ui_state.record_bitrate_slider.update(mouse_x_coordinate, button_state == .pressed);
+        if (response.visual_change or response.active_index != null)
+            is_render_requested = true;
     }
 
     {

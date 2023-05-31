@@ -24,7 +24,7 @@ pub const format_labels = [_][]const u8{
     "AVI",
 };
 
-pub const recording_quality_labels = [_][]const u8 {
+pub const recording_quality_labels = [_][]const u8{
     "low",
     "medium",
     "high",
@@ -33,6 +33,19 @@ pub const recording_quality_labels = [_][]const u8 {
 pub const image_format_labels = [_][]const u8{
     @tagName(ImageFormat.png),
     @tagName(ImageFormat.qoi),
+};
+
+pub const bitrate_values = [10][]const u8{
+    "1 MB",
+    "1.5 MB",
+    "2 MB",
+    "3 MB",
+    "4 MB",
+    "5 MB",
+    "7 MB",
+    "8 MB",
+    "10 MB",
+    "12 MB",
 };
 
 pub const activity_labels = [_][]const u8{
@@ -184,6 +197,7 @@ activity_start_button: widgets.Button,
 
 record_format_selector: widgets.Selector,
 record_quality_selector: widgets.Selector,
+record_bitrate_slider: widgets.Slider,
 
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),
