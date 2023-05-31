@@ -306,7 +306,7 @@ pub inline fn reserveTextBuffer(char_count: u16) renderer.VertexRange {
         writeQuadIndices(vertices_used);
         vertices_used += 4;
     }
-    return .{ .start = vertex_index, .count = char_count };
+    return .{ .start = vertex_index, .count = vertex_count };
 }
 
 pub fn overwriteText(
@@ -320,12 +320,15 @@ pub fn overwriteText(
     horizontal_anchor: HorizontalAnchor,
     vertical_anchor: VerticalAnchor,
 ) void {
+    assert(vertex_range.count % 4 == 0);
+    assert(vertex_range.count >= text.len * 4);
     @memset(vertices_buffer[vertex_range.start..vertex_range.end()], Vertex.null_value);
     assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = BufferTextWriterInterface{
+        .z = extent.z,
         .color = color,
         .vertex_start = vertex_range.start,
-        .capacity = vertex_range.count,
+        .capacity = @intCast(u16, text.len),
     };
     switch (pen_weight) {
         .light => unreachable,
@@ -469,7 +472,7 @@ const BufferTextWriterInterface = struct {
         self: *@This(),
         screen_extent: geometry.Extent2D(f32),
         texture_extent: geometry.Extent2D(f32),
-    ) !void {
+    ) f32 {
         assert(self.used < self.capacity);
         //
         // See comments in TextWriterInterface for notes on pixel snapping / clamping
@@ -492,6 +495,7 @@ const BufferTextWriterInterface = struct {
             .bottom_left,
         );
         self.used += 1;
+        return snapped_x - screen_extent.x;
     }
 };
 

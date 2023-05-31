@@ -35,7 +35,7 @@ pub const image_format_labels = [_][]const u8{
     @tagName(ImageFormat.qoi),
 };
 
-pub const bitrate_values = [10][]const u8{
+pub const bitrate_value_labels = [10][]const u8{
     "1 MB",
     "1.5 MB",
     "2 MB",
@@ -47,6 +47,7 @@ pub const bitrate_values = [10][]const u8{
     "10 MB",
     "12 MB",
 };
+pub const bitrate_value_label_max_length = 6;
 
 pub const activity_labels = [_][]const u8{
     "Record",

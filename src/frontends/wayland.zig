@@ -293,7 +293,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_bitrate_slider.background_color = RGBA.fromInt(57, 59, 63, 255);
     ui_state.record_bitrate_slider.knob_outer_color = RGBA.white;
     ui_state.record_bitrate_slider.knob_inner_color = RGBA.fromInt(17, 20, 26, 255);
-    ui_state.record_bitrate_slider.step_count = 10;
+    ui_state.record_bitrate_slider.label_buffer = &UIState.bitrate_value_labels;
+    ui_state.record_bitrate_slider.title = "Bit Rate";
 
     ui_state.add_source_state = .closed;
 
@@ -364,7 +365,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
 
     {
         const mouse_x_coordinate = @floatCast(f32, mouse_coordinates.x) * screen_scale.horizontal;
-        const response = ui_state.record_bitrate_slider.update(mouse_x_coordinate, button_state == .pressed);
+        const response = ui_state.record_bitrate_slider.update(mouse_x_coordinate, button_state == .pressed, screen_scale);
         if (response.visual_change or response.active_index != null)
             is_render_requested = true;
     }

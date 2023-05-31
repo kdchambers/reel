@@ -32,7 +32,9 @@ const TextWriterInterface = graphics.TextWriterInterface;
 pub const MouseEventEntry = event_system.MouseEventEntry;
 
 pub const Slider = struct {
-    step_count: u16,
+    label_buffer: []const []const u8,
+    title: []const u8,
+
     active_index: u16,
     drag_active: bool,
     background_color: RGBA(u8),
@@ -40,6 +42,8 @@ pub const Slider = struct {
     knob_inner_color: RGBA(u8),
     mouse_event_slot: mini_heap.Index(MouseEventEntry),
     knob_vertex_range: renderer.VertexRange,
+    value_vertex_range: renderer.VertexRange,
+    value_extent: Extent3D(f32),
 
     drag_start_mouse_x: f32,
     drag_start_x: f32,
@@ -57,14 +61,14 @@ pub const Slider = struct {
         active_index: ?u16 = null,
     };
 
-    pub fn update(self: *@This(), mouse_x: f32, left_mouse_active: bool) Response {
+    pub fn update(self: *@This(), mouse_x: f32, left_mouse_active: bool, screen_scale: ScaleFactor2D(f32)) Response {
         var response = Response{};
         var event_ptr = self.mouse_event_slot.getPtr();
         if (self.drag_active) {
             const x_diff: f32 = mouse_x - self.drag_start_mouse_x;
             const relative_x = x_diff - self.drag_start_x;
             const index = @floatToInt(i32, @floor((relative_x + (self.drag_interval / 2.0)) / self.drag_interval));
-            if (index >= 0 and index < self.step_count and index != self.active_index) {
+            if (index >= 0 and index < self.label_buffer.len and index != self.active_index) {
                 const index_diff: i32 = index - self.active_index;
                 const x_shift = @intToFloat(f32, index_diff) * self.drag_interval;
                 self.active_index = @intCast(u16, index);
@@ -72,6 +76,17 @@ pub const Slider = struct {
                 renderer.updateVertexRangeHPosition(
                     self.knob_vertex_range,
                     x_shift,
+                );
+                renderer.overwriteText(
+                    self.value_vertex_range,
+                    self.label_buffer[self.active_index],
+                    self.value_extent,
+                    screen_scale,
+                    .small,
+                    .regular,
+                    RGBA(u8).white,
+                    .middle,
+                    .middle,
                 );
             }
             if (!left_mouse_active) {
@@ -91,30 +106,74 @@ pub const Slider = struct {
 
     pub fn draw(
         self: *@This(),
-        placement: Coordinates3D(f32),
-        width: f32,
+        extent: Extent3D(f32),
         screen_scale: ScaleFactor2D(f32),
+        value_label_buffer_size: u16,
     ) void {
-        assert(self.step_count > 2);
+        const step_count = self.label_buffer.len;
+        assert(step_count > 2);
+
+        const title_text_height = 40.0 * screen_scale.vertical;
+        const title_extent = Extent3D(f32){
+            .x = extent.x,
+            .y = extent.y - extent.height + title_text_height,
+            .z = extent.z,
+            .width = 60.0 * screen_scale.horizontal,
+            .height = title_text_height,
+        };
+        _ = renderer.drawText(
+            self.title,
+            title_extent,
+            screen_scale,
+            .small,
+            .regular,
+            RGBA(u8).white,
+            .middle,
+            .middle,
+        );
+
+        const value_label_height = 40.0 * screen_scale.vertical;
+        const value_label_width = 60.0 * screen_scale.horizontal;
+        const value_label_extent = Extent3D(f32){
+            .x = extent.x + extent.width - value_label_width,
+            .y = extent.y - extent.height + value_label_height,
+            .z = extent.z,
+            .width = value_label_width,
+            .height = value_label_height,
+        };
+        self.value_extent = value_label_extent;
+        self.value_vertex_range = renderer.reserveTextBuffer(value_label_buffer_size);
+        renderer.overwriteText(
+            self.value_vertex_range,
+            self.label_buffer[self.active_index],
+            self.value_extent,
+            screen_scale,
+            .small,
+            .regular,
+            RGBA(u8).white,
+            .middle,
+            .middle,
+        );
+
         const bar_height: f32 = 8.0 * screen_scale.vertical;
-        const background_extent = Extent3D(f32){
-            .x = placement.x,
-            .y = placement.y,
-            .z = placement.z,
-            .width = width,
+        const bar_extent = Extent3D(f32){
+            .x = extent.x,
+            .y = extent.y,
+            .z = extent.z,
+            .width = extent.width,
             .height = bar_height,
         };
-        _ = renderer.drawQuad(background_extent, self.background_color, .bottom_left);
-        const value_interval: f32 = width / @intToFloat(f32, self.step_count - 1);
+        _ = renderer.drawQuad(bar_extent, self.background_color, .bottom_left);
+        const value_interval: f32 = extent.width / @intToFloat(f32, step_count - 1);
         const point_size_pixels: f32 = 2.0;
         const point_width: f32 = point_size_pixels * screen_scale.horizontal;
         const point_height: f32 = point_size_pixels * screen_scale.vertical;
-        const point_y_placement: f32 = placement.y - ((bar_height / 2.0) - (point_height / 2.0));
-        for (self.active_index..self.step_count - 2) |i| {
+        const point_y_placement: f32 = extent.y - ((bar_height / 2.0) - (point_height / 2.0));
+        for (self.active_index..step_count - 2) |i| {
             const point_extent = Extent3D(f32){
-                .x = placement.x + @intToFloat(f32, i + 1) * value_interval,
+                .x = extent.x + @intToFloat(f32, i + 1) * value_interval,
                 .y = point_y_placement,
-                .z = placement.z,
+                .z = extent.z,
                 .width = point_width,
                 .height = point_height,
             };
@@ -122,12 +181,12 @@ pub const Slider = struct {
         }
 
         self.drag_interval = value_interval;
-        self.drag_count = @intToFloat(f32, self.step_count - 2);
+        self.drag_count = @intToFloat(f32, step_count - 2);
 
         const knob_placement_center = Coordinates3D(f32){
-            .x = placement.x + @intToFloat(f32, self.active_index) * value_interval,
+            .x = extent.x + @intToFloat(f32, self.active_index) * value_interval,
             .y = point_y_placement,
-            .z = placement.z,
+            .z = extent.z,
         };
         const knob_radius_pixels: f32 = 10.0;
         const knob_radius = Radius2D(f32){
@@ -149,7 +208,7 @@ pub const Slider = struct {
         const knob_hover_extent = Extent3D(f32){
             .x = knob_placement_center.x - knob_radius.h,
             .y = knob_placement_center.y + knob_radius.v,
-            .z = placement.z,
+            .z = extent.z,
             .width = knob_radius.h * 2.0,
             .height = knob_radius.v * 2.0,
         };
