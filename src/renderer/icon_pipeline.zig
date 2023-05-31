@@ -217,16 +217,8 @@ pub fn resetVertexBuffer() void {
 
 pub inline fn reserveGreyscale(quad_count: u16) u16 {
     const vertex_index = vertices_used;
-    const null_vertex = Vertex{
-        .x = -2.0,
-        .y = -2.0,
-        .z = -2.0,
-        .u = 0.0,
-        .v = 0.0,
-        .color = RGBA(u8).transparent,
-    };
     const vertex_count: u16 = quad_count * 4;
-    @memset(vertices_buffer[vertex_index .. vertex_index + vertex_count], null_vertex);
+    @memset(vertices_buffer[vertex_index .. vertex_index + vertex_count], Vertex.null_value);
     for (0..quad_count) |_| {
         writeQuadIndices(vertices_used);
         vertices_used += 4;
@@ -306,6 +298,17 @@ pub fn calculateRenderedDimensions(text: []const u8, pen_size: PenSize) Dimensio
     };
 }
 
+pub inline fn reserveTextBuffer(char_count: u16) renderer.VertexRange {
+    const vertex_index = vertices_used;
+    const vertex_count: u16 = char_count * 4;
+    @memset(vertices_buffer[vertex_index .. vertex_index + vertex_count], Vertex.null_value);
+    for (0..char_count) |_| {
+        writeQuadIndices(vertices_used);
+        vertices_used += 4;
+    }
+    return .{ .start = vertex_index, .count = char_count };
+}
+
 pub fn overwriteText(
     vertex_range: renderer.VertexRange,
     text: []const u8,
@@ -316,7 +319,7 @@ pub fn overwriteText(
     color: RGBA(u8),
     horizontal_anchor: HorizontalAnchor,
     vertical_anchor: VerticalAnchor,
-) DrawTextResult {
+) void {
     @memset(vertices_buffer[vertex_range.start..vertex_range.end()], Vertex.null_value);
     assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = BufferTextWriterInterface{
@@ -332,12 +335,6 @@ pub fn overwriteText(
             else => unreachable,
         },
     }
-
-    return .{
-        .written_extent = extent.to2D(),
-        .vertex_start = 0,
-        .vertex_count = 0,
-    };
 }
 
 pub fn drawIcon(
@@ -395,6 +392,7 @@ pub fn drawText(
     horizontal_anchor: HorizontalAnchor,
     vertical_anchor: VerticalAnchor,
 ) DrawTextResult {
+    const pre_vertices_used = vertices_used;
     assert(horizontal_anchor == .middle and vertical_anchor == .middle);
     var text_writer_interface = TextWriterInterface{ .color = color, .z = extent.z };
     switch (pen_weight) {
@@ -405,10 +403,14 @@ pub fn drawText(
             else => unreachable,
         },
     }
+    const post_vertices_used = vertices_used;
+    assert(post_vertices_used > pre_vertices_used);
+    const vertex_count = post_vertices_used - pre_vertices_used;
+    assert(vertex_count % 4 == 0);
     return .{
         .written_extent = extent.to2D(),
-        .vertex_start = 0,
-        .vertex_count = 0,
+        .vertex_start = pre_vertices_used,
+        .vertex_count = vertex_count,
     };
 }
 

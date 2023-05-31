@@ -65,6 +65,7 @@ pub const calculateRenderedDimensions = icon_pipeline.calculateRenderedDimension
 pub const drawIcon = icon_pipeline.drawIcon;
 pub const drawGreyscale = icon_pipeline.drawGreyscale;
 pub const drawText = icon_pipeline.drawText;
+pub const reserveTextBuffer = icon_pipeline.reserveTextBuffer;
 pub const overwriteText = icon_pipeline.overwriteText;
 pub const overwriteGreyscale = icon_pipeline.overwriteGreyscale;
 pub const reserveGreyscale = icon_pipeline.reserveGreyscale;
