@@ -455,7 +455,7 @@ pub const CategoryList = struct {
     title: []const u8,
     categories: []const []const u8,
     entry_labels: []const []const u8,
-    entry_categories: []const u8,
+    entry_categories: [max_label_count]u8,
     label_background: RGBA(u8),
     label_background_hovered: RGBA(u8),
 

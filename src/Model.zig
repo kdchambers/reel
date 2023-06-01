@@ -91,11 +91,16 @@ pub const VideoSourceProvider = struct {
     sources: ?[]Source,
 };
 
+pub const AudioSourceProvider = struct {
+    name: []const u8,
+};
+
 //
 // This defines all state that is relevant to the user interface
 //
 
 video_source_providers: []VideoSourceProvider,
+audio_source_providers: []AudioSourceProvider,
 
 canvas_dimensions: Dimensions2D(u32),
 

@@ -31,6 +31,7 @@ const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig")
 
 pub const CoreUpdate = enum {
     video_source_added,
+    source_provider_added,
 };
 
 pub const Request = enum(u8) {
@@ -101,9 +102,11 @@ var update_encoder: UpdateEncoder = .{};
 var update_encoder_mutex: std.Thread.Mutex = .{};
 
 var video_source_provider_buffer: [2]Model.VideoSourceProvider = undefined;
+var audio_source_provider_buffer: [2]Model.AudioSourceProvider = undefined;
 
 var model: Model = .{
     .video_source_providers = &.{},
+    .audio_source_providers = &.{},
     .audio_streams = &.{},
     .video_streams = &.{},
     .recording_context = .{
@@ -552,7 +555,13 @@ pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16)
 }
 
 fn handleAudioSourceInitSuccess() void {
-    std.log.info("audio input system initialized", .{});
+    assert(model.audio_source_providers.len == 0);
+    audio_source_provider_buffer[0].name = audio_source_interface.info.name;
+    model.audio_source_providers = audio_source_provider_buffer[0..1];
+    assert(model.audio_source_providers.len == 1);
+    update_encoder_mutex.lock();
+    update_encoder.write(.source_provider_added) catch unreachable;
+    update_encoder_mutex.unlock();
     audio_source_interface.listSources(gpa, handleSourceListReady);
 }
 

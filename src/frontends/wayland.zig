@@ -196,6 +196,8 @@ var is_shutdown_requested: bool = false;
 var allocator_ref: std.mem.Allocator = undefined;
 var request_encoder: CoreRequestEncoder = .{};
 
+var source_provider_label_buffer: [4][]const u8 = undefined;
+
 pub const InitError = error{
     FontInitFail,
     InitializeEventSystemFail,
@@ -305,8 +307,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.source_provider_list.init();
     ui_state.source_provider_list.title = "Source Providers";
     ui_state.source_provider_list.categories = &[_][]const u8{ "Screen Capture", "Webcam", "Audio Input" };
-    ui_state.source_provider_list.entry_labels = &[_][]const u8{ "wlroots", "pulseaudio" };
-    ui_state.source_provider_list.entry_categories = &[8]u8{ 0, 2, 255, 255, 255, 255, 255, 255 };
+    ui_state.source_provider_list.entry_labels = &[_][]const u8{};
+    ui_state.source_provider_list.entry_categories = undefined;
     ui_state.source_provider_list.label_background = RGBA.transparent;
     ui_state.source_provider_list.label_background_hovered = RGBA.fromInt(0, 0, 0, 50);
 
@@ -327,6 +329,22 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     while (core_updates.next()) |core_update| {
         switch (core_update) {
             .video_source_added => is_draw_required = true,
+            .source_provider_added => {
+                var i: usize = 0;
+                for (model.video_source_providers) |source_provider| {
+                    source_provider_label_buffer[i] = source_provider.name;
+                    ui_state.source_provider_list.entry_categories[i] = 0;
+                    i += 1;
+                }
+                for (model.audio_source_providers) |source_provider| {
+                    source_provider_label_buffer[i] = source_provider.name;
+                    ui_state.source_provider_list.entry_categories[i] = 2;
+                    i += 1;
+                }
+                ui_state.source_provider_list.entry_labels = source_provider_label_buffer[0..i];
+                const source_provider_count = model.video_source_providers.len + model.audio_source_providers.len;
+                assert(ui_state.source_provider_list.entry_labels.len == source_provider_count);
+            },
         }
     }
 
@@ -390,18 +408,6 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = true;
         if (response.active_index != null)
             is_draw_required = true;
-    }
-
-    {
-        const response = ui_state.source_provider_list.update();
-        if(response.item_clicked) |item_index| {
-            std.log.info("{d} source provider clicked", .{item_index});
-        }
-        if(response.closed) {
-            assert(ui_state.add_source_state == .select_source_provider);
-            ui_state.add_source_state = .closed;
-            is_draw_required = true;
-        }
     }
 
     {
@@ -480,28 +486,34 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     switch (ui_state.add_source_state) {
         .closed => {},
         .select_source_provider => {
-            const response = ui_state.select_source_provider_popup.update();
-            if (response.visual_change)
-                is_render_requested = true;
+            const response = ui_state.source_provider_list.update();
             if (response.item_clicked) |item_index| {
-                assert(item_index < model.video_source_providers.len);
-                const selected_source_provider_ptr = &model.video_source_providers[item_index];
-                if (selected_source_provider_ptr.sources) |sources| {
-                    ui_state.select_video_source_popup.clearLabels();
-                    ui_state.select_video_source_popup.title = "Select Display";
-                    for (sources) |source| {
-                        ui_state.select_video_source_popup.addLabel(source.name);
+                if (item_index < model.video_source_providers.len) {
+                    const selected_source_provider_ptr = &model.video_source_providers[item_index];
+                    if (selected_source_provider_ptr.sources) |sources| {
+                        ui_state.select_video_source_popup.clearLabels();
+                        ui_state.select_video_source_popup.title = "Select Display";
+                        for (sources) |source| {
+                            ui_state.select_video_source_popup.addLabel(source.name);
+                        }
+                        ui_state.add_source_state = .select_source;
+                    } else {
+                        //
+                        // If sources for provider is null, that means that interspection and selecting
+                        // a specific source from the client isn't supported. Instead we simply request
+                        // *a* source from the provider which might be selected via an external interface
+                        //
+                        request_encoder.write(.screencapture_request_source) catch unreachable;
+                        ui_state.add_source_state = .closed;
                     }
-                    ui_state.add_source_state = .select_source;
+                    is_draw_required = true;
                 } else {
-                    //
-                    // If sources for provider is null, that means that interspection and selecting
-                    // a specific source from the client isn't supported. Instead we simply request
-                    // *a* source from the provider which might be selected via an external interface
-                    //
-                    request_encoder.write(.screencapture_request_source) catch unreachable;
-                    ui_state.add_source_state = .closed;
+                    std.log.info("Audio or Web source provider clicked", .{});
                 }
+            }
+            if (response.closed) {
+                assert(ui_state.add_source_state == .select_source_provider);
+                ui_state.add_source_state = .closed;
                 is_draw_required = true;
             }
         },
