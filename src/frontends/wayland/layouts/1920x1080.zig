@@ -173,8 +173,11 @@ pub fn draw(
                     const menu_item_height: f32 = 40.0 * screen_scale.vertical;
                     const menu_item_width: f32 = 300 * screen_scale.horizontal;
                     const menu_placement = Coordinates3D(f32){
-                        .x = 1.0 - (80.0 * screen_scale.horizontal) - menu_item_width,
-                        .y = -1.0 + (200.0 * screen_scale.vertical),
+                        .x = 1.0 - (40.0 * screen_scale.horizontal) - menu_item_width,
+                        //
+                        // NOTE: Placement is `top_right`
+                        //
+                        .y = -1.0 + (160.0 * screen_scale.vertical),
                         .z = ui_layer.middle,
                     };
                     ui_state.select_video_source_popup.draw(

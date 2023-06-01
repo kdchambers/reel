@@ -456,6 +456,7 @@ pub const CategoryList = struct {
     categories: []const []const u8,
     entry_labels: []const []const u8,
     entry_categories: [max_label_count]u8,
+    background_color: RGBA(u8),
     label_background: RGBA(u8),
     label_background_hovered: RGBA(u8),
 
@@ -634,10 +635,9 @@ pub const CategoryList = struct {
             .width = border_extent.width - (border_width * 2.0),
             .height = border_extent.height - (border_height * 2.0),
         };
-        const background_color = RGBA(u8).fromInt(28, 30, 35, 255);
         const border_color = RGBA(u8).black;
         renderer.overwriteQuad(background_quads.start, border_extent, border_color, .top_left);
-        renderer.overwriteQuad(background_quads.start + 4, background_extent, background_color, .top_left);
+        renderer.overwriteQuad(background_quads.start + 4, background_extent, self.background_color, .top_left);
 
         //
         // We have to convert top_left to bottom_left :|
@@ -656,34 +656,20 @@ pub const CategoryList = struct {
 pub const ListSelectPopup = struct {
     const max_label_count = 3;
 
-    vertex_index_buffer: [max_label_count]u16,
-    mouse_event_slots: mini_heap.SliceIndex(MouseEventEntry),
     title: []const u8,
     label_buffer: [max_label_count][]const u8,
     label_count: u16,
+    border_color: RGBA(u8),
     background_color: RGBA(u8),
-    item_background_color_hovered: RGBA(u8),
-    item_background_color: RGBA(u8),
+    entry_background_color: RGBA(u8),
+    entry_background_hovered_color: RGBA(u8),
+
+    vertex_index_buffer: [max_label_count]u16,
+    mouse_event_slots: mini_heap.SliceIndex(MouseEventEntry),
 
     pub fn init(self: *@This()) void {
         self.label_count = 0;
         self.vertex_index_buffer = [1]u16{std.math.maxInt(u16)} ** max_label_count;
-    }
-
-    pub fn clearLabels(self: *@This()) void {
-        self.label_count = 0;
-    }
-
-    pub fn addLabelAlloc(self: *@This(), label: []const u8) void {
-        assert(self.label_count < max_label_count);
-        self.label_buffer[self.label_count] = mini_heap.writeString(label);
-        self.label_count += 1;
-    }
-
-    pub fn addLabel(self: *@This(), label: []const u8) void {
-        assert(self.label_count < max_label_count);
-        self.label_buffer[self.label_count] = label;
-        self.label_count += 1;
     }
 
     pub fn draw(
@@ -693,37 +679,65 @@ pub const ListSelectPopup = struct {
         item_height: f32,
         screen_scale: ScaleFactor2D(f32),
     ) void {
-        const background_extent = Extent3D(f32){
+        const title_height = 40.0 * screen_scale.vertical;
+        const height = title_height + @intToFloat(f32, self.label_count) * item_height;
+        const border_extent = Extent3D(f32){
             .x = placement.x,
             .y = placement.y,
             .z = placement.z,
             .width = width,
-            .height = item_height * @intToFloat(f32, self.label_count + 1),
+            .height = height,
         };
-        const background_color = RGBA(u8){ .r = 40, .g = 40, .b = 10, .a = 255 };
-        _ = renderer.drawQuad(background_extent, background_color, .bottom_left);
+        _ = renderer.drawQuad(border_extent, self.border_color, .top_left);
+
+        const border_thickness_pixels: f32 = 1.0;
+        const border_h: f32 = border_thickness_pixels * screen_scale.horizontal;
+        const border_v: f32 = border_thickness_pixels * screen_scale.vertical;
+        const background_extent = Extent3D(f32){
+            .x = placement.x + border_h,
+            .y = placement.y + border_v,
+            .z = placement.z,
+            .width = width - (border_h * 2.0),
+            .height = height - (border_v * 2.0),
+        };
+        _ = renderer.drawQuad(background_extent, self.background_color, .top_left);
 
         const title_extent = Extent3D(f32){
             .x = placement.x,
-            .y = placement.y - (item_height * @intToFloat(f32, self.label_count)),
+            .y = placement.y + title_height,
             .z = placement.z,
             .width = width,
             .height = item_height,
         };
-        _ = renderer.drawText(self.title, title_extent, screen_scale, .medium, .regular, RGBA(u8).white, .center);
+        const title_label_color = RGBA(u8).white;
+        _ = renderer.drawText(self.title, title_extent, screen_scale, .medium, .regular, title_label_color, .center);
 
-        self.mouse_event_slots = event_system.reserveMouseEventSlots(self.label_count);
-        for (self.label_buffer[0..self.label_count], self.mouse_event_slots.get(), 0..) |option_label, *mouse_slot, i| {
-            const item_extent = Extent3D(f32){
-                .x = placement.x,
-                .y = placement.y - (item_height * @intToFloat(f32, i)),
+        const entry_left_margin: f32 = 15.0 * screen_scale.horizontal;
+        const entry_label_color = RGBA(u8).fromInt(220, 220, 220, 255);
+
+        self.mouse_event_slots = event_system.reserveMouseEventSlots(@intCast(u16, self.label_count));
+
+        var current_y: f32 = placement.y + title_height + item_height;
+        for (self.label_buffer[0..self.label_count], 0..) |label, i| {
+            const entry_label_extent = Extent3D(f32){
+                .x = placement.x + entry_left_margin,
+                .y = current_y,
                 .z = placement.z,
                 .width = width,
                 .height = item_height,
             };
-            self.vertex_index_buffer[i] = renderer.drawQuad(item_extent, self.item_background_color, .bottom_left);
-            _ = renderer.drawText(option_label, item_extent, screen_scale, .medium, .regular, RGBA(u8).white, .center);
-            event_system.overwriteMouseEventSlot(mouse_slot, item_extent, .{});
+            _ = renderer.drawText(label, entry_label_extent, screen_scale, .small, .regular, entry_label_color, .middle_left);
+            current_y += item_height;
+
+            const label_background_extent = Extent3D(f32){
+                .x = placement.x,
+                .y = entry_label_extent.y,
+                .z = entry_label_extent.z,
+                .width = width,
+                .height = item_height,
+            };
+            self.vertex_index_buffer[i] = renderer.drawQuad(label_background_extent, self.entry_background_color, .bottom_left);
+            event_system.overwriteMouseEventSlot(&self.mouse_event_slots.get()[i], label_background_extent, .{});
         }
     }
 
@@ -742,18 +756,18 @@ pub const ListSelectPopup = struct {
             event.state.clear();
             if (state_copy.hover_enter) {
                 var quad_ptr = renderer.quad(self.vertex_index_buffer[i]);
-                quad_ptr[0].color = self.item_background_color_hovered;
-                quad_ptr[1].color = self.item_background_color_hovered;
-                quad_ptr[2].color = self.item_background_color_hovered;
-                quad_ptr[3].color = self.item_background_color_hovered;
+                quad_ptr[0].color = self.entry_background_hovered_color;
+                quad_ptr[1].color = self.entry_background_hovered_color;
+                quad_ptr[2].color = self.entry_background_hovered_color;
+                quad_ptr[3].color = self.entry_background_hovered_color;
                 response.visual_change = true;
             }
             if (state_copy.hover_exit) {
                 var quad_ptr = renderer.quad(self.vertex_index_buffer[i]);
-                quad_ptr[0].color = self.item_background_color;
-                quad_ptr[1].color = self.item_background_color;
-                quad_ptr[2].color = self.item_background_color;
-                quad_ptr[3].color = self.item_background_color;
+                quad_ptr[0].color = self.entry_background_color;
+                quad_ptr[1].color = self.entry_background_color;
+                quad_ptr[2].color = self.entry_background_color;
+                quad_ptr[3].color = self.entry_background_color;
                 response.visual_change = true;
             }
 

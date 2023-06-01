@@ -275,9 +275,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.add_source_button.icon = .add_circle_24px;
 
     ui_state.select_video_source_popup.init();
-    ui_state.select_video_source_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
-    ui_state.select_video_source_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
-    ui_state.select_video_source_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
+    ui_state.select_video_source_popup.border_color = RGBA.fromInt(0, 0, 0, 255);
+    ui_state.select_video_source_popup.background_color = RGBA.fromInt(28, 30, 35, 255);
+    ui_state.select_video_source_popup.entry_background_color = RGBA.transparent;
+    ui_state.select_video_source_popup.entry_background_hovered_color = RGBA.fromInt(0, 0, 0, 50);
 
     ui_state.activity_section.init(&UIState.activity_labels);
 
@@ -310,6 +311,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.source_provider_list.entry_labels = &[_][]const u8{};
     ui_state.source_provider_list.entry_categories = undefined;
     ui_state.source_provider_list.label_background = RGBA.transparent;
+    ui_state.source_provider_list.background_color = RGBA.fromInt(28, 30, 35, 255);
     ui_state.source_provider_list.label_background_hovered = RGBA.fromInt(0, 0, 0, 50);
 
     ui_state.add_source_state = .closed;
@@ -491,11 +493,11 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 if (item_index < model.video_source_providers.len) {
                     const selected_source_provider_ptr = &model.video_source_providers[item_index];
                     if (selected_source_provider_ptr.sources) |sources| {
-                        ui_state.select_video_source_popup.clearLabels();
                         ui_state.select_video_source_popup.title = "Select Display";
-                        for (sources) |source| {
-                            ui_state.select_video_source_popup.addLabel(source.name);
+                        for (sources, 0..) |source, source_index| {
+                            ui_state.select_video_source_popup.label_buffer[source_index] = source.name;
                         }
+                        ui_state.select_video_source_popup.label_count = @intCast(u16, sources.len);
                         ui_state.add_source_state = .select_source;
                     } else {
                         //
