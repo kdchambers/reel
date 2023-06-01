@@ -235,7 +235,7 @@ pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime opti
     comptime assert(@alignOf(Type) <= heap_alignment);
     const result_index = heap_index;
     @memcpy(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..slice.len], slice);
-    heap_index += @sizeOf(Type) * slice.len;
+    heap_index += @intCast(u16, @sizeOf(Type) * slice.len);
     heap_index = roundUp(heap_index, heap_alignment);
     return .{ .index = result_index, .count = @intCast(u16, slice.len) };
 }
@@ -244,7 +244,7 @@ pub inline fn writeN(comptime Type: type, value: *const Type, count: u16) SliceI
     comptime assert(@alignOf(Type) <= heap_alignment);
     const result_index = heap_index;
     @memset(@ptrCast([*]Type, @alignCast(@alignOf(Type), &heap_memory[heap_index]))[0..count], value.*);
-    heap_index += @sizeOf(Type) * count;
+    heap_index += @intCast(u16, @sizeOf(Type) * count);
     heap_index = roundUp(heap_index, heap_alignment);
     return .{ .index = result_index, .count = @intCast(u16, count) };
 }

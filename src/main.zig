@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const log = std.log;
+const testing = std.testing;
 const builtin = @import("builtin");
 const Timer = @import("utils.zig").Timer;
 const app_core = @import("app_core.zig");
@@ -34,4 +35,9 @@ pub fn main() !void {
 comptime {
     if (builtin.os.tag != .linux)
         @panic("Linux is the only supported operating system");
+}
+
+test {
+    _ = @import("utils.zig");
+    _ = @import("frontends/wayland/mini_heap.zig");
 }

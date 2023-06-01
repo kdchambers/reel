@@ -1,0 +1,18 @@
+name: CI
+on:
+  - push
+  - pull_request
+jobs:
+  x86_64-linux:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Setup Zig
+        run: |
+          sudo apt install xz-utils
+          sudo sh -c 'wget -c https://ziglang.org/builds/zig-linux-x86_64-0.11.0-dev.3132+465272921.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+      - name: test
+        run: |
+          zig build test
