@@ -21,6 +21,8 @@ const HoverZoneState = event_system.HoverZoneState;
 const mini_heap = @import("../mini_heap.zig");
 const Index = mini_heap.Index;
 
+pub const frontend = @import("../../wayland.zig");
+
 const graphics = @import("../../../graphics.zig");
 const Vertex = graphics.GenericVertex;
 const FaceWriter = graphics.FaceWriter;
@@ -353,15 +355,7 @@ pub const Selector = struct {
                 .height = extent.height,
             };
             _ = renderer.drawQuad(seperator_extent, self.border_color, .bottom_left);
-            _ = renderer.drawText(
-                self.labels[0],
-                middle_section_extent,
-                screen_scale,
-                .small,
-                .regular,
-                RGBA(u8).white,
-                .center
-            );
+            _ = renderer.drawText(self.labels[0], middle_section_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
         }
 
         const last_index = self.labels.len - 1;
@@ -393,15 +387,7 @@ pub const Selector = struct {
                 };
                 _ = renderer.drawQuad(seperator_extent, self.border_color, .bottom_left);
 
-                _ = renderer.drawText(
-                    self.labels[i],
-                    middle_section_extent,
-                    screen_scale,
-                    .small,
-                    .regular,
-                    RGBA(u8).white,
-                    .center
-                );
+                _ = renderer.drawText(self.labels[i], middle_section_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
                 event_system.overwriteMouseEventSlot(&self.mouse_event_slots.get()[i], middle_section_extent, .{});
             }
         }
@@ -457,16 +443,213 @@ pub const Selector = struct {
             vertex_count += renderer.drawArc(bottom_right_arc_placement, radius, background_color, 0, 90, 10).count;
             self.vertex_range_buffer[last_index].count = vertex_count + 8;
 
-            _ = renderer.drawText(
-                self.labels[last_index],
-                middle_section_extent,
-                screen_scale,
-                .small,
-                .regular,
-                RGBA(u8).white,
-                .center
-            );
+            _ = renderer.drawText(self.labels[last_index], middle_section_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
         }
+    }
+};
+
+pub const CategoryList = struct {
+    const max_category_count = 4;
+    const max_label_count = 8;
+
+    title: []const u8,
+    categories: []const []const u8,
+    entry_labels: []const []const u8,
+    entry_categories: []const u8,
+    label_background: RGBA(u8),
+    label_background_hovered: RGBA(u8),
+
+    vertex_index_buffer: [max_label_count]u16,
+    mouse_event_slots: mini_heap.SliceIndex(MouseEventEntry),
+    background_extent_slot: mini_heap.Index(MouseEventEntry),
+
+    pub fn init(self: *@This()) void {
+        _ = self;
+    }
+
+    const Response = struct {
+        item_clicked: ?u16 = null,
+        closed: bool = false,
+    };
+
+    pub fn update(self: *@This()) Response {
+        var response = Response{};
+        for (self.mouse_event_slots.get(), 0..) |*event, i| {
+            const state_copy = event.state;
+            event.state.clear();
+            if (state_copy.hover_enter) {
+                var quad_ptr = renderer.quad(self.vertex_index_buffer[i]);
+                quad_ptr[0].color = self.label_background_hovered;
+                quad_ptr[1].color = self.label_background_hovered;
+                quad_ptr[2].color = self.label_background_hovered;
+                quad_ptr[3].color = self.label_background_hovered;
+                frontend.requestRender();
+            }
+            if (state_copy.hover_exit) {
+                var quad_ptr = renderer.quad(self.vertex_index_buffer[i]);
+                quad_ptr[0].color = self.label_background;
+                quad_ptr[1].color = self.label_background;
+                quad_ptr[2].color = self.label_background;
+                quad_ptr[3].color = self.label_background;
+                frontend.requestRender();
+            }
+
+            if (state_copy.left_click_press) {
+                response.item_clicked = @intCast(u16, i);
+            }
+        }
+
+        var event = self.background_extent_slot.get();
+        const state_copy = event.state;
+        event.state.clear();
+        if (state_copy.left_click_press) {
+            response.closed = true;
+        }
+        return response;
+    }
+
+    pub fn draw(
+        self: *@This(),
+        //
+        // NOTE: `placement` is top_right instead of the normal `bottom_left`
+        //
+        placement: Coordinates3D(f32),
+        width: f32,
+        item_height: f32,
+        screen_scale: ScaleFactor2D(f32),
+    ) void {
+
+        //
+        // We're reserving the quads here as we don't really know the height of the
+        // list at this point. Trying to render at the end with a lower z is causing
+        // problems with alpha blending.
+        //
+        const background_quads: renderer.VertexRange = renderer.reserveQuads(2);
+
+        const title_margin_top: f32 = 5.0 * screen_scale.vertical;
+        const title_height = 40.0 * screen_scale.vertical;
+        const title_extent = Extent3D(f32){
+            .x = placement.x,
+            .y = placement.y + title_height + title_margin_top,
+            .z = placement.z,
+            .width = width,
+            .height = item_height,
+        };
+        const title_label_color = RGBA(u8).white;
+        _ = renderer.drawText(self.title, title_extent, screen_scale, .medium, .regular, title_label_color, .center);
+
+        const entry_left_margin: f32 = 15.0 * screen_scale.horizontal;
+        const category_y_offset: f32 = 25.0 * screen_scale.vertical;
+        const entry_y_offset: f32 = 30.0 * screen_scale.vertical;
+        const category_label_color = RGBA(u8).fromInt(200, 200, 200, 255);
+        const entry_label_color = RGBA(u8).fromInt(220, 220, 220, 255);
+        const category_line_color = RGBA(u8).fromInt(200, 200, 200, 255);
+
+        self.mouse_event_slots = event_system.reserveMouseEventSlots(@intCast(u16, self.entry_labels.len));
+
+        const title_margin_bottom: f32 = 10.0 * screen_scale.vertical;
+        var current_y: f32 = placement.y + title_height + category_y_offset + title_margin_bottom;
+
+        for (self.categories, 0..) |category_label, category_index| {
+            const category_label_extent = Extent3D(f32){
+                .x = placement.x,
+                .y = current_y,
+                .z = placement.z,
+                .width = width,
+                .height = item_height,
+            };
+            const result = renderer.drawText(category_label, category_label_extent, screen_scale, .small, .regular, category_label_color, .center);
+            current_y += category_y_offset;
+
+            const rendered_extent = result.written_extent;
+
+            const line_margin_text: f32 = 10.0 * screen_scale.horizontal;
+            const line_margin_border: f32 = 10.0 * screen_scale.horizontal;
+            const line_height: f32 = 1.0 * screen_scale.vertical;
+            {
+                const line_end_x: f32 = rendered_extent.x - line_margin_text;
+                const line_start_x: f32 = placement.x + line_margin_border;
+                const left_line_extent = Extent3D(f32){
+                    .x = line_start_x,
+                    .y = rendered_extent.y - (rendered_extent.height / 3.0),
+                    .z = placement.z,
+                    .width = line_end_x - line_start_x,
+                    .height = line_height,
+                };
+                _ = renderer.drawQuad(left_line_extent, category_line_color, .bottom_left);
+            }
+            {
+                const line_end_x: f32 = rendered_extent.x + rendered_extent.width + line_margin_text;
+                const line_start_x: f32 = placement.x + width - line_margin_border;
+                const right_line_extent = Extent3D(f32){
+                    .x = line_start_x,
+                    .y = rendered_extent.y - (rendered_extent.height / 3.0),
+                    .z = placement.z,
+                    .width = line_end_x - line_start_x,
+                    .height = line_height,
+                };
+                _ = renderer.drawQuad(right_line_extent, category_line_color, .bottom_left);
+            }
+
+            for (self.entry_categories[0..self.entry_labels.len], 0..) |entry_category, entry_index| {
+                if (entry_category == category_index) {
+                    current_y += 5.0 * screen_scale.vertical;
+                    const entry_label_extent = Extent3D(f32){
+                        .x = placement.x + entry_left_margin,
+                        .y = current_y,
+                        .z = placement.z,
+                        .width = width,
+                        .height = item_height,
+                    };
+                    const entry_label = self.entry_labels[entry_index];
+                    _ = renderer.drawText(entry_label, entry_label_extent, screen_scale, .small, .regular, entry_label_color, .middle_left);
+                    current_y += entry_y_offset;
+
+                    const label_background_extent = Extent3D(f32){
+                        .x = placement.x,
+                        .y = entry_label_extent.y,
+                        .z = entry_label_extent.z,
+                        .width = width,
+                        .height = item_height,
+                    };
+                    self.vertex_index_buffer[entry_index] = renderer.drawQuad(label_background_extent, self.label_background, .bottom_left);
+                    event_system.overwriteMouseEventSlot(&self.mouse_event_slots.get()[entry_index], label_background_extent, .{});
+                }
+            }
+        }
+
+        const border_extent = Extent3D(f32){
+            .x = placement.x,
+            .y = placement.y,
+            .z = placement.z,
+            .width = width,
+            .height = current_y - placement.y - entry_y_offset,
+        };
+        const border_width: f32 = 1.0 * screen_scale.horizontal;
+        const border_height: f32 = 1.0 * screen_scale.vertical;
+        const background_extent = Extent3D(f32){
+            .x = border_extent.x + border_width,
+            .y = border_extent.y + border_height,
+            .z = border_extent.z,
+            .width = border_extent.width - (border_width * 2.0),
+            .height = border_extent.height - (border_height * 2.0),
+        };
+        const background_color = RGBA(u8).fromInt(28, 30, 35, 255);
+        const border_color = RGBA(u8).black;
+        renderer.overwriteQuad(background_quads.start, border_extent, border_color, .top_left);
+        renderer.overwriteQuad(background_quads.start + 4, background_extent, background_color, .top_left);
+
+        //
+        // We have to convert top_left to bottom_left :|
+        //
+        const mouse_extent = Extent3D(f32){
+            .x = border_extent.x,
+            .y = border_extent.y + border_extent.height,
+            .z = border_extent.z,
+            .width = border_extent.width,
+            .height = border_extent.height,
+        };
+        self.background_extent_slot = event_system.writeMouseEventSlot(mouse_extent, .{ .invert = true, .enable_hover = false });
     }
 };
 

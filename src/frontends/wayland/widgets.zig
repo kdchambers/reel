@@ -9,6 +9,7 @@ pub const IconButton = base.IconButton;
 pub const Dropdown = base.Dropdown;
 pub const Selector = base.Selector;
 pub const ListSelectPopup = base.ListSelectPopup;
+pub const CategoryList = base.CategoryList;
 pub const TabbedSection = base.TabbedSection;
 pub const Slider = base.Slider;
 
