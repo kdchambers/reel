@@ -76,7 +76,8 @@ pub const MouseButton = enum(c_int) {
 pub const MouseEventOptions = packed struct(u32) {
     enable_hover: bool = true,
     start_active: bool = false,
-    reserved: u30 = 0,
+    invert: bool = false,
+    reserved: u29 = 0,
 };
 
 pub const MouseEventEntry = extern struct {
@@ -85,7 +86,8 @@ pub const MouseEventEntry = extern struct {
         click_left_enabled: bool = false,
         click_right_enabled: bool = false,
         hover_active: bool = false,
-        reserved: u4 = 0,
+        invert: bool = false,
+        reserved: u3 = 0,
     };
 
     extent: Extent2D(f32),
@@ -148,6 +150,11 @@ pub fn writeMouseEventSlot(
     extent: geometry.Extent3D(f32),
     options: MouseEventOptions,
 ) Index(MouseEventEntry) {
+    //
+    // Doesn't make sense to do hover testing on an inverted region as it will cover most
+    // of the screen and cause z collision issues
+    //
+    assert(!(options.invert and options.enable_hover));
     event_slot_buffer.get()[mouse_event_slot_count] = .{
         .extent = extent.to2D(),
         .z_layer = @floatToInt(u8, @floor(extent.z * 100.0)),
@@ -155,6 +162,7 @@ pub fn writeMouseEventSlot(
         .flags = .{
             .hover_enabled = options.enable_hover,
             .hover_active = options.start_active,
+            .invert = options.invert,
         },
     };
     const written_index = mouse_event_slot_count;
@@ -167,6 +175,11 @@ pub inline fn overwriteMouseEventSlot(
     extent: geometry.Extent3D(f32),
     options: MouseEventOptions,
 ) void {
+    //
+    // Doesn't make sense to do hover testing on an inverted region as it will cover most
+    // of the screen and cause z collision issues
+    //
+    assert(!(options.invert and options.enable_hover));
     slot.* = .{
         .extent = extent.to2D(),
         .z_layer = @floatToInt(u8, @floor(extent.z * 100.0)),
@@ -174,6 +187,7 @@ pub inline fn overwriteMouseEventSlot(
         .flags = .{
             .hover_enabled = options.enable_hover,
             .hover_active = options.start_active,
+            .invert = options.invert,
         },
     };
 }
@@ -185,6 +199,17 @@ pub fn handleMouseClick(position: *const geometry.Coordinates2D(f64), button: Mo
         if (entry.z_layer <= min_z_layer) {
             const is_within_extent = (position.x >= entry.extent.x and position.x <= (entry.extent.x + entry.extent.width) and
                 position.y <= entry.extent.y and position.y >= (entry.extent.y - entry.extent.height));
+            //
+            // The `invert` flags means we're using this to check if a mouse click DIDN'T happen inside a region.
+            // It also ignores the depth value so we continue instead of potentially causing a match. If we were to
+            // match we could run into collisions where more than one region with the same depth value are matched
+            //
+            if (entry.flags.invert) {
+                assert(!entry.flags.hover_enabled);
+                if (!is_within_extent and button_action == .pressed and button == .left)
+                    entry.state.left_click_press = true;
+                continue;
+            }
             if (!is_within_extent)
                 continue;
             min_z_layer = entry.z_layer;
