@@ -71,6 +71,22 @@ pub inline fn vertexSlice(vertex_index: u32, count: u32) []Vertex {
     return vertices_buffer[vertex_index .. vertex_index + count];
 }
 
+pub inline fn reserveQuad() u16 {
+    const reserved_index = vertices_used;
+    writeQuadIndices(vertices_used);
+    vertices_used += 4;
+    return reserved_index;
+}
+
+pub inline fn reserveQuads(quad_count: u16) VertexRange {
+    const reserved_index = vertices_used;
+    for (0..quad_count) |_| {
+        writeQuadIndices(vertices_used);
+        vertices_used += 4;
+    }
+    return .{ .start = reserved_index, .count = quad_count * 4 };
+}
+
 pub inline fn updateQuadColor(vertex_index: u32, color: RGBA(u8)) void {
     const quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
     quad_ptr[0].color = color;

@@ -48,6 +48,8 @@ pub const quad = color_pipeline.quad;
 pub const vertexSlice = color_pipeline.vertexSlice;
 pub const nextVertexIndex = color_pipeline.nextVertexIndex;
 
+pub const reserveQuad = color_pipeline.reserveQuad;
+pub const reserveQuads = color_pipeline.reserveQuads;
 pub const drawTriangle = color_pipeline.drawTriangle;
 pub const drawQuad = color_pipeline.drawQuad;
 pub const overwriteQuad = color_pipeline.overwriteQuad;
