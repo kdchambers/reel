@@ -366,7 +366,14 @@ pub fn overwriteText(
         .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
         .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
-    pen_ptr.write(text, text_placement, screen_scale, &text_writer_interface) catch unreachable;
+    const y_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height);
+    const y_threshold: f32 = y_increment / 2.0;
+    const snapped_y = snap(text_placement.y, y_increment, y_threshold);
+    const snapped_placement = Coordinates2D(f32){
+        .x = text_placement.x,
+        .y = snapped_y,
+    };
+    _ = pen_ptr.write(text, snapped_placement, screen_scale, &text_writer_interface) catch unreachable;
 }
 
 pub fn drawIcon(
@@ -455,14 +462,21 @@ pub fn drawText(
         .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
         .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
-    pen_ptr.write(text, text_placement, screen_scale, &text_writer_interface) catch unreachable;
+    const y_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height);
+    const y_threshold: f32 = y_increment / 2.0;
+    const snapped_y = snap(text_placement.y, y_increment, y_threshold);
+    const snapped_placement = Coordinates2D(f32){
+        .x = text_placement.x,
+        .y = snapped_y,
+    };
+    const rendered_extent = pen_ptr.write(text, snapped_placement, screen_scale, &text_writer_interface) catch unreachable;
 
     const post_vertices_used = vertices_used;
     assert(post_vertices_used > pre_vertices_used);
     const vertex_count = post_vertices_used - pre_vertices_used;
     assert(vertex_count % 4 == 0);
     return .{
-        .written_extent = extent.to2D(),
+        .written_extent = rendered_extent,
         .vertex_start = pre_vertices_used,
         .vertex_count = vertex_count,
     };
@@ -480,9 +494,9 @@ const TextWriterInterface = struct {
         screen_extent: geometry.Extent2D(f32),
         texture_extent: geometry.Extent2D(f32),
     ) f32 {
-        const increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
-        const threshold: f32 = increment / 4.0;
-        const snapped_x = snap(screen_extent.x, increment, threshold);
+        const x_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
+        const x_threshold: f32 = x_increment / 4.0;
+        const snapped_x = snap(screen_extent.x, x_increment, x_threshold);
         const truncated_extent = geometry.Extent3D(f32){
             //
             // X values can land on any part of the pixel and lead to awkward blending
@@ -491,9 +505,10 @@ const TextWriterInterface = struct {
             //
             .x = snapped_x,
             //
-            // Since Y values are more stable, we clamp everything to the nearest pixel
+            // The vertical baseline is snapped in drawText, etc. Beyond that modifying the y offset
+            // for glyphs looks bad so we just write as-is.
             //
-            .y = roundDown(screen_extent.y, 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height)),
+            .y = screen_extent.y,
             .z = self.z,
             .width = screen_extent.width,
             .height = screen_extent.height,
@@ -528,12 +543,12 @@ const BufferTextWriterInterface = struct {
         //
         // See comments in TextWriterInterface for notes on pixel snapping / clamping
         //
-        const increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
-        const threshold: f32 = increment / 4.0;
-        const snapped_x = snap(screen_extent.x, increment, threshold);
+        const x_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
+        const x_threshold: f32 = x_increment / 4.0;
+        const snapped_x = snap(screen_extent.x, x_increment, x_threshold);
         const truncated_extent = Extent3D(f32){
             .x = snapped_x,
-            .y = roundDown(screen_extent.y, 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height)),
+            .y = screen_extent.y,
             .z = self.z,
             .width = screen_extent.width,
             .height = screen_extent.height,
