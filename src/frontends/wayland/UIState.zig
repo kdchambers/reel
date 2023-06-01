@@ -190,8 +190,9 @@ open_sidemenu_button: widgets.IconButton,
 open_settings_button: widgets.IconButton,
 add_source_button: widgets.IconButton,
 
-select_source_provider_popup: widgets.ListSelectPopup,
 select_video_source_popup: widgets.ListSelectPopup,
+
+source_provider_list: widgets.CategoryList,
 
 activity_section: widgets.TabbedSection,
 activity_start_button: widgets.Button,

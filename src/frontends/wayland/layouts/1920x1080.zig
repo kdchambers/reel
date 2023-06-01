@@ -153,13 +153,16 @@ pub fn draw(
             switch (ui_state.add_source_state) {
                 .select_source_provider => {
                     const menu_item_height: f32 = 40.0 * screen_scale.vertical;
-                    const menu_item_width: f32 = 200 * screen_scale.horizontal;
+                    const menu_item_width: f32 = 240 * screen_scale.horizontal;
                     const menu_placement = Coordinates3D(f32){
                         .x = 1.0 - (40.0 * screen_scale.horizontal) - menu_item_width,
-                        .y = -1.0 + (200.0 * screen_scale.vertical),
+                        //
+                        // NOTE: Placement is `top_right`
+                        //
+                        .y = -1.0 + (160.0 * screen_scale.vertical),
                         .z = ui_layer.middle,
                     };
-                    ui_state.select_source_provider_popup.draw(
+                    ui_state.source_provider_list.draw(
                         menu_placement,
                         menu_item_width,
                         menu_item_height,

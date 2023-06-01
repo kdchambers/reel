@@ -214,6 +214,18 @@ pub const UpdateError = error{ VulkanRendererRenderFrameFail, UserInterfaceDrawF
 var last_recording_state: Model.RecordingContext.State = .idle;
 var last_preview_frame: u64 = 0;
 
+pub inline fn requestDraw() void {
+    is_draw_required = true;
+}
+
+pub inline fn requestRender() void {
+    is_render_requested = true;
+}
+
+pub inline fn leftClickInFrame() bool {
+    return button_state == .pressed;
+}
+
 pub fn init(allocator: std.mem.Allocator) !void {
     allocator_ref = allocator;
 
@@ -260,13 +272,6 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.add_source_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.add_source_button.icon = .add_circle_24px;
 
-    ui_state.select_source_provider_popup.init();
-    ui_state.select_source_provider_popup.title = "Select Source Provider";
-    ui_state.select_source_provider_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
-    ui_state.select_source_provider_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
-    ui_state.select_source_provider_popup.item_background_color_hovered = RGBA.fromInt(44, 44, 66, 255);
-    ui_state.select_source_provider_popup.addLabel("wlroots");
-
     ui_state.select_video_source_popup.init();
     ui_state.select_video_source_popup.background_color = RGBA.fromInt(24, 24, 46, 255);
     ui_state.select_video_source_popup.item_background_color = RGBA.fromInt(24, 24, 46, 255);
@@ -296,6 +301,14 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_bitrate_slider.knob_inner_color = RGBA.fromInt(17, 20, 26, 255);
     ui_state.record_bitrate_slider.label_buffer = &UIState.bitrate_value_labels;
     ui_state.record_bitrate_slider.title = "Bit Rate";
+
+    ui_state.source_provider_list.init();
+    ui_state.source_provider_list.title = "Source Providers";
+    ui_state.source_provider_list.categories = &[_][]const u8{ "Screen Capture", "Webcam", "Audio Input" };
+    ui_state.source_provider_list.entry_labels = &[_][]const u8{ "wlroots", "pulseaudio" };
+    ui_state.source_provider_list.entry_categories = &[8]u8{ 0, 2, 255, 255, 255, 255, 255, 255 };
+    ui_state.source_provider_list.label_background = RGBA.transparent;
+    ui_state.source_provider_list.label_background_hovered = RGBA.fromInt(0, 0, 0, 50);
 
     ui_state.add_source_state = .closed;
 
@@ -377,6 +390,18 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = true;
         if (response.active_index != null)
             is_draw_required = true;
+    }
+
+    {
+        const response = ui_state.source_provider_list.update();
+        if(response.item_clicked) |item_index| {
+            std.log.info("{d} source provider clicked", .{item_index});
+        }
+        if(response.closed) {
+            assert(ui_state.add_source_state == .select_source_provider);
+            ui_state.add_source_state = .closed;
+            is_draw_required = true;
+        }
     }
 
     {
