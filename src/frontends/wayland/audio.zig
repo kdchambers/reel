@@ -2,9 +2,10 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
-const zmath = @import("zmath");
+const utils = @import("../../utils.zig");
+const math = utils.math;
 
-pub var unity_table: [256]zmath.F32x4 = undefined;
+pub var unity_table: [256]math.F32x4 = undefined;
 const fft_bin_count = 256;
 
 var mel_bin_buffer: [128]f32 = undefined;
@@ -45,8 +46,8 @@ fn triangleFilter(point: f32, filter_map_buffer: *[5]FilterMap) []FilterMap {
 
 const reference_max_audio: f32 = 128.0 * 4.0;
 
-pub fn powerSpectrumToVolumeDb(power_spectrum: [fft_bin_count / 8]zmath.F32x4) f32 {
-    var accumulator: zmath.F32x4 = .{ 0, 0, 0, 0 };
+pub fn powerSpectrumToVolumeDb(power_spectrum: [fft_bin_count / 8]math.F32x4) f32 {
+    var accumulator: math.F32x4 = .{ 0, 0, 0, 0 };
     for (power_spectrum) |values| {
         accumulator += values;
     }
@@ -55,7 +56,7 @@ pub fn powerSpectrumToVolumeDb(power_spectrum: [fft_bin_count / 8]zmath.F32x4) f
     return std.math.log10(average_power / reference_max_audio);
 }
 
-pub fn powerSpectrumToMelScale(power_spectrum: [fft_bin_count / 8]zmath.F32x4, output_bin_count: u32) []f32 {
+pub fn powerSpectrumToMelScale(power_spectrum: [fft_bin_count / 8]math.F32x4, output_bin_count: u32) []f32 {
     const usable_bin_count = power_spectrum.len * 4;
     var mel_bins = [1]f32{0.00000000001} ** usable_bin_count;
 
@@ -98,21 +99,21 @@ pub fn powerSpectrumToMelScale(power_spectrum: [fft_bin_count / 8]zmath.F32x4, o
 
 const hamming_table = calculateHammingWindowTable(fft_bin_count);
 
-pub fn samplesToPowerSpectrum(pcm_buffer: []const f32) [fft_bin_count / 8]zmath.F32x4 {
+pub fn samplesToPowerSpectrum(pcm_buffer: []const f32) [fft_bin_count / 8]math.F32x4 {
     const fft_overlap_samples = @divExact(fft_bin_count, 2);
     const fft_iteration_count = ((pcm_buffer.len / 2) / (fft_overlap_samples - 1)) - 1;
 
-    var power_spectrum = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (fft_bin_count / 8);
+    var power_spectrum = [1]math.F32x4{math.f32x4(0.0, 0.0, 0.0, 0.0)} ** (fft_bin_count / 8);
 
     var i: usize = 0;
     while (i < fft_iteration_count) : (i += 1) {
         const vector_len: usize = @divExact(fft_bin_count, 4);
-        var complex = [1]zmath.F32x4{zmath.f32x4s(0.0)} ** vector_len;
+        var complex = [1]math.F32x4{math.f32x4s(0.0)} ** vector_len;
 
         var fft_window = blk: {
             // TODO: Don't hardcode channel count
             const channel_count = 2;
-            var result = [1]zmath.F32x4{zmath.f32x4(0.0, 0.0, 0.0, 0.0)} ** (@divExact(fft_bin_count, 4));
+            var result = [1]math.F32x4{math.f32x4(0.0, 0.0, 0.0, 0.0)} ** (@divExact(fft_bin_count, 4));
             const sample_increment = fft_overlap_samples * channel_count;
             const start = sample_increment * i;
             const end = start + (fft_bin_count * channel_count);
@@ -135,13 +136,13 @@ pub fn samplesToPowerSpectrum(pcm_buffer: []const f32) [fft_bin_count / 8]zmath.
             break :blk result;
         };
 
-        zmath.fft(&fft_window, &complex, &unity_table);
+        math.fft(&fft_window, &complex, &unity_table);
 
         for (&power_spectrum, 0..) |*value, v| {
             const complex2 = complex[v] * complex[v];
             // const real2 = fft_window[v] * fft_window[v];
             // const magnitude = zmath.sqrt(complex2 + real2);
-            const magnitude = zmath.sqrt(complex2);
+            const magnitude = math.sqrt(complex2);
             value.* += magnitude;
         }
     }
@@ -150,7 +151,7 @@ pub fn samplesToPowerSpectrum(pcm_buffer: []const f32) [fft_bin_count / 8]zmath.
         std.debug.assert(value.*[1] >= 0.0);
         std.debug.assert(value.*[2] >= 0.0);
         std.debug.assert(value.*[3] >= 0.0);
-        value.* /= zmath.f32x4s(@intToFloat(f32, fft_iteration_count));
+        value.* /= math.f32x4s(@intToFloat(f32, fft_iteration_count));
         std.debug.assert(value.*[0] >= 0.0);
         std.debug.assert(value.*[1] >= 0.0);
         std.debug.assert(value.*[2] >= 0.0);

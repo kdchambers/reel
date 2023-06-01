@@ -8,7 +8,6 @@ const Pkg = Build.Pkg;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const ScanProtocolsStep = @import("deps/zig-wayland/build.zig").ScanProtocolsStep;
-const zmath = @import("deps/zig-gamedev/libs/zmath/build.zig");
 
 const Options = struct {
     have_wayland: bool,
@@ -63,11 +62,6 @@ pub fn build(b: *Build) void {
 
     const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml");
     exe.addModule("vulkan", gen.getModule());
-
-    const zmath_pkg = zmath.package(b, target, optimize, .{
-        .options = .{ .enable_cross_platform_determinism = false },
-    });
-    zmath_pkg.link(exe);
 
     const shaders_module = b.createModule(.{
         .source_file = .{ .path = "shaders/shaders.zig" },

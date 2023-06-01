@@ -4,6 +4,7 @@
 pub const RingBuffer = @import("utils/RingBuffer.zig").RingBuffer;
 pub const Timer = @import("utils/Timer.zig");
 pub const FixedBuffer = @import("utils/FixedBuffer.zig").FixedBuffer;
+pub const math = @import("utils/zmath.zig");
 
 const std = @import("std");
 const assert = std.debug.assert;

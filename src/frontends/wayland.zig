@@ -7,7 +7,8 @@ const assert = std.debug.assert;
 const Model = @import("../Model.zig");
 const UIState = @import("wayland/UIState.zig");
 const audio_utils = @import("wayland/audio.zig");
-const zmath = @import("zmath");
+const utils = @import("../utils.zig");
+const math = utils.math;
 
 const wayland_core = @import("../wayland_core.zig");
 const wayland = @import("wayland");
@@ -304,7 +305,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     // TODO: Don't hardcode bin count
     //
     ui_state.audio_source_mel_bins = allocator.alloc(f32, 64) catch return error.OutOfMemory;
-    zmath.fftInitUnityTable(&audio_utils.unity_table);
+    math.fftInitUnityTable(&audio_utils.unity_table);
 }
 
 pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
