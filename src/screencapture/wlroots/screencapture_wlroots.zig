@@ -214,7 +214,7 @@ pub fn openStream(
 
     on_success_cb(stream_index, user_data);
 
-    captureNextFrame();
+    wayland_core.capture_callback = captureNextFrame;
 }
 
 pub fn state() screencapture.State {
@@ -228,7 +228,6 @@ pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn) void {
 
 fn captureNextFrame() void {
     const screencopy_manager = wayland_core.screencopy_manager_opt orelse unreachable;
-    assert(initialized_stream_count == 2);
     stream_loop: for (0..initialized_stream_count) |i| {
         if (stream_buffer[i].stream_state != .running)
             continue :stream_loop;
@@ -275,8 +274,6 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
                 .xbgr8888 => {},
                 else => unreachable,
             }
-
-            captureNextFrame();
 
             stream_ptr.*.frame_index_buffer[frame_reference.frame_index] = invalid_frame;
             const stream_handle: u16 = frame_reference.stream_index;

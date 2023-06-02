@@ -33,6 +33,9 @@ pub var pointer: *wl.Pointer = undefined;
 
 pub var display_list: std.ArrayList([]const u8) = undefined;
 
+pub const CaptureCallbackFn = fn () void;
+pub var capture_callback: ?*const CaptureCallbackFn = null;
+
 pub const OutputDisplay = struct {
     handle: *wl.Output,
     dimensions: geometry.Dimensions2D(i32) = .{ .width = 0, .height = 0 },
@@ -132,6 +135,13 @@ pub fn sync() bool {
     }
 
     _ = display.dispatchPending();
+
+    //
+    // This is used by the wlroots screencapture backend to get CPU time at
+    // ~60 frames per second. It will need to be made more sophisticated later on
+    //
+    if (capture_callback) |callback|
+        callback();
 
     return false;
 }
