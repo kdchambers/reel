@@ -10,3 +10,6 @@
 [submodule "deps/fontana"]
 	path = deps/fontana
 	url = https://github.com/kdchambers/fontana
+[submodule "deps/reel-assets"]
+	path = deps/reel-assets
+	url = https://github.com/kdchambers/reel-assets

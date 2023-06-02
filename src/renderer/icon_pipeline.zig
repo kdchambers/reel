@@ -80,7 +80,7 @@ pub const Icon = enum {
     videocam_32px,
 };
 
-const icon_directory_path = "assets/icons/";
+const icon_directory_path = "deps/reel-assets/icons/";
 const icon_path_list = [_][]const u8{
     icon_directory_path ++ "add_32px.png",
     icon_directory_path ++ "arrow_back_32px.png",
@@ -120,12 +120,15 @@ const pen_options = fontana.PenOptions{
 pub var pen_medium: Font.PenConfig(pen_options) = undefined;
 pub var pen_small: Font.PenConfig(pen_options) = undefined;
 
-const asset_path_font = "assets/Lato-Regular.ttf";
+const asset_path_font = "deps/reel-assets/fonts/Lato-Regular.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 
 fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
     font = blk: {
-        const file_handle = std.fs.cwd().openFile(asset_path_font, .{ .mode = .read_only }) catch return error.FontInitFail;
+        const file_handle = std.fs.cwd().openFile(asset_path_font, .{ .mode = .read_only }) catch |err| {
+            std.log.err("Failed to open: \"{s}\". Error: {}", .{ asset_path_font, err });
+            return err;
+        };
         defer file_handle.close();
         const max_size_bytes = 10 * 1024 * 1024;
         const font_file_bytes = file_handle.readToEndAlloc(allocator, max_size_bytes) catch return error.FontInitFail;
