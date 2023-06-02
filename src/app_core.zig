@@ -92,6 +92,9 @@ var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
 const max_video_streams = 2;
 var video_stream_buffer: [max_video_streams]Model.VideoStream = undefined;
 
+const max_video4linux_streams = 2;
+var video4linux_sources_buffer: [max_video4linux_streams]Model.WebcamSourceProvider.Source = undefined;
+
 pub const CoreRequestEncoder = utils.Encoder(Request, 512);
 pub const CoreRequestDecoder = CoreRequestEncoder.Decoder;
 
@@ -102,11 +105,13 @@ var update_encoder: UpdateEncoder = .{};
 var update_encoder_mutex: std.Thread.Mutex = .{};
 
 var video_source_provider_buffer: [2]Model.VideoSourceProvider = undefined;
+var webcam_source_provider_buffer: [2]Model.WebcamSourceProvider = undefined;
 var audio_source_provider_buffer: [2]Model.AudioSourceProvider = undefined;
 
 var model: Model = .{
     .video_source_providers = &.{},
     .audio_source_providers = &.{},
+    .webcam_source_providers = &.{},
     .audio_streams = &.{},
     .video_streams = &.{},
     .recording_context = .{
@@ -195,6 +200,32 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 
     screencapture_interface.init(&screenCaptureInitSuccess, &screenCaptureInitFail);
 
+    have_video4linux = blk: {
+        video4linux.init(allocator) catch {
+            std.log.warn("video4linux not available", .{});
+            break :blk false;
+        };
+
+        const v4l_devices = video4linux.devices();
+        for (v4l_devices, 0..) |device, i| {
+            std.log.info("v4l device: {s}", .{device.path});
+            video4linux_sources_buffer[i].name = device.name;
+        }
+
+        const webcam_source_provider_count = model.webcam_source_providers.len;
+        webcam_source_provider_buffer[webcam_source_provider_count] = .{
+            .name = "video4linux",
+            .sources = video4linux_sources_buffer[0..v4l_devices.len],
+        };
+        model.webcam_source_providers = webcam_source_provider_buffer[0 .. webcam_source_provider_count + 1];
+
+        update_encoder_mutex.lock();
+        update_encoder.write(.source_provider_added) catch unreachable;
+        update_encoder_mutex.unlock();
+
+        break :blk true;
+    };
+
     _ = wayland_core.sync();
 
     frontend_interface = frontend.interface(options.frontend);
@@ -206,18 +237,6 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         &handleAudioSourceInitSuccess,
         &handleAudioSourceInitFail,
     ) catch return error.AudioInputInitFail;
-
-    have_video4linux = blk: {
-        video4linux.init(allocator) catch {
-            std.log.warn("video4linux not available", .{});
-            break :blk false;
-        };
-        const v4l_devices = video4linux.devices();
-        for (v4l_devices) |device| {
-            std.log.info("v4l device: {s}", .{device.path});
-        }
-        break :blk true;
-    };
 }
 
 pub fn run() !void {

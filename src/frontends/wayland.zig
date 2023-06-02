@@ -331,22 +331,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     while (core_updates.next()) |core_update| {
         switch (core_update) {
             .video_source_added => is_draw_required = true,
-            .source_provider_added => {
-                var i: usize = 0;
-                for (model.video_source_providers) |source_provider| {
-                    source_provider_label_buffer[i] = source_provider.name;
-                    ui_state.source_provider_list.entry_categories[i] = 0;
-                    i += 1;
-                }
-                for (model.audio_source_providers) |source_provider| {
-                    source_provider_label_buffer[i] = source_provider.name;
-                    ui_state.source_provider_list.entry_categories[i] = 2;
-                    i += 1;
-                }
-                ui_state.source_provider_list.entry_labels = source_provider_label_buffer[0..i];
-                const source_provider_count = model.video_source_providers.len + model.audio_source_providers.len;
-                assert(ui_state.source_provider_list.entry_labels.len == source_provider_count);
-            },
+            .source_provider_added => syncSourceProviders(model),
         }
     }
 
@@ -695,6 +680,28 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
 
 pub fn deinit() void {
     std.log.info("wayland deinit", .{});
+}
+
+fn syncSourceProviders(model: *const Model) void {
+    var i: usize = 0;
+    for (model.video_source_providers) |source_provider| {
+        source_provider_label_buffer[i] = source_provider.name;
+        ui_state.source_provider_list.entry_categories[i] = 0;
+        i += 1;
+    }
+    for (model.webcam_source_providers) |source_provider| {
+        source_provider_label_buffer[i] = source_provider.name;
+        ui_state.source_provider_list.entry_categories[i] = 1;
+        i += 1;
+    }
+    for (model.audio_source_providers) |source_provider| {
+        source_provider_label_buffer[i] = source_provider.name;
+        ui_state.source_provider_list.entry_categories[i] = 2;
+        i += 1;
+    }
+    ui_state.source_provider_list.entry_labels = source_provider_label_buffer[0..i];
+    const source_provider_count = model.video_source_providers.len + model.audio_source_providers.len + model.webcam_source_providers.len;
+    assert(ui_state.source_provider_list.entry_labels.len == source_provider_count);
 }
 
 inline fn setCursorState(cursor_state: CursorState) void {

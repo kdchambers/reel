@@ -91,6 +91,17 @@ pub const VideoSourceProvider = struct {
     sources: ?[]Source,
 };
 
+pub const WebcamSourceProvider = struct {
+    pub const Source = struct {
+        name: []const u8,
+        dimensions: Dimensions2D(u32),
+        framerate: u32,
+    };
+
+    name: []const u8,
+    sources: ?[]Source,
+};
+
 pub const AudioSourceProvider = struct {
     name: []const u8,
 };
@@ -100,6 +111,7 @@ pub const AudioSourceProvider = struct {
 //
 
 video_source_providers: []VideoSourceProvider,
+webcam_source_providers: []WebcamSourceProvider,
 audio_source_providers: []AudioSourceProvider,
 
 canvas_dimensions: Dimensions2D(u32),
