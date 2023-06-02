@@ -18,7 +18,7 @@ const video_encoder = @import("video_record.zig");
 const geometry = @import("geometry.zig");
 const Dimensions2D = geometry.Dimensions2D;
 const Extent2D = geometry.Extent2D;
-const WebcamStream = @import("WebcamStream.zig").WebcamStream;
+const video4linux = @import("video4linux.zig");
 const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 
 // TODO: Audit, doesn't renderer belong here?
@@ -128,7 +128,7 @@ var model: Model = .{
 
 var model_mutex: std.Thread.Mutex = .{};
 
-var webcam_opt: ?WebcamStream = null;
+var have_video4linux: bool = false;
 
 var screencapture_open: bool = false;
 var frame_index: u64 = 0;
@@ -206,6 +206,18 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         &handleAudioSourceInitSuccess,
         &handleAudioSourceInitFail,
     ) catch return error.AudioInputInitFail;
+
+    have_video4linux = blk: {
+        video4linux.init(allocator) catch {
+            std.log.warn("video4linux not available", .{});
+            break :blk false;
+        };
+        const v4l_devices = video4linux.devices();
+        for (v4l_devices) |device| {
+            std.log.info("v4l device: {s}", .{device.path});
+        }
+        break :blk true;
+    };
 }
 
 pub fn run() !void {
@@ -217,14 +229,14 @@ pub fn run() !void {
 
         _ = wayland_core.sync();
 
-        if (webcam_opt) |*webcam| {
-            if (try webcam.getFrame(model.webcam_stream.last_frame, 0, 0, model.webcam_stream.dimensions.width)) {
-                model.webcam_stream.last_frame_index += 1;
-            }
-        }
-
         const frontend_timer = Timer.now();
         model_mutex.lock();
+
+        //
+        // TODO: This will block everything that tries to write to it for the duration of
+        //       `frontend_interface.update()`, which can be *VERY* lengthy. A better solution
+        //       would be to double buffer, and just swap buffers here
+        //
         update_encoder_mutex.lock();
 
         var update_decoder = update_encoder.decoder();
@@ -341,23 +353,6 @@ pub fn run() !void {
                     model.recording_context.quality = @intToEnum(Model.VideoQuality, quality_index);
                     std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.quality)});
                 },
-                .webcam_disable => {
-                    if (model.webcam_stream.enabled()) {
-                        webcam_opt.?.deinit() catch assert(false);
-                        webcam_opt = null;
-                        const pixels_count: usize = model.webcam_stream.dimensions.width * model.webcam_stream.dimensions.height;
-                        gpa.free(model.webcam_stream.last_frame[0..pixels_count]);
-                        model.webcam_stream.last_frame_index = std.math.maxInt(u64);
-                        assert(!model.webcam_stream.enabled());
-                        std.log.info("Webcam: disabled", .{});
-                    } else assert(false);
-                },
-                .webcam_enable => {
-                    //
-                    // TODO: Implement
-                    //
-                    assert(false);
-                },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
@@ -388,13 +383,7 @@ pub fn deinit() void {
         audio_stream.sample_buffer.deinit(gpa);
     }
 
-    //
-    // TODO:
-    //
-
-    if (webcam_opt) |*webcam| {
-        webcam.deinit() catch {};
-    }
+    video4linux.deinit(gpa);
 
     frontend_interface.deinit();
     if (comptime build_options.have_wayland) wayland_core.deinit();
