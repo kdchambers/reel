@@ -122,19 +122,6 @@ pub fn appendVideoFrame(pixels: [*]const graphics.RGBA(u8), frame_index: i64) !v
     assert(frame_index >= 0);
     assert(frame_index >= last_video_frame_index);
     if (frame_index > last_video_frame_index) {
-        if (last_video_frame_index + 1 != frame_index) {
-            std.log.warn("Frames skipped. Going from {d} to {d}", .{ last_video_frame_index, frame_index });
-            const frames_to_fill = (frame_index - last_video_frame_index);
-            var i: usize = 1;
-            while (i < frames_to_fill) : (i += 1) {
-                video_ring_buffer.push(.{
-                    .pixels = pixels,
-                    .frame_index = last_video_frame_index + @intCast(i64, i),
-                }) catch {
-                    std.log.warn("Buffer full, failed to write frame", .{});
-                };
-            }
-        }
         last_video_frame_index = frame_index;
         video_ring_buffer.push(.{
             .pixels = pixels,
