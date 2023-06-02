@@ -6,6 +6,7 @@ const log = std.log;
 const assert = std.debug.assert;
 const zigimg = @import("zigimg");
 const graphics = @import("graphics.zig");
+const RGBA = graphics.RGBA;
 const screencapture = @import("screencapture.zig");
 const build_options = @import("build_options");
 const frontend = @import("frontend.zig");
@@ -357,6 +358,8 @@ pub fn run() !void {
                     };
                     model.recording_context.start = std.time.nanoTimestamp();
                     model.recording_context.state = .sync;
+
+                    renderer.onPreviewFrameReady = handlePreviewFrameReady;
                 },
                 .record_stop => {
                     model.recording_context.state = .closing;
@@ -438,113 +441,6 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
     const renderer_source_index = stream_binding_buffer[stream_handle];
     renderer.writeStreamFrame(renderer_source_index, @ptrCast([*]const u8, pixels)[0 .. pixel_count * 4]) catch assert(false);
 
-    const video_frame_to_encode: [*]const graphics.RGBA(u8) = pixels;
-
-    //
-    // Find the audio sample that corresponds to the start of the first video frame
-    //
-    if (model.recording_context.state == .sync) {
-        model.recording_context.state = .recording;
-
-        recording_start_timestamp = std.time.nanoTimestamp();
-
-        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
-        const samples_for_frame = blk: {
-            if (audio_buffer_opt) |audio_buffer| {
-                const sample_index = audio_buffer.lastNSample(sample_multiple);
-                recording_sample_base_index = sample_index;
-                break :blk audio_buffer.samplesCopyIfRequired(
-                    sample_index,
-                    sample_multiple,
-                    sample_buffer[0..sample_multiple],
-                );
-            } else break :blk sample_buffer[0..sample_multiple];
-        };
-
-        video_encoder.appendVideoFrame(video_frame_to_encode, 0) catch unreachable;
-        video_encoder.appendAudioFrame(samples_for_frame) catch unreachable;
-
-        recording_frame_index_base = frame_index;
-        recording_sample_count = sample_multiple;
-    } else if (model.recording_context.state == .recording) {
-        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
-        const samples_to_encode = blk: {
-            if (audio_buffer_opt) |audio_buffer| {
-                const sample_index: u64 = recording_sample_base_index + recording_sample_count;
-                const samples_in_buffer: u64 = audio_buffer.availableSamplesFrom(sample_index);
-                const overflow: u64 = samples_in_buffer % sample_multiple;
-                const samples_to_load: u64 = @min(samples_in_buffer - overflow, sample_multiple * 3);
-                assert(samples_to_load % sample_multiple == 0);
-                recording_sample_count += samples_to_load;
-                break :blk if (samples_to_load > 0) audio_buffer.samplesCopyIfRequired(
-                    sample_index,
-                    samples_to_load,
-                    sample_buffer[0..samples_to_load],
-                ) else &[0]f32{};
-            } else break :blk sample_buffer[0..sample_multiple];
-        };
-
-        const current_time_ns = std.time.nanoTimestamp();
-        const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
-        const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
-        const ms_per_frame: f64 = 1000.0 / 60.0;
-        const current_frame_index = @floatToInt(i64, @floor(@intToFloat(f64, ms_from_record_start) / ms_per_frame));
-        last_video_frame_written_ns = current_time_ns;
-
-        video_encoder.appendVideoFrame(video_frame_to_encode, current_frame_index) catch |err| {
-            std.log.warn("Failed to write video frame. Error: {}", .{err});
-        };
-        if (samples_to_encode.len != 0) {
-            video_encoder.appendAudioFrame(samples_to_encode) catch |err| {
-                std.log.warn("Failed to write audio frame. Error: {}", .{err});
-            };
-        }
-    } else if (model.recording_context.state == .closing) {
-        const current_time_ns = std.time.nanoTimestamp();
-        const recording_ns = @intCast(u64, current_time_ns - recording_start_timestamp);
-        const recording_ms = @divFloor(recording_ns, std.time.ns_per_ms);
-        const channel_count: f64 = 2.0;
-        const audio_samples_ms = @floatToInt(u64, @floor(@intToFloat(f64, recording_sample_count) / (44.1 * channel_count)));
-        const video_frames_ns = @intCast(u64, last_video_frame_written_ns - recording_start_timestamp);
-        const video_frames_ms = @divFloor(video_frames_ns, std.time.ns_per_ms);
-        std.log.info("{d} ms of video & {d} ms of audio written. {d} ms expected", .{
-            video_frames_ms,
-            audio_samples_ms,
-            recording_ms,
-        });
-        if (video_frames_ms > audio_samples_ms) {
-            const audio_required_ms = video_frames_ms - audio_samples_ms;
-            const sample_count_required = audio_required_ms * 44;
-            const audio_buffer: AudioSampleRingBuffer = model.audio_streams[0].sample_buffer;
-            const samples_to_encode = blk: {
-                const sample_index: u64 = recording_sample_base_index + recording_sample_count;
-                const samples_in_buffer: u64 = audio_buffer.availableSamplesFrom(sample_index);
-                const samples_to_load: u64 = @min(sample_count_required, samples_in_buffer);
-                assert(samples_to_load <= sample_multiple * 3);
-                recording_sample_count += samples_to_load;
-                break :blk if (samples_to_load > 0) audio_buffer.samplesCopyIfRequired(
-                    sample_index,
-                    samples_to_load,
-                    sample_buffer[0..samples_to_load],
-                ) else &[0]f32{};
-            };
-            video_encoder.appendAudioFrame(samples_to_encode) catch |err| {
-                std.log.warn("Failed to write video frame. Error: {}", .{err});
-            };
-        } else if ((audio_samples_ms + 8) > video_frames_ms) {
-            const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
-            const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
-            const current_frame_index = @divFloor(ms_from_record_start, 16);
-            video_encoder.appendVideoFrame(video_frame_to_encode, current_frame_index) catch |err| {
-                std.log.warn("Failed to write video frame. Error: {}", .{err});
-            };
-        }
-        video_encoder.close();
-        model.recording_context.state = .idle;
-    }
-
-    last_screencapture_input_timestamp = std.time.nanoTimestamp();
-
     frame_index += 1;
 }
 
@@ -611,6 +507,112 @@ fn handleSourceListReady(audio_sources: []audio_source.SourceInfo) void {
         //     desktop_audio_stream = .{ .index = @intCast(u32, source_i) };
         //     have_desktop = true;
         // }
+    }
+}
+
+fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
+    //
+    // Find the audio sample that corresponds to the start of the first video frame
+    //
+    if (model.recording_context.state == .sync) {
+        model.recording_context.state = .recording;
+
+        recording_start_timestamp = std.time.nanoTimestamp();
+
+        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
+        const samples_for_frame = blk: {
+            if (audio_buffer_opt) |audio_buffer| {
+                const sample_index = audio_buffer.lastNSample(sample_multiple);
+                recording_sample_base_index = sample_index;
+                break :blk audio_buffer.samplesCopyIfRequired(
+                    sample_index,
+                    sample_multiple,
+                    sample_buffer[0..sample_multiple],
+                );
+            } else break :blk sample_buffer[0..sample_multiple];
+        };
+
+        video_encoder.appendVideoFrame(pixels.ptr, 0) catch unreachable;
+        video_encoder.appendAudioFrame(samples_for_frame) catch unreachable;
+
+        recording_frame_index_base = frame_index;
+        recording_sample_count = sample_multiple;
+    } else if (model.recording_context.state == .recording) {
+        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
+        const samples_to_encode = blk: {
+            if (audio_buffer_opt) |audio_buffer| {
+                const sample_index: u64 = recording_sample_base_index + recording_sample_count;
+                const samples_in_buffer: u64 = audio_buffer.availableSamplesFrom(sample_index);
+                const overflow: u64 = samples_in_buffer % sample_multiple;
+                const samples_to_load: u64 = @min(samples_in_buffer - overflow, sample_multiple * 3);
+                assert(samples_to_load % sample_multiple == 0);
+                recording_sample_count += samples_to_load;
+                break :blk if (samples_to_load > 0) audio_buffer.samplesCopyIfRequired(
+                    sample_index,
+                    samples_to_load,
+                    sample_buffer[0..samples_to_load],
+                ) else &[0]f32{};
+            } else break :blk sample_buffer[0..sample_multiple];
+        };
+
+        const current_time_ns = std.time.nanoTimestamp();
+        const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
+        const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
+        const ms_per_frame: f64 = 1000.0 / 60.0;
+        const current_frame_index = @floatToInt(i64, @floor(@intToFloat(f64, ms_from_record_start) / ms_per_frame));
+        last_video_frame_written_ns = current_time_ns;
+
+        video_encoder.appendVideoFrame(pixels.ptr, current_frame_index) catch |err| {
+            std.log.warn("Failed to write video frame. Error: {}", .{err});
+        };
+        if (samples_to_encode.len != 0) {
+            video_encoder.appendAudioFrame(samples_to_encode) catch |err| {
+                std.log.warn("Failed to write audio frame. Error: {}", .{err});
+            };
+        }
+    } else if (model.recording_context.state == .closing) {
+        const current_time_ns = std.time.nanoTimestamp();
+        const recording_ns = @intCast(u64, current_time_ns - recording_start_timestamp);
+        const recording_ms = @divFloor(recording_ns, std.time.ns_per_ms);
+        const channel_count: f64 = 2.0;
+        const audio_samples_ms = @floatToInt(u64, @floor(@intToFloat(f64, recording_sample_count) / (44.1 * channel_count)));
+        const video_frames_ns = @intCast(u64, last_video_frame_written_ns - recording_start_timestamp);
+        const video_frames_ms = @divFloor(video_frames_ns, std.time.ns_per_ms);
+        std.log.info("{d} ms of video & {d} ms of audio written. {d} ms expected", .{
+            video_frames_ms,
+            audio_samples_ms,
+            recording_ms,
+        });
+        if (video_frames_ms > audio_samples_ms) {
+            const audio_required_ms = video_frames_ms - audio_samples_ms;
+            const sample_count_required = audio_required_ms * 44;
+            const audio_buffer: AudioSampleRingBuffer = model.audio_streams[0].sample_buffer;
+            const samples_to_encode = blk: {
+                const sample_index: u64 = recording_sample_base_index + recording_sample_count;
+                const samples_in_buffer: u64 = audio_buffer.availableSamplesFrom(sample_index);
+                const samples_to_load: u64 = @min(sample_count_required, samples_in_buffer);
+                assert(samples_to_load <= sample_multiple * 3);
+                recording_sample_count += samples_to_load;
+                break :blk if (samples_to_load > 0) audio_buffer.samplesCopyIfRequired(
+                    sample_index,
+                    samples_to_load,
+                    sample_buffer[0..samples_to_load],
+                ) else &[0]f32{};
+            };
+            video_encoder.appendAudioFrame(samples_to_encode) catch |err| {
+                std.log.warn("Failed to write video frame. Error: {}", .{err});
+            };
+        } else if ((audio_samples_ms + 8) > video_frames_ms) {
+            const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
+            const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
+            const current_frame_index = @divFloor(ms_from_record_start, 16);
+            video_encoder.appendVideoFrame(pixels.ptr, current_frame_index) catch |err| {
+                std.log.warn("Failed to write video frame. Error: {}", .{err});
+            };
+        }
+        video_encoder.close();
+        model.recording_context.state = .idle;
+        renderer.onPreviewFrameReady = null;
     }
 }
 

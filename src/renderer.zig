@@ -37,6 +37,9 @@ const color_index_buffer_capacity = color_quad_capacity * 6;
 const required_cpu_memory: usize = calcRequiredCpuMemory();
 const required_gpu_memory: usize = calcRequiredGpuMemory();
 
+const PreviewFrameReadyCallbackFn = fn (pixels: []const RGBA(u8)) void;
+pub var onPreviewFrameReady: ?*const PreviewFrameReadyCallbackFn = null;
+
 //
 // Draw API
 //
@@ -362,6 +365,9 @@ pub fn renderFrame() !void {
     const logical_device = vulkan_core.logical_device;
 
     try waitForFence(inflight_fences[current_frame]);
+
+    if (onPreviewFrameReady) |callback|
+        callback(video_pipeline.unscaledFrame());
 
     const acquire_image_result = try device_dispatch.acquireNextImageKHR(
         logical_device,

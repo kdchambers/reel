@@ -83,6 +83,12 @@ var canvas_image_view: vk.ImageView = undefined;
 var canvas_mapped_memory: []RGBA(u8) = undefined;
 var canvas_dimensions: Dimensions2D(f32) = .{ .width = 0, .height = 0 };
 
+var unscaled_canvas_dimensions: Dimensions2D(u32) = .{ .width = 1920, .height = 1080 };
+var unscaled_canvas_memory: vk.DeviceMemory = undefined;
+var unscaled_canvas_image: vk.Image = undefined;
+var unscaled_canvas_image_view: vk.ImageView = undefined;
+var unscaled_canvas_mapped_memory: []RGBA(u8) = undefined;
+
 var scale_method: vk.Filter = .nearest;
 
 const Stream = struct {
@@ -100,6 +106,11 @@ pub const SupportedImageFormat = enum {
 
 pub fn resetVertexBuffer() void {
     draw_quad_count = 0;
+}
+
+pub inline fn unscaledFrame() []RGBA(u8) {
+    const pixel_count = unscaled_canvas_dimensions.width * unscaled_canvas_dimensions.height;
+    return unscaled_canvas_mapped_memory[0..pixel_count];
 }
 
 pub inline fn writeStreamFrame(stream_index: u32, pixels: []const u8) !void {
@@ -230,7 +241,7 @@ pub inline fn moveEdgeTop(source_index: u16, value: f32) void {
 pub inline fn moveEdgeBottom(source_index: u16, value: f32) void {
     if (value < 0.0)
         return;
-    if(value > canvas_dimensions.height)
+    if (value > canvas_dimensions.height)
         return;
     const new_y: f32 = value / canvas_dimensions.height;
     const old_y: f32 = draw_context_buffer[source_index].relative_extent.y;
@@ -512,6 +523,73 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         );
     }
 
+    for (0..source_count) |i| {
+        const draw_context_ptr: *const DrawContext = &draw_context_buffer[i];
+        const stream_ptr: *const Stream = &stream_buffer[draw_context_ptr.stream_index];
+        const relative_extent = draw_context_ptr.relative_extent;
+
+        const subresource_layers = vk.ImageSubresourceLayers{
+            .aspect_mask = .{ .color_bit = true },
+            .layer_count = 1,
+            .mip_level = 0,
+            .base_array_layer = 0,
+        };
+
+        var src_region_offsets = [2]vk.Offset3D{
+            .{ .x = 0, .y = 0, .z = 0 },
+            .{
+                .x = @floatToInt(i32, stream_ptr.dimensions.width),
+                .y = @floatToInt(i32, stream_ptr.dimensions.height),
+                .z = 1,
+            },
+        };
+
+        const dst_dimensions = Dimensions2D(f32){
+            .width = @intToFloat(f32, unscaled_canvas_dimensions.width),
+            .height = @intToFloat(f32, unscaled_canvas_dimensions.height),
+        };
+
+        const top_left = Coordinates2D(f32){
+            .x = dst_dimensions.width * relative_extent.x,
+            .y = dst_dimensions.height * (1.0 - (relative_extent.height + relative_extent.y)),
+        };
+        const bottom_right = Coordinates2D(f32){
+            .x = dst_dimensions.width * (relative_extent.x + relative_extent.width),
+            .y = dst_dimensions.height * (1.0 - relative_extent.y),
+        };
+
+        const dst_region_offsets = [2]vk.Offset3D{
+            .{
+                .x = @floatToInt(i32, @floor(top_left.x)),
+                .y = @floatToInt(i32, @floor(top_left.y)),
+                .z = 0,
+            },
+            .{
+                .x = @floatToInt(i32, @floor(bottom_right.x)),
+                .y = @floatToInt(i32, @floor(bottom_right.y)),
+                .z = 1,
+            },
+        };
+
+        const regions = [_]vk.ImageBlit{.{
+            .src_subresource = subresource_layers,
+            .src_offsets = src_region_offsets,
+            .dst_subresource = subresource_layers,
+            .dst_offsets = dst_region_offsets,
+        }};
+
+        device_dispatch.cmdBlitImage(
+            command_buffer,
+            stream_ptr.image,
+            .general,
+            unscaled_canvas_image,
+            .general,
+            1,
+            &regions,
+            scale_method,
+        );
+    }
+
     const image_barriers = [_]vk.ImageMemoryBarrier{
         .{
             .src_access_mask = .{},
@@ -521,6 +599,22 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .image = canvas_image,
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        },
+        .{
+            .src_access_mask = .{},
+            .dst_access_mask = .{ .shader_read_bit = true },
+            .old_layout = .general,
+            .new_layout = .general,
+            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .image = unscaled_canvas_image,
             .subresource_range = .{
                 .aspect_mask = .{ .color_bit = true },
                 .base_mip_level = 0,
@@ -619,9 +713,10 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
     assert(dimensions.width > 0);
     assert(dimensions.height > 0);
 
-    if (dimensions.width == @floatToInt(u32, canvas_dimensions.width))
-        return;
-    if (dimensions.height == @floatToInt(u32, canvas_dimensions.height))
+    const width_equal = (dimensions.width == @floatToInt(u32, canvas_dimensions.width));
+    const height_equal = (dimensions.height == @floatToInt(u32, canvas_dimensions.height));
+
+    if (width_equal and height_equal)
         return;
 
     const pixel_count = dimensions.width * dimensions.height;
@@ -710,11 +805,6 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
     //
     // Transition from .undefined to .general
     //
-
-    command_pool = try device_dispatch.createCommandPool(logical_device, &vk.CommandPoolCreateInfo{
-        .queue_family_index = vulkan_core.graphics_present_queue_index,
-        .flags = .{},
-    }, null);
 
     var command_buffer: vk.CommandBuffer = undefined;
 
@@ -926,6 +1016,142 @@ pub fn init(
     pipeline_layout = try device_dispatch.createPipelineLayout(logical_device, &pipeline_layout_create_info, null);
     try createDescriptorPool(device_dispatch, logical_device, swapchain_image_count);
     try createGraphicsPipeline(device_dispatch, logical_device, viewport_dimensions);
+
+    //
+    // Setup unscaled canvas image
+    //
+
+    const pixel_count = unscaled_canvas_dimensions.width * unscaled_canvas_dimensions.height;
+    const bytes_per_pixel = 4;
+    const image_size_bytes: usize = pixel_count * bytes_per_pixel;
+    const image_create_info = vk.ImageCreateInfo{
+        .flags = .{},
+        .image_type = .@"2d",
+        .format = .r8g8b8a8_unorm,
+        .tiling = .linear,
+        .extent = vk.Extent3D{
+            .width = unscaled_canvas_dimensions.width,
+            .height = unscaled_canvas_dimensions.height,
+            .depth = 1,
+        },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .initial_layout = .undefined,
+        .usage = .{ .transfer_dst_bit = true },
+        .samples = .{ .@"1_bit" = true },
+        .sharing_mode = .exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+    };
+    unscaled_canvas_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+
+    const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, unscaled_canvas_image);
+    unscaled_canvas_memory = try vulkan_core.device_dispatch.allocateMemory(logical_device, &.{
+        .allocation_size = memory_requirements.size,
+        .memory_type_index = cpu_memory_index,
+    }, null);
+    unscaled_canvas_mapped_memory = @ptrCast([*]RGBA(u8), (try device_dispatch.mapMemory(logical_device, unscaled_canvas_memory, 0, image_size_bytes, .{})).?)[0..pixel_count];
+    @memset(unscaled_canvas_mapped_memory, RGBA(u8).transparent);
+
+    try device_dispatch.bindImageMemory(logical_device, unscaled_canvas_image, unscaled_canvas_memory, 0);
+
+    //
+    // Transition from .undefined to .general
+    //
+
+    var command_buffer: vk.CommandBuffer = undefined;
+
+    const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
+        .command_pool = vulkan_core.command_pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    };
+    try device_dispatch.allocateCommandBuffers(
+        vulkan_core.logical_device,
+        &command_buffer_allocate_info,
+        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+    );
+
+    try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
+        .flags = .{ .one_time_submit_bit = true },
+        .p_inheritance_info = null,
+    });
+
+    const image_barriers = [_]vk.ImageMemoryBarrier{
+        .{
+            .src_access_mask = .{},
+            .dst_access_mask = .{},
+            .old_layout = .undefined,
+            .new_layout = .general,
+            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .image = unscaled_canvas_image,
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        },
+    };
+
+    {
+        //
+        // Transfer will produce the data, and in this case we nothing in the pipeline depends on it
+        //
+        const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
+        const dst_stage = vk.PipelineStageFlags{ .transfer_bit = true };
+        const dependency_flags = vk.DependencyFlags{};
+        device_dispatch.cmdPipelineBarrier(
+            command_buffer,
+            src_stage,
+            dst_stage,
+            dependency_flags,
+            0,
+            undefined,
+            0,
+            undefined,
+            image_barriers.len,
+            &image_barriers,
+        );
+    }
+
+    try device_dispatch.endCommandBuffer(command_buffer);
+
+    const submit_command_infos = [_]vk.SubmitInfo{.{
+        .wait_semaphore_count = 0,
+        .p_wait_semaphores = undefined,
+        .p_wait_dst_stage_mask = undefined,
+        .command_buffer_count = 1,
+        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+        .signal_semaphore_count = 0,
+        .p_signal_semaphores = undefined,
+    }};
+
+    const fence = try device_dispatch.createFence(logical_device, &.{ .flags = .{} }, null);
+    try device_dispatch.queueSubmit(
+        vulkan_core.graphics_present_queue,
+        1,
+        &submit_command_infos,
+        fence,
+    );
+
+    const wait_fence_result = try device_dispatch.waitForFences(
+        logical_device,
+        1,
+        &[1]vk.Fence{fence},
+        vk.TRUE,
+        std.math.maxInt(u64),
+    );
+    assert(wait_fence_result == .success);
+    device_dispatch.destroyFence(logical_device, fence, null);
+    device_dispatch.freeCommandBuffers(
+        logical_device,
+        vulkan_core.command_pool,
+        1,
+        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+    );
 }
 
 fn createDescriptorPool(
