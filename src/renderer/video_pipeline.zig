@@ -427,7 +427,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
     const device_dispatch = vulkan_core.device_dispatch;
 
-    @memset(canvas_mapped_memory, RGBA(u8).transparent);
+    @memset(canvas_mapped_memory, RGBA(u8).black);
+    @memset(unscaled_canvas_mapped_memory, RGBA(u8).black);
 
     for (0..source_count) |i| {
         const draw_context_ptr: *const DrawContext = &draw_context_buffer[i];
@@ -783,7 +784,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
             .memory_type_index = cpu_memory_index,
         }, null);
         canvas_mapped_memory = @ptrCast([*]RGBA(u8), (try device_dispatch.mapMemory(logical_device, canvas_memory, 0, image_size_bytes, .{})).?)[0..pixel_count];
-        @memset(canvas_mapped_memory, RGBA(u8).transparent);
+        @memset(canvas_mapped_memory, RGBA(u8).black);
     }
     try device_dispatch.bindImageMemory(logical_device, canvas_image, canvas_memory, 0);
 
@@ -1051,7 +1052,7 @@ pub fn init(
         .memory_type_index = cpu_memory_index,
     }, null);
     unscaled_canvas_mapped_memory = @ptrCast([*]RGBA(u8), (try device_dispatch.mapMemory(logical_device, unscaled_canvas_memory, 0, image_size_bytes, .{})).?)[0..pixel_count];
-    @memset(unscaled_canvas_mapped_memory, RGBA(u8).transparent);
+    @memset(unscaled_canvas_mapped_memory, RGBA(u8).black);
 
     try device_dispatch.bindImageMemory(logical_device, unscaled_canvas_image, unscaled_canvas_memory, 0);
 
