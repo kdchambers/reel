@@ -225,6 +225,8 @@ pub fn run() !void {
 
         const frontend_timer = Timer.now();
         model_mutex.lock();
+        update_encoder_mutex.lock();
+
         var update_decoder = update_encoder.decoder();
         var request_buffer = frontend_interface.update(&model, &update_decoder) catch |err| {
             std.log.err("Runtime User Interface error. {}", .{err});
@@ -233,7 +235,6 @@ pub fn run() !void {
         model_mutex.unlock();
         frontend_timer.durationLog("Frontend");
 
-        update_encoder_mutex.lock();
         update_encoder.reset();
         update_encoder_mutex.unlock();
 
