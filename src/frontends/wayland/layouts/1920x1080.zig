@@ -187,6 +187,24 @@ pub fn draw(
                         screen_scale,
                     );
                 },
+                .select_webcam => {
+                    const menu_item_height: f32 = 40.0 * screen_scale.vertical;
+                    const menu_item_width: f32 = 300 * screen_scale.horizontal;
+                    const menu_placement = Coordinates3D(f32){
+                        .x = 1.0 - (40.0 * screen_scale.horizontal) - menu_item_width,
+                        //
+                        // NOTE: Placement is `top_right`
+                        //
+                        .y = -1.0 + (160.0 * screen_scale.vertical),
+                        .z = ui_layer.middle,
+                    };
+                    ui_state.select_webcam_source_popup.draw(
+                        menu_placement,
+                        menu_item_width,
+                        menu_item_height,
+                        screen_scale,
+                    );
+                },
                 else => {},
             }
         },

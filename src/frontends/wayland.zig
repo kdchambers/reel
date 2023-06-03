@@ -279,6 +279,14 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.select_video_source_popup.background_color = RGBA.fromInt(28, 30, 35, 255);
     ui_state.select_video_source_popup.entry_background_color = RGBA.transparent;
     ui_state.select_video_source_popup.entry_background_hovered_color = RGBA.fromInt(0, 0, 0, 50);
+    ui_state.select_video_source_popup.title = "Select Display";
+
+    ui_state.select_webcam_source_popup.init();
+    ui_state.select_webcam_source_popup.border_color = RGBA.fromInt(0, 0, 0, 255);
+    ui_state.select_webcam_source_popup.background_color = RGBA.fromInt(28, 30, 35, 255);
+    ui_state.select_webcam_source_popup.entry_background_color = RGBA.transparent;
+    ui_state.select_webcam_source_popup.entry_background_hovered_color = RGBA.fromInt(0, 0, 0, 50);
+    ui_state.select_webcam_source_popup.title = "Webcam Devices";
 
     ui_state.activity_section.init(&UIState.activity_labels);
 
@@ -475,10 +483,13 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         .select_source_provider => {
             const response = ui_state.source_provider_list.update();
             if (response.item_clicked) |item_index| {
-                if (item_index < model.video_source_providers.len) {
+                const video_source_range = model.video_source_providers.len;
+                const webcam_source_range = video_source_range + model.webcam_source_providers.len;
+                const audio_source_range = webcam_source_range + model.audio_source_providers.len;
+                assert(item_index < audio_source_range);
+                if (item_index < video_source_range) {
                     const selected_source_provider_ptr = &model.video_source_providers[item_index];
                     if (selected_source_provider_ptr.sources) |sources| {
-                        ui_state.select_video_source_popup.title = "Select Display";
                         for (sources, 0..) |source, source_index| {
                             ui_state.select_video_source_popup.label_buffer[source_index] = source.name;
                         }
@@ -494,9 +505,14 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                         ui_state.add_source_state = .closed;
                     }
                     is_draw_required = true;
-                } else {
-                    std.log.info("Audio or Web source provider clicked", .{});
-                }
+                } else if (item_index < webcam_source_range) {
+                    // request_encoder.write(.webcam_add_source) catch unreachable;
+                    // request_encoder.writeInt(u16, 0) catch unreachable;
+                    ui_state.add_source_state = .select_webcam;
+                    is_draw_required = true;
+                } else if (item_index < audio_source_range) {
+                    std.log.info("Audio source provider clicked", .{});
+                } else unreachable;
             }
             if (response.closed) {
                 assert(ui_state.add_source_state == .select_source_provider);
@@ -511,6 +527,30 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             if (response.item_clicked) |item_index| {
                 assert(item_index < model.video_source_providers[0].sources.?.len);
                 request_encoder.write(.screencapture_add_source) catch unreachable;
+                request_encoder.writeInt(u16, item_index) catch unreachable;
+                ui_state.add_source_state = .closed;
+                //
+                // Close the righthand sidebar once we've finished adding a new source
+                //
+                // TODO: Implement a cleaner way of switching between button states
+                //       Or just use two seperate buttons
+                ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
+                ui_state.open_sidemenu_button.background_color = RGBA.transparent;
+                ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
+                ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
+                ui_state.open_sidemenu_button.icon = .arrow_back_32px;
+                ui_state.sidebar_state = .closed;
+
+                is_draw_required = true;
+            }
+        },
+        .select_webcam => {
+            const response = ui_state.select_webcam_source_popup.update();
+            if (response.visual_change)
+                is_render_requested = true;
+            if (response.item_clicked) |item_index| {
+                assert(item_index < model.webcam_source_providers[0].sources.len);
+                request_encoder.write(.webcam_add_source) catch unreachable;
                 request_encoder.writeInt(u16, item_index) catch unreachable;
                 ui_state.add_source_state = .closed;
                 //
@@ -702,6 +742,11 @@ fn syncSourceProviders(model: *const Model) void {
     ui_state.source_provider_list.entry_labels = source_provider_label_buffer[0..i];
     const source_provider_count = model.video_source_providers.len + model.audio_source_providers.len + model.webcam_source_providers.len;
     assert(ui_state.source_provider_list.entry_labels.len == source_provider_count);
+
+    for (model.webcam_source_providers[0].sources, 0..) |source, source_index| {
+        ui_state.select_webcam_source_popup.label_buffer[source_index] = source.name;
+    }
+    ui_state.select_webcam_source_popup.label_count = @intCast(u16, model.webcam_source_providers[0].sources.len);
 }
 
 inline fn setCursorState(cursor_state: CursorState) void {

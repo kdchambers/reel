@@ -99,7 +99,7 @@ pub const WebcamSourceProvider = struct {
     };
 
     name: []const u8,
-    sources: ?[]Source,
+    sources: []Source,
 };
 
 pub const AudioSourceProvider = struct {

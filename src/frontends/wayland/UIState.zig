@@ -191,6 +191,7 @@ open_settings_button: widgets.IconButton,
 add_source_button: widgets.IconButton,
 
 select_video_source_popup: widgets.ListSelectPopup,
+select_webcam_source_popup: widgets.ListSelectPopup,
 
 source_provider_list: widgets.CategoryList,
 
@@ -209,6 +210,7 @@ add_source_state: enum {
     closed,
     select_source_provider,
     select_source,
+    select_webcam,
 },
 
 sidebar_state: enum { closed, open },

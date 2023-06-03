@@ -50,8 +50,7 @@ pub const Request = enum(u8) {
     screencapture_add_source,
     screencapture_request_source,
 
-    webcam_enable,
-    webcam_disable,
+    webcam_add_source,
 
     screenshot_format_set,
     screenshot_region_set,
@@ -374,6 +373,12 @@ pub fn run() !void {
                     const quality_index = request_buffer.readInt(u16) catch 0;
                     model.recording_context.quality = @intToEnum(Model.VideoQuality, quality_index);
                     std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.quality)});
+                },
+                .webcam_add_source => {
+                    const webcam_source_index = request_buffer.readInt(u16) catch unreachable;
+                    // TODO: Don't assume first webcam source provider
+                    assert(webcam_source_index < model.webcam_source_providers[0].sources.len);
+                    std.log.info("Adding webcam source: {d}", .{webcam_source_index});
                 },
                 else => std.log.err("Invalid core request", .{}),
             }
