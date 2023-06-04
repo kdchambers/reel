@@ -38,7 +38,7 @@ The following is a course-grained summary of what features / backends have been 
 
 ## Build & Run Instructions
 
-To build, you'll need a master build of the zig compiler. The latest version tested is **0.11.0-dev.2685**, but if out of date will be updated soon.
+To build, you'll need a master build of the zig compiler. The latest version tested is **0.11.0-dev.3132**, but if out of date will be updated soon.
 
 ### Build requirements
 
