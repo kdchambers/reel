@@ -92,6 +92,9 @@ var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
 const max_video_streams = 2;
 var video_stream_buffer: [max_video_streams]Model.VideoStream = undefined;
 
+const max_webcam_streams = 2;
+var webcam_stream_buffer: [max_webcam_streams]Model.WebcamStream = undefined;
+
 const max_video4linux_streams = 2;
 var video4linux_sources_buffer: [max_video4linux_streams]Model.WebcamSourceProvider.Source = undefined;
 
@@ -114,6 +117,7 @@ var model: Model = .{
     .webcam_source_providers = &.{},
     .audio_streams = &.{},
     .video_streams = &.{},
+    .webcam_streams = &.{},
     .recording_context = .{
         .format = .mp4,
         .quality = .low,
@@ -123,11 +127,6 @@ var model: Model = .{
         .state = .idle,
     },
     .screenshot_format = .png,
-    .webcam_stream = .{
-        .dimensions = .{ .width = 640, .height = 480 },
-        .last_frame = undefined,
-        .last_frame_index = std.math.maxInt(u64),
-    },
     .canvas_dimensions = .{ .width = 1920, .height = 1080 },
 };
 
@@ -379,6 +378,32 @@ pub fn run() !void {
                     // TODO: Don't assume first webcam source provider
                     assert(webcam_source_index < model.webcam_source_providers[0].sources.len);
                     std.log.info("Adding webcam source: {d}", .{webcam_source_index});
+                    const wanted_dimensions = Dimensions2D(u32){ .width = 640, .height = 480 };
+                    video4linux.open(webcam_source_index, wanted_dimensions) catch |err| {
+                        std.log.err("Failed to open video4linux device {d}. Error: {}", .{ webcam_source_index, err });
+                    };
+                    assert(model.webcam_streams.len == 0);
+                    webcam_stream_buffer[0].dimensions = wanted_dimensions;
+                    webcam_stream_buffer[0].pixels = try gpa.alloc(RGBA(u8), wanted_dimensions.width * wanted_dimensions.height);
+                    _ = try video4linux.getFrame(webcam_stream_buffer[0].pixels.ptr, 0, 0, wanted_dimensions.width);
+                    model.webcam_streams = webcam_stream_buffer[0..1];
+                    assert(model.webcam_streams.len == 1);
+
+                    const stream_handle = renderer.createStream(.rgba, wanted_dimensions) catch unreachable;
+                    const relative_extent = Extent2D(f32){
+                        .x = 0.0,
+                        .y = 0.0,
+                        .width = 1.0,
+                        .height = 1.0,
+                    };
+                    renderer.addVideoSource(stream_handle, relative_extent);
+                    const byte_count: usize = wanted_dimensions.width * wanted_dimensions.height * @sizeOf(RGBA(u8));
+                    const pixel_buffer = @ptrCast([*]u8, webcam_stream_buffer[0].pixels.ptr)[0..byte_count];
+                    renderer.writeStreamFrame(stream_handle, pixel_buffer) catch unreachable;
+
+                    update_encoder_mutex.lock();
+                    update_encoder.write(.video_source_added) catch unreachable;
+                    update_encoder_mutex.unlock();
                 },
                 else => std.log.err("Invalid core request", .{}),
             }
@@ -664,9 +689,6 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     };
     stream_binding_buffer[stream_handle] = renderer.createStream(supported_image_format, stream_info.dimensions) catch unreachable;
 
-    //
-    // Draw this source to the canvas at 50% of it's size
-    //
     const relative_extent = Extent2D(f32){
         .x = 0.0,
         .y = 0.0,

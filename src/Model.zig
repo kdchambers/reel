@@ -58,7 +58,7 @@ pub const VideoFrame = struct {
 pub const WebcamStream = struct {
     dimensions: geometry.Dimensions2D(u32),
     last_frame_index: u64,
-    last_frame: [*]graphics.RGBA(u8),
+    pixels: []graphics.RGBA(u8),
 
     pub inline fn enabled(self: @This()) bool {
         return self.last_frame_index != std.math.maxInt(u64);
@@ -118,7 +118,7 @@ canvas_dimensions: Dimensions2D(u32),
 
 audio_streams: []AudioStream,
 video_streams: []VideoStream,
+webcam_streams: []WebcamStream,
 
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,
-webcam_stream: WebcamStream,
