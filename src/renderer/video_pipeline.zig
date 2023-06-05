@@ -448,8 +448,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         assert(relative_extent.y + relative_extent.height <= 1.0);
 
         const scale_factor = ScaleFactor2D(f32){
-            .horizontal = canvas_dimensions.width / stream_ptr.dimensions.width,
-            .vertical = canvas_dimensions.height / stream_ptr.dimensions.height,
+            .horizontal = stream_ptr.dimensions.width / @intToFloat(f32, unscaled_canvas_dimensions.width),
+            .vertical = stream_ptr.dimensions.height / @intToFloat(f32, unscaled_canvas_dimensions.height),
         };
         //
         // Assert we're not upscaling the image as that isn't supported currently
@@ -478,8 +478,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
             .y = canvas_dimensions.height * (1.0 - (relative_extent.height + relative_extent.y)),
         };
         const bottom_right = Coordinates2D(f32){
-            .x = canvas_dimensions.width * (relative_extent.x + relative_extent.width),
-            .y = canvas_dimensions.height * (1.0 - relative_extent.y),
+            .x = canvas_dimensions.width * relative_extent.width * scale_factor.horizontal,
+            .y = canvas_dimensions.height * relative_extent.height * scale_factor.vertical,
         };
 
         assert(top_left.x <= canvas_dimensions.width);
