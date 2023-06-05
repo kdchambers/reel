@@ -238,6 +238,9 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     ) catch return error.AudioInputInitFail;
 }
 
+// TODO: Hack
+var webcam_stream_handle: u32 = 0;
+
 pub fn run() !void {
     const input_fps = 60;
     const ns_per_frame: u64 = @divFloor(std.time.ns_per_s, input_fps);
@@ -312,7 +315,7 @@ pub fn run() !void {
                     std.log.info("Screenshot display set to: {s}", .{display_list[display_index]});
                 },
                 .record_start => {
-                    if (model.video_streams.len == 0 or model.audio_streams.len == 0) {
+                    if (model.video_streams.len == 0 and model.webcam_streams.len == 0) {
                         std.log.err("Cannot start recording without streams", .{});
                         continue :request_loop;
                     }
@@ -385,27 +388,38 @@ pub fn run() !void {
                     assert(model.webcam_streams.len == 0);
                     webcam_stream_buffer[0].dimensions = wanted_dimensions;
                     webcam_stream_buffer[0].pixels = try gpa.alloc(RGBA(u8), wanted_dimensions.width * wanted_dimensions.height);
-                    _ = try video4linux.getFrame(webcam_stream_buffer[0].pixels.ptr, 0, 0, wanted_dimensions.width);
                     model.webcam_streams = webcam_stream_buffer[0..1];
                     assert(model.webcam_streams.len == 1);
 
-                    const stream_handle = renderer.createStream(.rgba, wanted_dimensions) catch unreachable;
+                    webcam_stream_handle = renderer.createStream(.rgba, wanted_dimensions) catch unreachable;
                     const relative_extent = Extent2D(f32){
                         .x = 0.0,
                         .y = 0.0,
                         .width = 1.0,
                         .height = 1.0,
                     };
-                    renderer.addVideoSource(stream_handle, relative_extent);
+                    renderer.addVideoSource(webcam_stream_handle, relative_extent);
                     const byte_count: usize = wanted_dimensions.width * wanted_dimensions.height * @sizeOf(RGBA(u8));
                     const pixel_buffer = @ptrCast([*]u8, webcam_stream_buffer[0].pixels.ptr)[0..byte_count];
-                    renderer.writeStreamFrame(stream_handle, pixel_buffer) catch unreachable;
+                    renderer.writeStreamFrame(webcam_stream_handle, pixel_buffer) catch unreachable;
 
                     update_encoder_mutex.lock();
                     update_encoder.write(.video_source_added) catch unreachable;
                     update_encoder_mutex.unlock();
                 },
                 else => std.log.err("Invalid core request", .{}),
+            }
+        }
+
+        for (model.webcam_streams) |*stream| {
+            const pixels_updated = video4linux.getFrame(stream.pixels.ptr, 0, 0, stream.dimensions.width) catch |err| blk: {
+                std.log.err("Failed to get webcam frame. Error: {}", .{err});
+                break :blk false;
+            };
+            if (pixels_updated) {
+                const byte_count: usize = stream.dimensions.width * stream.dimensions.height * @sizeOf(RGBA(u8));
+                const pixel_buffer = @ptrCast([*]u8, webcam_stream_buffer[0].pixels.ptr)[0..byte_count];
+                renderer.writeStreamFrame(webcam_stream_handle, pixel_buffer) catch unreachable;
             }
         }
 

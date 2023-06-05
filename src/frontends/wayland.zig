@@ -360,7 +360,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         }
     }
 
-    if (model.video_streams.len != 0)
+    if (model.video_streams.len != 0 or model.webcam_streams.len != 0)
         is_render_requested = true;
 
     if (model.recording_context.state != last_recording_state) {
