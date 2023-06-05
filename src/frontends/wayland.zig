@@ -9,6 +9,8 @@ const UIState = @import("wayland/UIState.zig");
 const audio_utils = @import("wayland/audio.zig");
 const utils = @import("../utils.zig");
 const math = utils.math;
+const Timer = utils.Timer;
+const Profiler = utils.Profiler;
 
 const wayland_core = @import("../wayland_core.zig");
 const wayland = @import("wayland");
@@ -216,6 +218,18 @@ pub const UpdateError = error{ VulkanRendererRenderFrameFail, UserInterfaceDrawF
 var last_recording_state: Model.RecordingContext.State = .idle;
 var last_preview_frame: u64 = 0;
 
+var rendered_frame_count: u64 = 0;
+var rendering_start: i128 = 0;
+
+const ProfileTag = enum(u16) {
+    frontend_update,
+    render,
+    draw,
+    record_commands,
+    mouse_input,
+};
+var profiler: Profiler(true, ProfileTag) = undefined;
+
 pub inline fn requestDraw() void {
     is_draw_required = true;
 }
@@ -239,6 +253,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
         std.log.err("Failed to initialize the event system. Error: {}", .{err});
         return error.InitializeEventSystemFail;
     };
+
+    profiler.init();
 
     renderer.init(
         allocator,
@@ -335,6 +351,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
 pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
     request_encoder.used = 0;
+
+    profiler.reset();
+    _ = profiler.push(.frontend_update);
 
     while (core_updates.next()) |core_update| {
         switch (core_update) {
@@ -631,10 +650,10 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = true;
     }
 
+    _ = profiler.push(.mouse_input);
+
+    const mouse_input_timer = Timer.now();
     const mouse_position = mouseCoordinatesNDCR();
-    //
-    // TODO: This is silly. Why can't I just pass button_clicked directly?
-    //
     switch (button_clicked) {
         .left => event_system.handleMouseClick(&mouse_position, .left, button_state),
         .right => event_system.handleMouseClick(&mouse_position, .right, button_state),
@@ -651,8 +670,13 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         if (changes.hover_exit and loaded_cursor != .normal)
             setCursorState(.normal);
     }
+    _ = profiler.pop(.mouse_input);
+    mouse_input_timer.durationLog("Mouse input");
 
     if (is_draw_required) {
+        _ = profiler.push(.draw);
+        defer profiler.pop(.draw);
+
         is_draw_required = false;
         renderer.resetVertexBuffers();
 
@@ -699,7 +723,11 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
 
     if (is_record_requested) {
         is_record_requested = false;
+
+        _ = profiler.push(.record_commands);
         renderer.recordDrawCommands() catch return error.UserInterfaceDrawFail;
+        profiler.pop(.record_commands);
+
         is_render_requested = true;
     }
 
@@ -708,18 +736,33 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = false;
             pending_swapchain_images_count -= 1;
 
+            if (rendering_start == 0)
+                rendering_start = std.time.nanoTimestamp();
+
+            _ = profiler.push(.render);
             renderer.renderFrame() catch
                 return error.VulkanRendererRenderFrameFail;
+            profiler.pop(.render);
+
+            rendered_frame_count += 1;
         }
     }
 
     event_system.mouse_click_coordinates = null;
+    profiler.pop(.frontend_update);
+
+    profiler.log(0, 0, std.time.us_per_ms * 1);
 
     return request_encoder.decoder();
 }
 
 pub fn deinit() void {
     std.log.info("wayland deinit", .{});
+    const current_time_ns = std.time.nanoTimestamp();
+    const rendering_duration = @intCast(u64, current_time_ns - rendering_start);
+    const rendering_duration_seconds = @intToFloat(f32, rendering_duration) / std.time.ns_per_s;
+    const frames_rendered_per_second = @intToFloat(f32, rendered_frame_count) / rendering_duration_seconds;
+    std.log.info("wayland fps: {d}", .{frames_rendered_per_second});
 }
 
 fn syncSourceProviders(model: *const Model) void {

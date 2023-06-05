@@ -6,11 +6,15 @@ pub const Timer = @import("utils/Timer.zig");
 pub const FixedBuffer = @import("utils/FixedBuffer.zig").FixedBuffer;
 pub const math = @import("utils/zmath.zig");
 
+const profile = @import("utils/profile.zig");
+
 const std = @import("std");
 const assert = std.debug.assert;
 const c = @cImport({
     @cInclude("time.h");
 });
+
+pub const Profiler = profile.Profiler;
 
 pub const DateTime = struct {
     year: u16,
