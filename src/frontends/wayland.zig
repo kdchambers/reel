@@ -76,8 +76,6 @@ const CoreRequestDecoder = app_core.CoreRequestDecoder;
 
 var ui_state: UIState = undefined;
 
-var cached_webcam_enabled: bool = false;
-
 const StreamDragContext = struct {
     start_coordinates: Coordinates2D(u16),
     start_mouse_coordinates: Coordinates2D(u16),
@@ -367,16 +365,6 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
 
     if (model.recording_context.state != last_recording_state) {
         last_recording_state = model.recording_context.state;
-        is_draw_required = true;
-    }
-
-    //
-    // TODO: A hack until app_core has a proper way of communicating changes with
-    //       frontend
-    //
-    if (cached_webcam_enabled != model.webcam_stream.enabled()) {
-        cached_webcam_enabled = !cached_webcam_enabled;
-        assert(cached_webcam_enabled == model.webcam_stream.enabled());
         is_draw_required = true;
     }
 
