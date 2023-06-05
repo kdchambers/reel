@@ -545,6 +545,11 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
             },
         };
 
+        const scale_factor = ScaleFactor2D(f32){
+            .horizontal = stream_ptr.dimensions.width / @intToFloat(f32, unscaled_canvas_dimensions.width),
+            .vertical = stream_ptr.dimensions.height / @intToFloat(f32, unscaled_canvas_dimensions.height),
+        };
+
         const dst_dimensions = Dimensions2D(f32){
             .width = @intToFloat(f32, unscaled_canvas_dimensions.width),
             .height = @intToFloat(f32, unscaled_canvas_dimensions.height),
@@ -555,8 +560,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
             .y = dst_dimensions.height * (1.0 - (relative_extent.height + relative_extent.y)),
         };
         const bottom_right = Coordinates2D(f32){
-            .x = dst_dimensions.width * (relative_extent.x + relative_extent.width),
-            .y = dst_dimensions.height * (1.0 - relative_extent.y),
+            .x = dst_dimensions.width * relative_extent.width * scale_factor.horizontal,
+            .y = dst_dimensions.height * relative_extent.height * scale_factor.vertical,
         };
 
         const dst_region_offsets = [2]vk.Offset3D{
