@@ -98,43 +98,46 @@ pub fn deinit() void {
 }
 
 pub fn sync() bool {
-    while (!display.prepareRead()) {
-        //
-        // Client event queue should be empty before calling `prepareRead`
-        // As a result this shouldn't happen but is just a safegaurd
-        //
-        _ = display.dispatchPending();
-    }
+    if (display.roundtrip() != .SUCCESS)
+        unreachable;
 
-    //
-    // Flush Display write buffer -> Compositor
-    //
-    _ = display.flush();
+    // while (!display.prepareRead()) {
+    //     //
+    //     // Client event queue should be empty before calling `prepareRead`
+    //     // As a result this shouldn't happen but is just a safegaurd
+    //     //
+    //     _ = display.dispatchPending();
+    // }
 
-    const timeout_milliseconds = 0;
-    var pollfd = linux.pollfd{
-        .fd = wayland_fd,
-        .events = linux.POLL.IN,
-        .revents = 0,
-    };
-    const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
+    // //
+    // // Flush Display write buffer -> Compositor
+    // //
+    // _ = display.flush();
 
-    if (poll_code == 0) {
-        display.cancelRead();
-        return true;
-    }
+    // const timeout_milliseconds = 1;
+    // var pollfd = linux.pollfd{
+    //     .fd = wayland_fd,
+    //     .events = linux.POLL.IN,
+    //     .revents = 0,
+    // };
+    // const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
 
-    const input_available = (pollfd.revents & linux.POLL.IN) != 0;
-    if (poll_code > 0 and input_available) {
-        const errno = display.readEvents();
-        if (errno != .SUCCESS)
-            std.log.warn("wayland_client: failed reading events. Errno: {}", .{errno});
-    } else {
-        std.log.info("Cancel read", .{});
-        display.cancelRead();
-    }
+    // if (poll_code == 0) {
+    //     display.cancelRead();
+    //     return true;
+    // }
 
-    _ = display.dispatchPending();
+    // const input_available = (pollfd.revents & linux.POLL.IN) != 0;
+    // if (poll_code > 0 and input_available) {
+    //     const errno = display.readEvents();
+    //     if (errno != .SUCCESS)
+    //         std.log.warn("wayland_client: failed reading events. Errno: {}", .{errno});
+    // } else {
+    //     std.log.info("Cancel read", .{});
+    //     display.cancelRead();
+    // }
+
+    // _ = display.dispatchPending();
 
     //
     // This is used by the wlroots screencapture backend to get CPU time at
