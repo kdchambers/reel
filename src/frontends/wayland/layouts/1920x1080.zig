@@ -459,34 +459,39 @@ pub fn draw(
             preview_extent.z = ui_layer.low;
             renderer.drawVideoFrame(preview_extent);
 
-            const video_source_extents = renderer.videoSourceExtents(screen_scale);
-            ui_state.video_source_mouse_event_count = @intCast(u32, video_source_extents.len);
-            for (video_source_extents, 0..) |source_extent, i| {
-                const absolute_extent = Extent3D(f32){
-                    .x = source_extent.x + preview_extent.x,
-                    .y = preview_extent.y - source_extent.y,
-                    .z = source_extent.z + ui_layer.low_lower,
-                    .width = source_extent.width,
-                    .height = source_extent.height,
-                };
-                std.log.info("Source extent: {d} x {d}", .{
-                    absolute_extent.width,
-                    absolute_extent.height,
-                });
-                ui_state.video_source_mouse_event_buffer[i] = event_system.writeMouseEventSlot(absolute_extent, .{});
+            ui_state.video_source_mouse_event_count = 0;
+            //
+            // TODO: Moving and re-scaling video sources in preview disabled for now as it's kind of buggy
+            //
 
-                const edges_extent = Extent3D(f32){
-                    .x = absolute_extent.x,
-                    .y = absolute_extent.y,
-                    .z = ui_layer.middle,
-                    .width = absolute_extent.width,
-                    .height = absolute_extent.height,
-                };
-                const border_width_pixels = 4;
-                const border_h: f32 = border_width_pixels * screen_scale.horizontal;
-                const border_v: f32 = border_width_pixels * screen_scale.vertical;
-                ui_state.video_source_mouse_edge_buffer[i].fromExtent(edges_extent, border_h, border_v);
-            }
+            // const video_source_extents = renderer.videoSourceExtents(screen_scale);
+            // ui_state.video_source_mouse_event_count = @intCast(u32, video_source_extents.len);
+            // for (video_source_extents, 0..) |source_extent, i| {
+            //     const absolute_extent = Extent3D(f32){
+            //         .x = source_extent.x + preview_extent.x,
+            //         .y = preview_extent.y - source_extent.y,
+            //         .z = source_extent.z + ui_layer.low_lower,
+            //         .width = source_extent.width,
+            //         .height = source_extent.height,
+            //     };
+            //     std.log.info("Source extent: {d} x {d}", .{
+            //         absolute_extent.width,
+            //         absolute_extent.height,
+            //     });
+            //     ui_state.video_source_mouse_event_buffer[i] = event_system.writeMouseEventSlot(absolute_extent, .{});
+
+            //     const edges_extent = Extent3D(f32){
+            //         .x = absolute_extent.x,
+            //         .y = absolute_extent.y,
+            //         .z = ui_layer.middle,
+            //         .width = absolute_extent.width,
+            //         .height = absolute_extent.height,
+            //     };
+            //     const border_width_pixels = 4;
+            //     const border_h: f32 = border_width_pixels * screen_scale.horizontal;
+            //     const border_v: f32 = border_width_pixels * screen_scale.vertical;
+            //     ui_state.video_source_mouse_edge_buffer[i].fromExtent(edges_extent, border_h, border_v);
+            // }
         }
     }
 }
