@@ -310,15 +310,15 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.record_format_selector.labels = &UIState.format_labels;
     ui_state.record_format_selector.background_color = RGBA.fromInt(66, 66, 66, 255);
     ui_state.record_format_selector.border_color = RGBA.fromInt(166, 166, 166, 255);
-    ui_state.record_format_selector.active_background_color = RGBA.fromInt(56, 56, 56, 255);
-    ui_state.record_format_selector.hovered_background_color = RGBA.fromInt(56, 56, 56, 255);
+    ui_state.record_format_selector.active_background_color = RGBA.fromInt(40, 40, 40, 255);
+    ui_state.record_format_selector.hovered_background_color = RGBA.fromInt(40, 40, 40, 255);
 
     ui_state.record_quality_selector.init();
     ui_state.record_quality_selector.labels = &UIState.recording_quality_labels;
     ui_state.record_quality_selector.background_color = RGBA.fromInt(66, 66, 66, 255);
     ui_state.record_quality_selector.border_color = RGBA.fromInt(166, 166, 166, 255);
-    ui_state.record_quality_selector.active_background_color = RGBA.fromInt(56, 56, 56, 255);
-    ui_state.record_quality_selector.hovered_background_color = RGBA.fromInt(56, 56, 56, 255);
+    ui_state.record_quality_selector.active_background_color = RGBA.fromInt(40, 40, 40, 255);
+    ui_state.record_quality_selector.hovered_background_color = RGBA.fromInt(40, 40, 40, 255);
 
     ui_state.record_bitrate_slider.init();
     ui_state.record_bitrate_slider.background_color = RGBA.fromInt(57, 59, 63, 255);
