@@ -148,7 +148,7 @@ pub fn draw(
                         .height = item_height,
                     };
                     std.log.info("Source stream: {d}", .{stream.source_index});
-                    const source_name = model.video_source_providers[stream.provider_index].sources.?[stream.source_index].name;
+                    const source_name = model.video_source_providers[stream.provider_ref.index].sources.?[stream.source_index].name;
                     _ = renderer.drawText(source_name, extent, screen_scale, .small, .regular, RGBA.white, .middle_left);
 
                     const delete_icon_placement = Coordinates3D(f32){
@@ -437,7 +437,7 @@ pub fn draw(
 
         _ = renderer.drawQuad(preview_region.toExtent(), background_color.toRGBA(), .bottom_left);
 
-        if (model.video_streams.len > 0 or model.webcam_streams.len > 0) {
+        if (model.video_streams.len > 0) {
             const canvas_dimensions_pixels: Dimensions2D(u32) = .{
                 .width = @floatToInt(u32, @floor(@intToFloat(f32, frame_dimensions.width) * scale)),
                 .height = @floatToInt(u32, @floor(@intToFloat(f32, frame_dimensions.height) * scale)),

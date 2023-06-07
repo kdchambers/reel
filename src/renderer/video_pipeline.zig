@@ -116,6 +116,8 @@ pub inline fn unscaledFrame() []RGBA(u8) {
 pub inline fn writeStreamFrame(stream_index: u32, pixels: []const u8) !void {
     assert(stream_count > stream_index);
     const stream_ptr: *Stream = &stream_buffer[stream_index];
+    assert(stream_ptr.mapped_memory.len > 0);
+    assert(stream_ptr.mapped_memory.len == pixels.len);
     @memcpy(stream_ptr.mapped_memory, pixels);
 }
 

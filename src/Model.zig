@@ -55,16 +55,6 @@ pub const VideoFrame = struct {
     dimensions: Dimensions2D(u32),
 };
 
-pub const WebcamStream = struct {
-    dimensions: geometry.Dimensions2D(u32),
-    last_frame_index: u64,
-    pixels: []graphics.RGBA(u8),
-
-    pub inline fn enabled(self: @This()) bool {
-        return self.last_frame_index != std.math.maxInt(u64);
-    }
-};
-
 pub const AudioStream = struct {
     state: enum { open, closed, paused },
     source_type: enum { microphone, desktop, unknown },
@@ -72,11 +62,19 @@ pub const AudioStream = struct {
     sample_buffer: AudioSampleRingBuffer,
 };
 
+pub const VideoProviderRef = packed struct(u16) {
+    index: u10,
+    kind: enum(u6) {
+        screen_capture,
+        webcam,
+    },
+};
+
 pub const VideoStream = struct {
     frame_index: u64,
     source_index: u16,
-    provider_index: u16,
-    pixels: [*]const RGBA(u8),
+    provider_ref: VideoProviderRef,
+    pixels: []const RGBA(u8),
     dimensions: Dimensions2D(u32),
 };
 
@@ -118,7 +116,6 @@ canvas_dimensions: Dimensions2D(u32),
 
 audio_streams: []AudioStream,
 video_streams: []VideoStream,
-webcam_streams: []WebcamStream,
 
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,
