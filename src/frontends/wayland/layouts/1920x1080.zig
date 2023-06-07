@@ -136,6 +136,9 @@ pub fn draw(
                 const item_height: f32 = 40.0 * screen_scale.vertical;
                 const margin_right: f32 = 10.0 * screen_scale.horizontal;
                 const item_width: f32 = 400.0 * screen_scale.horizontal;
+                const remove_icon_width: f32 = 16.0 * screen_scale.horizontal;
+                const remove_icon_height: f32 = 16.0 * screen_scale.vertical;
+                const remove_button_margin_right: f32 = 20.0 * screen_scale.horizontal;
                 for (model.video_streams, 0..) |stream, i| {
                     const extent = Extent3D(f32){
                         .x = right_sidebar_region.left() + margin_right,
@@ -146,7 +149,18 @@ pub fn draw(
                     };
                     std.log.info("Source stream: {d}", .{stream.source_index});
                     const source_name = model.video_source_providers[stream.provider_index].sources.?[stream.source_index].name;
-                    _ = renderer.drawText(source_name, extent, screen_scale, .medium, .regular, RGBA.white, .center);
+                    _ = renderer.drawText(source_name, extent, screen_scale, .small, .regular, RGBA.white, .middle_left);
+
+                    const delete_icon_placement = Coordinates3D(f32){
+                        .x = right_sidebar_region.right() - (remove_button_margin_right + remove_icon_width),
+                        .y = extent.y - (remove_icon_height * 0.5),
+                        .z = ui_layer.middle,
+                    };
+                    ui_state.video_source_entry_buffer[i].remove_icon.draw(
+                        delete_icon_placement,
+                        5.0,
+                        screen_scale,
+                    );
                 }
             }
 
@@ -423,7 +437,7 @@ pub fn draw(
 
         _ = renderer.drawQuad(preview_region.toExtent(), background_color.toRGBA(), .bottom_left);
 
-        if (model.video_streams.len > 0) {
+        if (model.video_streams.len > 0 or model.webcam_streams.len > 0) {
             const canvas_dimensions_pixels: Dimensions2D(u32) = .{
                 .width = @floatToInt(u32, @floor(@intToFloat(f32, frame_dimensions.width) * scale)),
                 .height = @floatToInt(u32, @floor(@intToFloat(f32, frame_dimensions.height) * scale)),

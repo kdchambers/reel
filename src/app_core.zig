@@ -48,6 +48,7 @@ pub const Request = enum(u8) {
     stream_start,
 
     screencapture_add_source,
+    screencapture_remove_source,
     screencapture_request_source,
 
     webcam_add_source,
@@ -287,6 +288,10 @@ pub fn run() !void {
                         &openStreamErrorCallback,
                         &.{},
                     );
+                },
+                .screencapture_remove_source => {
+                    const stream_index = request_buffer.readInt(u16) catch unreachable;
+                    std.log.info("Removing video stream {d}", .{stream_index});
                 },
                 .screencapture_request_source => {
                     //

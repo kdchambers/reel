@@ -336,6 +336,15 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.source_provider_list.background_color = RGBA.fromInt(28, 30, 35, 255);
     ui_state.source_provider_list.label_background_hovered = RGBA.fromInt(0, 0, 0, 50);
 
+    for (&ui_state.video_source_entry_buffer) |*entry| {
+        entry.remove_icon.init();
+        entry.remove_icon.icon_color = RGBA.fromInt(220, 220, 220, 255);
+        entry.remove_icon.on_hover_icon_color = RGBA.white;
+        entry.remove_icon.background_color = RGBA.transparent;
+        entry.remove_icon.on_hover_background_color = RGBA.transparent;
+        entry.remove_icon.icon = .delete_16px;
+    }
+
     ui_state.add_source_state = .closed;
 
     ui_state.video_source_mouse_event_count = 0;
@@ -418,6 +427,20 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = true;
         if (response.active_index != null)
             is_draw_required = true;
+    }
+
+    if (ui_state.sidebar_state == .open) {
+        const source_count = model.video_streams.len;
+        const source_entries = ui_state.video_source_entry_buffer[0..source_count];
+        for (source_entries, 0..) |*entry, i| {
+            const entry_response = entry.remove_icon.update();
+            if (entry_response.clicked) {
+                request_encoder.write(.screencapture_remove_source) catch unreachable;
+                request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
+            }
+            if (entry_response.modified)
+                is_render_requested = true;
+        }
     }
 
     {

@@ -181,6 +181,10 @@ pub const EdgeRegions = struct {
     }
 };
 
+const SourceEntry = struct {
+    remove_icon: widgets.IconButton,
+};
+
 pub const quality_labels = [_][]const u8{ "low", "medium", "high" };
 
 window_decoration_requested: bool,
@@ -205,6 +209,8 @@ record_bitrate_slider: widgets.Slider,
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),
 video_source_mouse_event_count: u32,
+
+video_source_entry_buffer: [16]SourceEntry,
 
 add_source_state: enum {
     closed,

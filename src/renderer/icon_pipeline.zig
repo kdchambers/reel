@@ -73,6 +73,7 @@ pub const Icon = enum {
     arrow_forward_32px,
     add_circle_24px,
     camera_32px,
+    delete_16px,
     help_32px,
     menu_32px,
     settings_32px,
@@ -87,6 +88,7 @@ const icon_path_list = [_][]const u8{
     icon_directory_path ++ "arrow_forward_32px.png",
     icon_directory_path ++ "add_circle_24px.png",
     icon_directory_path ++ "camera_32px.png",
+    icon_directory_path ++ "delete_16px.png",
     icon_directory_path ++ "help_32px.png",
     icon_directory_path ++ "menu_32px.png",
     icon_directory_path ++ "settings_32px.png",
@@ -184,8 +186,6 @@ fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
         var image = zigimg.Image.fromFilePath(allocator, icon_path) catch return error.LoadAssetFail;
         defer image.deinit();
         assert(image.pixelFormat() == .rgba32);
-        assert(image.width == 32 or image.width == 24);
-        assert(image.height == 32 or image.height == 24);
 
         icon_extent_list[i] = texture_atlas.reserve(
             Extent2D(u32),
@@ -388,6 +388,7 @@ pub fn drawIcon(
 ) u16 {
     const size: f32 = switch (icon) {
         .add_circle_24px => 24.0,
+        .delete_16px => 16.0,
         else => 32.0,
     };
     const extent = Extent3D(f32){
