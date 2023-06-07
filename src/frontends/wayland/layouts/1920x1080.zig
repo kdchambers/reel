@@ -147,8 +147,12 @@ pub fn draw(
                         .width = item_width,
                         .height = item_height,
                     };
-                    std.log.info("Source stream: {d}", .{stream.source_index});
-                    const source_name = model.video_source_providers[stream.provider_ref.index].sources.?[stream.source_index].name;
+
+                    const source_provider_index: usize = stream.provider_ref.index;
+                    const source_name: []const u8 = switch (stream.provider_ref.kind) {
+                        .screen_capture => model.video_source_providers[source_provider_index].sources.?[stream.source_index].name,
+                        .webcam => model.webcam_source_providers[source_provider_index].sources[stream.source_index].name,
+                    };
                     _ = renderer.drawText(source_name, extent, screen_scale, .small, .regular, RGBA.white, .middle_left);
 
                     const delete_icon_placement = Coordinates3D(f32){
