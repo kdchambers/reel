@@ -378,16 +378,19 @@ pub fn draw(
             .height = @intToFloat(f32, frame_dimensions.height),
         };
 
+        const have_horizontal_space: bool = (ui_root.screen_dimensions.width >= 1400);
+
         const margin_pixels: f32 = 10.0;
         const margin_horizontal: f32 = margin_pixels * screen_scale.horizontal;
 
-        const margin_top: f32 = 50.0 * screen_scale.vertical;
-        const margin_bottom: f32 = 10.0 * screen_scale.vertical;
+        const margin_top_pixels: f32 = if (have_horizontal_space) 20.0 else 50.0;
+        const margin_top: f32 = margin_top_pixels * screen_scale.vertical;
+        const margin_bottom: f32 = 60.0 * screen_scale.vertical;
         const margin_vertical: f32 = margin_top + margin_bottom;
 
         const left_side = icon_bar_region.right();
 
-        const right_anchor: f32 = if (ui_state.sidebar_state == .open and ui_root.screen_dimensions.width >= 1400)
+        const right_anchor: f32 = if (ui_state.sidebar_state == .open and have_horizontal_space)
             right_sidebar_region.left()
         else
             window.right;
@@ -443,9 +446,10 @@ pub fn draw(
 
         var scene_volume_bar_region = Region{};
         scene_volume_bar_region.anchor.left = preview_region.left();
-        scene_volume_bar_region.anchor.top = preview_region.bottom();
-        scene_volume_bar_region.margin.top = 30.0 * screen_scale.vertical;
-        scene_volume_bar_region.width = 300.0 * screen_scale.horizontal;
+        scene_volume_bar_region.margin.left = 10.0 * screen_scale.horizontal;
+        scene_volume_bar_region.anchor.bottom = activity_region.top();
+        scene_volume_bar_region.margin.bottom = 15.0 * screen_scale.vertical;
+        scene_volume_bar_region.width = 400.0 * screen_scale.horizontal;
         scene_volume_bar_region.height = 30.0 * screen_scale.vertical;
 
         ui_state.scene_volume_level.draw(scene_volume_bar_region.toExtent(), screen_scale);
