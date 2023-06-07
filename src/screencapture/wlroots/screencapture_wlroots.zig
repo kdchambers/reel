@@ -187,7 +187,7 @@ fn streamState(handle: StreamHandle) screencapture.StreamState {
 }
 
 fn streamClose(handle: StreamHandle) void {
-    _ = handle;
+    stream_buffer[handle].stream_state = .paused;
 }
 
 pub fn openStream(
@@ -277,7 +277,8 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
 
             stream_ptr.*.frame_index_buffer[frame_reference.frame_index] = invalid_frame;
             const stream_handle: u16 = frame_reference.stream_index;
-            stream_ptr.frameReadyCallback(stream_handle, stream_ptr.width, stream_ptr.height, unconverted_pixels);
+            if (stream_buffer[stream_handle].stream_state == .running)
+                stream_ptr.frameReadyCallback(stream_handle, stream_ptr.width, stream_ptr.height, unconverted_pixels);
         },
         .failed => {
             std.log.err("screencapture: Frame capture failed", .{});
