@@ -206,6 +206,8 @@ record_format_selector: widgets.Selector,
 record_quality_selector: widgets.Selector,
 record_bitrate_slider: widgets.Slider,
 
+scene_volume_level: widgets.AudioVolumeLevelHorizontal,
+
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),
 video_source_mouse_event_count: u32,

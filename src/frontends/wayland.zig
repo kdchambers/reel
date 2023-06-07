@@ -306,6 +306,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.activity_start_button.init();
 
+    ui_state.scene_volume_level.init();
+
     ui_state.record_format_selector.init();
     ui_state.record_format_selector.labels = &UIState.format_labels;
     ui_state.record_format_selector.background_color = RGBA.fromInt(66, 66, 66, 255);
@@ -413,6 +415,9 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         if (response.visual_change or response.active_index != null)
             is_render_requested = true;
     }
+
+    if (model.audio_streams.len != 0)
+        ui_state.scene_volume_level.update(model.audio_streams[0].volume_db, screen_scale);
 
     {
         const response = ui_state.record_format_selector.update();

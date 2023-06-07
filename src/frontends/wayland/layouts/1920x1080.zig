@@ -244,7 +244,7 @@ pub fn draw(
         activity_region.anchor.left = icon_bar_region.right();
         activity_region.anchor.bottom = window.bottom;
         activity_region.anchor.right = window.right;
-        activity_region.height = 300.0 * screen_scale.vertical;
+        activity_region.height = 220.0 * screen_scale.vertical;
 
         _ = renderer.drawQuad(activity_region.toExtent(), window_color, .bottom_left);
 
@@ -440,6 +440,15 @@ pub fn draw(
             RGB.fromInt(150, 150, 150);
 
         _ = renderer.drawQuad(preview_region.toExtent(), background_color.toRGBA(), .bottom_left);
+
+        var scene_volume_bar_region = Region{};
+        scene_volume_bar_region.anchor.left = preview_region.left();
+        scene_volume_bar_region.anchor.top = preview_region.bottom();
+        scene_volume_bar_region.margin.top = 30.0 * screen_scale.vertical;
+        scene_volume_bar_region.width = 300.0 * screen_scale.horizontal;
+        scene_volume_bar_region.height = 30.0 * screen_scale.vertical;
+
+        ui_state.scene_volume_level.draw(scene_volume_bar_region.toExtent(), screen_scale);
 
         if (model.video_streams.len > 0) {
             const canvas_dimensions_pixels: Dimensions2D(u32) = .{

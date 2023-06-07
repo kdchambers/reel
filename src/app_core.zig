@@ -365,10 +365,7 @@ pub fn run() !void {
 
                     renderer.onPreviewFrameReady = handlePreviewFrameReady;
                 },
-                .record_stop => {
-                    model.recording_context.state = .closing;
-                    std.log.info("Video terminated", .{});
-                },
+                .record_stop => model.recording_context.state = .closing,
                 .record_format_set => {
                     const format_index = request_buffer.readInt(u16) catch 0;
                     model.recording_context.format = @intToEnum(Model.VideoFormat, format_index);
@@ -507,6 +504,8 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
     frame_index += 1;
 }
 
+const audio_utils = @import("frontends/wayland/audio.zig");
+
 // NOTE: This will be called on a separate thread
 pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16) void {
     if (active_audio_stream.*.index == stream.index) {
@@ -519,6 +518,8 @@ pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16)
         // TODO
         //
         model.audio_streams[0].sample_buffer.appendOverwrite(pcm_buffer);
+        const power_spectrum = audio_utils.samplesToPowerSpectrum(pcm_buffer);
+        model.audio_streams[0].volume_db = audio_utils.powerSpectrumToVolumeDb(power_spectrum);
     }
 }
 

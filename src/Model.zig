@@ -59,6 +59,7 @@ pub const AudioStream = struct {
     state: enum { open, closed, paused },
     source_type: enum { microphone, desktop, unknown },
     source_name: []const u8,
+    volume_db: f32,
     sample_buffer: AudioSampleRingBuffer,
 };
 
