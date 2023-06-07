@@ -398,6 +398,7 @@ pub fn run() !void {
                     const wanted_dimensions = Dimensions2D(u32){ .width = 640, .height = 480 };
                     video4linux.open(webcam_source_index, wanted_dimensions) catch |err| {
                         std.log.err("Failed to open video4linux device {d}. Error: {}", .{ webcam_source_index, err });
+                        continue :request_loop;
                     };
                     const pixel_count: usize = wanted_dimensions.width * wanted_dimensions.height;
                     webcam_pixel_buffer[webcam_source_index] = try gpa.alloc(RGBA(u8), pixel_count);
