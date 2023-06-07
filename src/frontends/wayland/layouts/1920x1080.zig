@@ -350,9 +350,9 @@ pub fn draw(
                 bitrate_slider_region.anchor.top = quality_selector_region.bottom();
                 bitrate_slider_region.anchor.left = region.left();
                 bitrate_slider_region.margin.left = 20.0 * screen_scale.horizontal;
-                bitrate_slider_region.margin.top = 20.0 * screen_scale.vertical;
+                bitrate_slider_region.margin.top = 40.0 * screen_scale.vertical;
                 bitrate_slider_region.width = 400 * screen_scale.horizontal;
-                bitrate_slider_region.height = 50 * screen_scale.vertical;
+                bitrate_slider_region.height = 35 * screen_scale.vertical;
 
                 ui_state.record_bitrate_slider.draw(bitrate_slider_region.toExtent(), screen_scale, UIState.bitrate_value_label_max_length);
             },

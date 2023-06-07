@@ -147,7 +147,7 @@ pub const Slider = struct {
             .small,
             .regular,
             RGBA(u8).white,
-            .center,
+            .top_left,
         );
 
         const value_label_height = 40.0 * screen_scale.vertical;
@@ -185,7 +185,7 @@ pub const Slider = struct {
         const point_width: f32 = point_size_pixels * screen_scale.horizontal;
         const point_height: f32 = point_size_pixels * screen_scale.vertical;
         const point_y_placement: f32 = extent.y - ((bar_height / 2.0) - (point_height / 2.0));
-        for (self.active_index..step_count - 2) |i| {
+        for (0..step_count - 2) |i| {
             const point_extent = Extent3D(f32){
                 .x = extent.x + @intToFloat(f32, i + 1) * value_interval,
                 .y = point_y_placement,
@@ -241,7 +241,7 @@ pub const Slider = struct {
         const progress_bar_extent = Extent3D(f32){
             .x = extent.x,
             .y = extent.y,
-            .z = extent.z,
+            .z = extent.z - 0.001,
             .width = @max(0.0, (extent.width * progress_percentage) - knob_inner_radius.h),
             .height = bar_height,
         };
