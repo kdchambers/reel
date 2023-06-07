@@ -150,7 +150,11 @@ pub fn draw(
 
                     const source_provider_index: usize = stream.provider_ref.index;
                     const source_name: []const u8 = switch (stream.provider_ref.kind) {
-                        .screen_capture => model.video_source_providers[source_provider_index].sources.?[stream.source_index].name,
+                        .screen_capture => blk: {
+                            break :blk if(model.video_source_providers[source_provider_index].sources) |sources|
+                                sources[stream.source_index].name
+                            else "unknown";
+                        },
                         .webcam => model.webcam_source_providers[source_provider_index].sources[stream.source_index].name,
                     };
                     _ = renderer.drawText(source_name, extent, screen_scale, .small, .regular, RGBA.white, .middle_left);

@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const assert = std.debug.assert;
 const dbus = @import("../../bindings/dbus/dbus.zig");
 
 const graphics = @import("../../graphics.zig");
@@ -94,7 +95,8 @@ const stream_events = pw.pw_stream_events{
 };
 
 pub var stream_format: StreamFormat = undefined;
-pub var stream_state: screencapture.State = .uninitialized;
+
+var backend_stream: screencapture.State = .uninitialized;
 
 pub var frameReadyCallback: *const screencapture.OnFrameReadyFn = undefined;
 
@@ -108,49 +110,75 @@ var session_count: u32 = 0;
 
 var onStreamOpenSuccessCallback: *const screencapture.OpenStreamOnSuccessFn = undefined;
 
-pub fn createInterface(
-    onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
-) screencapture.Interface {
-    frameReadyCallback = onFrameReadyCallback;
+pub fn createInterface() screencapture.Interface {
     return .{
         .init = _init,
         .deinit = deinit,
         .openStream = openStream,
         .screenshot = screenshot,
+        .queryStreams = queryStreams,
+        .streamInfo = streamInfo,
+        .streamPause = streamPause,
+        .streamState = streamState,
+        .streamClose = streamClose,
+        .info = .{ .name = "pipewire", .query_streams = false },
     };
+}
+
+fn queryStreams(allocator: std.mem.Allocator) []StreamInfo {
+    _ = allocator;
+    assert(false);
+    return &.{};
 }
 
 pub fn deinit() void {
     teardownPipewire();
-    stream_state = .closed;
+    // TODO:
+    // stream_state = .closed;
 }
 
 pub fn _init(successCallback: *const screencapture.InitOnSuccessFn, _: *const screencapture.InitOnErrorFn) void {
     successCallback();
 }
 
-const StreamInterface = screencapture.StreamInterface;
+const StreamHandle = screencapture.StreamHandle;
+const StreamState = screencapture.StreamState;
+const StreamInfo = screencapture.StreamInfo;
 
-fn streamPause(self: StreamInterface, is_paused: bool) void {
+fn streamInfo(stream_handle: StreamHandle) StreamInfo {
+    _ = stream_handle;
+    return .{
+        .name = "unknown",
+        .dimensions = .{ .width = stream_format.width, .height = stream_format.height },
+        .pixel_format = stream_format.format,
+    };
+}
+
+fn streamPause(self: StreamHandle, is_paused: bool) void {
     _ = self;
     _ = is_paused;
 }
 
-fn streamState(self: StreamInterface) StreamInterface.State {
+fn streamState(self: StreamHandle) StreamState {
     _ = self;
     return .running;
 }
 
-fn streamClose(self: StreamInterface) void {
+fn streamClose(self: StreamHandle) void {
     _ = self;
 }
 
 pub fn openStream(
+    stream_index: ?u16,
+    onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
     successCallback: *const screencapture.OpenStreamOnSuccessFn,
     failCallback: *const screencapture.OpenStreamOnErrorFn,
+    user_data: *anyopaque,
 ) void {
+    _ = stream_index;
+    frameReadyCallback = onFrameReadyCallback;
     onStreamOpenSuccessCallback = successCallback;
-    init() catch failCallback();
+    init() catch failCallback(user_data);
 }
 
 pub fn detectSupport() bool {
@@ -168,7 +196,7 @@ pub fn detectSupport() bool {
 pub fn screenshot(_: *const screencapture.OnScreenshotReadyFn) void {}
 
 pub fn state() screencapture.State {
-    return stream_state;
+    return backend_stream;
 }
 
 //
@@ -388,7 +416,7 @@ fn createSession(
         c.DBUS_TYPE_VARIANT,
         c.DBUS_DICT_ENTRY_END_CHAR,
     };
-    std.debug.assert(signature[4] == 0);
+    assert(signature[4] == 0);
     var array_iter: dbus.MessageIter = undefined;
     if (dbus.messageIterOpenContainer(&root_iter, c.DBUS_TYPE_ARRAY, &signature, &array_iter) != 1)
         return error.WriteDictFail;
@@ -573,7 +601,7 @@ fn setSource(
         c.DBUS_TYPE_VARIANT,
         c.DBUS_DICT_ENTRY_END_CHAR,
     };
-    std.debug.assert(signature[4] == 0);
+    assert(signature[4] == 0);
     var array_iter: dbus.MessageIter = undefined;
     if (dbus.messageIterOpenContainer(&root_iter, c.DBUS_TYPE_ARRAY, &signature, &array_iter) != 1)
         return error.WriteDictFail;
@@ -984,9 +1012,9 @@ fn openPipewireRemote(
 
 pub fn init() !void {
     comptime {
-        std.debug.assert(c.DBUS_BUS_SESSION == @enumToInt(dbus.BusType.session));
-        std.debug.assert(c.DBUS_BUS_SYSTEM == @enumToInt(dbus.BusType.system));
-        std.debug.assert(c.DBUS_BUS_STARTER == @enumToInt(dbus.BusType.starter));
+        assert(c.DBUS_BUS_SESSION == @enumToInt(dbus.BusType.session));
+        assert(c.DBUS_BUS_SYSTEM == @enumToInt(dbus.BusType.system));
+        assert(c.DBUS_BUS_STARTER == @enumToInt(dbus.BusType.starter));
     }
 
     const property_name = "AvailableCursorModes";
@@ -1065,7 +1093,7 @@ pub fn init() !void {
         session_handle_ref[0..session_handle_len],
     );
     const session_handle: [*:0]const u8 = session_handle_buffer[0..session_handle_len :0];
-    std.debug.assert(std.mem.indexOfSentinel(u8, 0, session_handle) == session_handle_len);
+    assert(std.mem.indexOfSentinel(u8, 0, session_handle) == session_handle_len);
 
     var request_suffix_buffer: [64]u8 = undefined;
     const select_source_request_suffix = try generateRequestToken(&request_suffix_buffer);
@@ -1114,7 +1142,7 @@ pub fn init() !void {
             },
         );
         const select_source_expected_len = std.mem.len(select_source_request);
-        std.debug.assert(select_source_real_len == select_source_expected_len);
+        assert(select_source_real_len == select_source_expected_len);
         const is_equal = blk: {
             var i: usize = 0;
             while (i < select_source_real_len) : (i += 1) {
@@ -1123,7 +1151,7 @@ pub fn init() !void {
             }
             break :blk true;
         };
-        std.debug.assert(is_equal);
+        assert(is_equal);
     }
 
     //
@@ -1338,19 +1366,24 @@ pub fn init() !void {
         1,
     );
 
-    stream_state = .init_pending;
+    // stream_state = .init_pending;
 
     pw.pw_thread_loop_unlock(thread_loop);
 }
 
 fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
-    std.debug.assert(stream_state == .open);
+    // TODO:
+    // assert(stream_state == .open);
     const buffer = pw.pw_stream_dequeue_buffer(stream);
     const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
     const alignment = @alignOf(screencapture.PixelType);
     const buffer_pixels = @ptrCast([*]const screencapture.PixelType, @alignCast(alignment, buffer_bytes));
 
     frameReadyCallback(
+        //
+        // TODO: This should be the stream_handle
+        //
+        0,
         stream_format.width,
         stream_format.height,
         buffer_pixels,
@@ -1359,8 +1392,8 @@ fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
 }
 
 fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod) callconv(.C) void {
-    if (stream_state == .closed)
-        return;
+    // if (stream_state == .closed)
+    //     return;
 
     if (id == pw.SPA_PARAM_Format) {
         stream_format = parseStreamFormat(params);
@@ -1370,19 +1403,9 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod)
             stream_format.height,
             @tagName(stream_format.format),
         });
-
-        stream_state = .open;
-        onStreamOpenSuccessCallback(.{
-            .index = 0,
-            .pause = streamPause,
-            .close = streamClose,
-            .state = streamState,
-            .pixel_format = stream_format.format,
-            .dimensions = .{
-                .width = stream_format.width,
-                .height = stream_format.height,
-            },
-        });
+        // TODO;
+        // stream_state = .open;
+        onStreamOpenSuccessCallback(0, &.{});
     }
 }
 
@@ -1411,7 +1434,8 @@ fn onCoreDoneCallback(_: ?*anyopaque, id: u32, seq: i32) callconv(.C) void {
 }
 
 fn teardownPipewire() void {
-    stream_state = .closed;
+    // TODO:
+    // stream_state = .closed;
     // TODO: Use a mutex
     //       It's possible that we're still using a pipewire buffer when entering this
     //       function as the onFrameReady callback is on a separate thread
@@ -1444,50 +1468,50 @@ fn extractMessageStart(
     _ = dbus.messageIterNext(&start_stream_response_iter);
 
     var next_type: i32 = dbus.messageIterGetArgType(&start_stream_response_iter);
-    std.debug.assert(next_type == c.DBUS_TYPE_ARRAY);
+    assert(next_type == c.DBUS_TYPE_ARRAY);
 
     var root_array_iter: dbus.MessageIter = undefined;
     dbus.messageIterRecurse(&start_stream_response_iter, &root_array_iter);
 
     next_type = dbus.messageIterGetArgType(&root_array_iter);
-    std.debug.assert(next_type == c.DBUS_TYPE_DICT_ENTRY);
+    assert(next_type == c.DBUS_TYPE_DICT_ENTRY);
 
     var root_dict_iter: dbus.MessageIter = undefined;
     dbus.messageIterRecurse(&root_array_iter, &root_dict_iter);
 
     next_type = dbus.messageIterGetArgType(&root_dict_iter);
-    std.debug.assert(next_type == c.DBUS_TYPE_STRING);
+    assert(next_type == c.DBUS_TYPE_STRING);
 
     var option_label: [*:0]const u8 = undefined;
     dbus.messageIterGetBasic(&root_dict_iter, @ptrCast(*void, &option_label));
 
     _ = dbus.messageIterNext(&root_dict_iter);
     next_type = dbus.messageIterGetArgType(&root_dict_iter);
-    std.debug.assert(next_type == c.DBUS_TYPE_VARIANT);
+    assert(next_type == c.DBUS_TYPE_VARIANT);
 
     var variant_iter: dbus.MessageIter = undefined;
     dbus.messageIterRecurse(&root_dict_iter, &variant_iter);
     next_type = dbus.messageIterGetArgType(&variant_iter);
 
-    std.debug.assert(next_type == c.DBUS_TYPE_ARRAY);
+    assert(next_type == c.DBUS_TYPE_ARRAY);
 
     var variant_array_iter: dbus.MessageIter = undefined;
     dbus.messageIterRecurse(&variant_iter, &variant_array_iter);
     next_type = dbus.messageIterGetArgType(&variant_array_iter);
 
-    std.debug.assert(next_type == c.DBUS_TYPE_STRUCT);
+    assert(next_type == c.DBUS_TYPE_STRUCT);
 
     var struct_iter: dbus.MessageIter = undefined;
     dbus.messageIterRecurse(&variant_array_iter, &struct_iter);
     next_type = dbus.messageIterGetArgType(&struct_iter);
 
-    std.debug.assert(next_type == c.DBUS_TYPE_UINT32);
+    assert(next_type == c.DBUS_TYPE_UINT32);
 
     dbus.messageIterGetBasic(&struct_iter, @ptrCast(*void, &result.pipewire_node_id));
     _ = dbus.messageIterNext(&struct_iter);
     next_type = dbus.messageIterGetArgType(&struct_iter);
 
-    std.debug.assert(next_type == c.DBUS_TYPE_ARRAY);
+    assert(next_type == c.DBUS_TYPE_ARRAY);
 
     var array_iter: dbus.MessageIter = undefined;
     dbus.messageIterRecurse(&struct_iter, &array_iter);
@@ -1508,35 +1532,35 @@ fn extractMessageStart(
                     if (c.strncmp("size", option_label, 4) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
                         next_type = dbus.messageIterGetArgType(&array_dict_entry_iter);
-                        std.debug.assert(next_type == c.DBUS_TYPE_VARIANT);
+                        assert(next_type == c.DBUS_TYPE_VARIANT);
 
                         var size_variant_iter: dbus.MessageIter = undefined;
                         dbus.messageIterRecurse(&array_dict_entry_iter, &size_variant_iter);
                         next_type = dbus.messageIterGetArgType(&size_variant_iter);
-                        std.debug.assert(next_type == c.DBUS_TYPE_STRUCT);
+                        assert(next_type == c.DBUS_TYPE_STRUCT);
 
                         var size_struct_iter: dbus.MessageIter = undefined;
                         dbus.messageIterRecurse(&size_variant_iter, &size_struct_iter);
                         next_type = dbus.messageIterGetArgType(&size_struct_iter);
-                        std.debug.assert(next_type == c.DBUS_TYPE_INT32);
+                        assert(next_type == c.DBUS_TYPE_INT32);
 
                         dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &result.dimensions[0]));
                         _ = dbus.messageIterNext(&size_struct_iter);
 
                         next_type = dbus.messageIterGetArgType(&size_struct_iter);
-                        std.debug.assert(next_type == c.DBUS_TYPE_INT32);
+                        assert(next_type == c.DBUS_TYPE_INT32);
 
                         dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &result.dimensions[1]));
                     }
                     if (c.strncmp("id", option_label, 2) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
                         next_type = dbus.messageIterGetArgType(&array_dict_entry_iter);
-                        std.debug.assert(next_type == c.DBUS_TYPE_VARIANT);
+                        assert(next_type == c.DBUS_TYPE_VARIANT);
 
                         var id_variant_iter: dbus.MessageIter = undefined;
                         dbus.messageIterRecurse(&array_dict_entry_iter, &id_variant_iter);
                         next_type = dbus.messageIterGetArgType(&id_variant_iter);
-                        std.debug.assert(next_type == c.DBUS_TYPE_STRING);
+                        assert(next_type == c.DBUS_TYPE_STRING);
 
                         dbus.messageIterGetBasic(&id_variant_iter, @ptrCast(*void, &result.id));
                     }
