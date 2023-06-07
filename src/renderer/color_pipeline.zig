@@ -130,6 +130,19 @@ pub inline fn drawQuad(extent: Extent3D(f32), color: RGBA(u8), comptime anchor_p
     return vertex_index;
 }
 
+pub inline fn drawQuadMultiColor(extent: Extent3D(f32), color: [4]RGBA(u8), comptime anchor_point: graphics.AnchorPoint) u16 {
+    const vertex_index = vertices_used;
+    var quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
+    graphics.writeQuad(Vertex, extent, anchor_point, quad_ptr);
+    quad_ptr[0].color = color[0];
+    quad_ptr[1].color = color[1];
+    quad_ptr[2].color = color[2];
+    quad_ptr[3].color = color[3];
+    writeQuadIndices(vertices_used);
+    vertices_used += 4;
+    return vertex_index;
+}
+
 pub inline fn overwriteQuad(
     vertex_index: u16,
     extent: Extent3D(f32),
