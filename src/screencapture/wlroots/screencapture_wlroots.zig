@@ -236,7 +236,7 @@ fn captureNextFrame() void {
             if (index.* == invalid_frame) {
                 assert(stream_buffer[i].stream_state != .uninitialized);
                 assert(stream_buffer[i].stream_state != .paused);
-                const next_frame = screencopy_manager.captureOutput(1, display_output) catch {
+                stream_buffer[i].captured_frames[frame_index_index] = screencopy_manager.captureOutput(1, display_output) catch {
                     std.log.err("screencapture: Failed to capture next frame", .{});
                     stream_buffer[i].stream_state = .fatal_error;
                     return;
@@ -246,7 +246,7 @@ fn captureNextFrame() void {
                     .stream_index = @intCast(u16, i),
                     .frame_index = @intCast(u16, frame_index_index),
                 };
-                next_frame.setListener(
+                stream_buffer[i].captured_frames[frame_index_index].setListener(
                     *const StreamFrameReference,
                     streamFrameCaptureCallback,
                     &stream_frame_reference_buffer[reference_index],
@@ -274,6 +274,9 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
                 .xbgr8888 => {},
                 else => unreachable,
             }
+
+            assert(frame == stream_ptr.*.captured_frames[frame_reference.frame_index]);
+            frame.destroy();
 
             stream_ptr.*.frame_index_buffer[frame_reference.frame_index] = invalid_frame;
             const stream_handle: u16 = frame_reference.stream_index;
