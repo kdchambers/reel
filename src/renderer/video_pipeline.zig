@@ -72,7 +72,7 @@ var cpu_memory_index: u32 = std.math.maxInt(u32);
 
 const DrawContext = struct {
     relative_extent: Extent2D(f32),
-    stream_index: u32,
+    stream_handle: u32,
 };
 
 var draw_context_buffer: [max_draw_count]DrawContext = undefined;
@@ -90,6 +90,10 @@ var unscaled_canvas_image_view: vk.ImageView = undefined;
 var unscaled_canvas_mapped_memory: []RGBA(u8) = undefined;
 
 var scale_method: vk.Filter = .nearest;
+
+// Binds stream handles to `stream_buffer` entries
+// E.G: stream_handle_buffer[0] = 55 (handle 55 corresponds to `stream_buffer[0]`)
+var stream_handle_buffer = [1]u32{std.math.maxInt(u32)} ** max_stream_count;
 
 const Stream = struct {
     dimensions: Dimensions2D(f32),
@@ -113,7 +117,8 @@ pub inline fn unscaledFrame() []RGBA(u8) {
     return unscaled_canvas_mapped_memory[0..pixel_count];
 }
 
-pub inline fn writeStreamFrame(stream_index: u32, pixels: []const u8) !void {
+pub inline fn writeStreamFrame(stream_handle: u32, pixels: []const u8) !void {
+    const stream_index = streamIndexFromHandle(stream_handle);
     assert(stream_count > stream_index);
     const stream_ptr: *Stream = &stream_buffer[stream_index];
     assert(stream_ptr.mapped_memory.len > 0);
@@ -128,8 +133,9 @@ pub inline fn drawVideoFrame(extent: Extent3D(f32)) void {
     draw_quad_count += 1;
 }
 
-pub inline fn addVideoSource(stream: u32, relative_extent: Extent2D(f32)) void {
-    assert(stream_count > stream);
+pub inline fn addVideoSource(stream_handle: u32, relative_extent: Extent2D(f32)) void {
+    const stream_index = streamIndexFromHandle(stream_handle);
+    assert(stream_count > stream_index);
     assert(source_count < max_draw_count);
 
     assert(relative_extent.x >= 0.0);
@@ -145,7 +151,7 @@ pub inline fn addVideoSource(stream: u32, relative_extent: Extent2D(f32)) void {
 
     draw_context_buffer[source_count] = .{
         .relative_extent = relative_extent,
-        .stream_index = stream,
+        .stream_handle = stream_handle,
     };
     source_count += 1;
 }
@@ -259,23 +265,49 @@ pub inline fn moveEdgeBottom(source_index: u16, value: f32) void {
     assert(new_y + new_height <= 1.0);
 }
 
+pub inline fn assignNewStreamHandle() u32 {
+    const next_free_handle: u32 = stream_count;
+    for (&stream_handle_buffer) |*mapped_buffer_index| {
+        if (mapped_buffer_index.* == std.math.maxInt(u32)) {
+            mapped_buffer_index.* = next_free_handle;
+            stream_count += 1;
+            return next_free_handle;
+        }
+    }
+    unreachable;
+}
+
+pub inline fn streamFromHandle(stream_handle: u32) *Stream {
+    for (stream_handle_buffer, 0..) |mapped_buffer_index, i| {
+        if (mapped_buffer_index == stream_handle)
+            return &stream_buffer[i];
+    }
+    unreachable;
+}
+
+pub inline fn streamIndexFromHandle(stream_handle: u32) u32 {
+    for (stream_handle_buffer, 0..) |mapped_buffer_index, i| {
+        if (mapped_buffer_index == stream_handle)
+            return @intCast(u32, i);
+    }
+    unreachable;
+}
+
 pub fn createStream(
     supported_image_format: SupportedImageFormat,
     source_dimensions: Dimensions2D(u32),
 ) !u32 {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
-
-    const stream_index: u32 = stream_count;
-
-    const stream_ptr: *Stream = &stream_buffer[stream_index];
+    const stream_handle = assignNewStreamHandle();
+    const stream_ptr: *Stream = streamFromHandle(stream_handle);
     stream_ptr.dimensions = .{
         .width = @intToFloat(f32, source_dimensions.width),
         .height = @intToFloat(f32, source_dimensions.height),
     };
 
     std.log.info("renderer: Adding stream #{d} with dimensions: {d} x {d}", .{
-        stream_index,
+        streamIndexFromHandle(stream_handle),
         stream_ptr.dimensions.width,
         stream_ptr.dimensions.height,
     });
@@ -309,7 +341,7 @@ pub fn createStream(
     };
     stream_ptr.image = try device_dispatch.createImage(logical_device, &image_create_info, null);
     const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, stream_ptr.image);
-    stream_ptr.memory = try vulkan_core.device_dispatch.allocateMemory(logical_device, &.{
+    stream_ptr.memory = try device_dispatch.allocateMemory(logical_device, &.{
         .allocation_size = memory_requirements.size,
         .memory_type_index = cpu_memory_index,
     }, null);
@@ -329,7 +361,7 @@ pub fn createStream(
         .command_buffer_count = 1,
     };
     try device_dispatch.allocateCommandBuffers(
-        vulkan_core.logical_device,
+        logical_device,
         &command_buffer_allocate_info,
         @ptrCast([*]vk.CommandBuffer, &command_buffer),
     );
@@ -414,10 +446,7 @@ pub fn createStream(
         1,
         @ptrCast([*]vk.CommandBuffer, &command_buffer),
     );
-
-    stream_count += 1;
-
-    return stream_index;
+    return stream_handle;
 }
 
 pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
@@ -434,7 +463,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
     for (0..source_count) |i| {
         const draw_context_ptr: *const DrawContext = &draw_context_buffer[i];
-        const stream_ptr: *const Stream = &stream_buffer[draw_context_ptr.stream_index];
+        const stream_index = streamIndexFromHandle(draw_context_ptr.stream_handle);
+        const stream_ptr: *const Stream = &stream_buffer[stream_index];
         const relative_extent = draw_context_ptr.relative_extent;
 
         assert(relative_extent.x >= 0.0);
@@ -528,7 +558,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
     for (0..source_count) |i| {
         const draw_context_ptr: *const DrawContext = &draw_context_buffer[i];
-        const stream_ptr: *const Stream = &stream_buffer[draw_context_ptr.stream_index];
+        const stream_index = streamIndexFromHandle(draw_context_ptr.stream_handle);
+        const stream_ptr: *const Stream = &stream_buffer[stream_index];
         const relative_extent = draw_context_ptr.relative_extent;
 
         const subresource_layers = vk.ImageSubresourceLayers{
