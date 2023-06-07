@@ -1217,8 +1217,6 @@ fn createDescriptorSets(
     logical_device: vk.Device,
     create_count: u32,
 ) !void {
-    assert(stream_count == 1);
-
     const descriptor_set_allocator_info = vk.DescriptorSetAllocateInfo{
         .descriptor_pool = descriptor_pool,
         .descriptor_set_count = create_count,
