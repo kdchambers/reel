@@ -34,6 +34,9 @@ const TextWriterInterface = graphics.TextWriterInterface;
 pub const MouseEventEntry = event_system.MouseEventEntry;
 
 pub const Slider = struct {
+    const knob_inner_radius_pixels: f32 = 7.0;
+    const knob_radius_pixels: f32 = 10.0;
+
     label_buffer: []const []const u8,
     title: []const u8,
 
@@ -46,6 +49,8 @@ pub const Slider = struct {
     knob_vertex_range: renderer.VertexRange,
     value_vertex_range: renderer.VertexRange,
     value_extent: Extent3D(f32),
+    progress_bar_full_extent: Extent3D(f32),
+    progress_bar_quad: u16,
 
     drag_start_mouse_x: f32,
     drag_start_x: f32,
@@ -90,6 +95,18 @@ pub const Slider = struct {
                     RGBA(u8).white,
                     .top_right,
                 );
+                const progress_percentage: f32 = @intToFloat(f32, self.active_index) / @intToFloat(f32, self.label_buffer.len - 1);
+                assert(progress_percentage >= 0.0);
+                assert(progress_percentage <= 1.0);
+                const knob_inner_radius_width: f32 = knob_inner_radius_pixels * screen_scale.horizontal;
+                const progress_bar_extent = Extent3D(f32){
+                    .x = self.progress_bar_full_extent.x,
+                    .y = self.progress_bar_full_extent.y,
+                    .z = self.progress_bar_full_extent.z,
+                    .width = @max(0.0, (self.progress_bar_full_extent.width * progress_percentage) - knob_inner_radius_width),
+                    .height = self.progress_bar_full_extent.height,
+                };
+                renderer.overwriteQuad(self.progress_bar_quad, progress_bar_extent, RGBA(u8).white, .bottom_left);
             }
             if (!left_mouse_active) {
                 self.drag_active = false;
@@ -187,14 +204,12 @@ pub const Slider = struct {
             .y = point_y_placement,
             .z = extent.z,
         };
-        const knob_radius_pixels: f32 = 10.0;
         const knob_radius = Radius2D(f32){
             .h = knob_radius_pixels * screen_scale.horizontal,
             .v = knob_radius_pixels * screen_scale.vertical,
         };
         const outer_vertex_range = renderer.drawCircle(knob_placement_center, knob_radius, self.knob_outer_color, 48);
 
-        const knob_inner_radius_pixels: f32 = 7.0;
         const knob_inner_radius = Radius2D(f32){
             .h = knob_inner_radius_pixels * screen_scale.horizontal,
             .v = knob_inner_radius_pixels * screen_scale.vertical,
@@ -212,6 +227,25 @@ pub const Slider = struct {
             .height = knob_radius.v * 2.0,
         };
         self.mouse_event_slot = event_system.writeMouseEventSlot(knob_hover_extent, .{});
+
+        const progress_percentage: f32 = @intToFloat(f32, self.active_index) / @intToFloat(f32, self.label_buffer.len - 1);
+        assert(progress_percentage >= 0.0);
+        assert(progress_percentage <= 1.0);
+        self.progress_bar_full_extent = Extent3D(f32){
+            .x = extent.x,
+            .y = extent.y,
+            .z = extent.z,
+            .width = extent.width,
+            .height = bar_height,
+        };
+        const progress_bar_extent = Extent3D(f32){
+            .x = extent.x,
+            .y = extent.y,
+            .z = extent.z,
+            .width = @max(0.0, (extent.width * progress_percentage) - knob_inner_radius.h),
+            .height = bar_height,
+        };
+        self.progress_bar_quad = renderer.drawQuad(progress_bar_extent, self.knob_outer_color, .bottom_left);
     }
 };
 

@@ -322,10 +322,11 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.record_bitrate_slider.init();
     ui_state.record_bitrate_slider.background_color = RGBA.fromInt(57, 59, 63, 255);
-    ui_state.record_bitrate_slider.knob_outer_color = RGBA.white;
+    ui_state.record_bitrate_slider.knob_outer_color = RGBA.fromInt(220, 220, 220, 255);
     ui_state.record_bitrate_slider.knob_inner_color = RGBA.fromInt(17, 20, 26, 255);
     ui_state.record_bitrate_slider.label_buffer = &UIState.bitrate_value_labels;
     ui_state.record_bitrate_slider.title = "Bit Rate";
+    ui_state.record_bitrate_slider.active_index = 7;
 
     ui_state.source_provider_list.init();
     ui_state.source_provider_list.title = "Source Providers";
