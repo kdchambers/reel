@@ -21,7 +21,7 @@ const HoverZoneState = event_system.HoverZoneState;
 const mini_heap = @import("../mini_heap.zig");
 const Index = mini_heap.Index;
 
-pub const frontend = @import("../../wayland.zig");
+const frontend = @import("../../wayland.zig");
 
 const graphics = @import("../../../graphics.zig");
 const Vertex = graphics.GenericVertex;
@@ -171,7 +171,7 @@ pub const Slider = struct {
             .top_right,
         );
 
-        const bar_height: f32 = 8.0 * screen_scale.vertical;
+        const bar_height: f32 = 4.0 * screen_scale.vertical;
         const bar_extent = Extent3D(f32){
             .x = extent.x,
             .y = extent.y,
@@ -193,7 +193,7 @@ pub const Slider = struct {
                 .width = point_width,
                 .height = point_height,
             };
-            _ = renderer.drawQuad(point_extent, RGBA(u8).black, .bottom_left);
+            _ = renderer.drawQuad(point_extent, RGBA(u8).fromInt(40, 40, 40, 255), .bottom_left);
         }
 
         self.drag_interval = value_interval;
