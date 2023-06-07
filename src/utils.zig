@@ -16,6 +16,15 @@ const c = @cImport({
 
 pub const Profiler = profile.Profiler;
 
+pub inline fn leftShiftRemove(comptime Type: type, buffer: []Type, index: usize) void {
+    assert(index < buffer.len);
+    var src_index: usize = index + 1;
+    assert(src_index > 0);
+    while (src_index < buffer.len) : (src_index += 1) {
+        buffer[src_index - 1] = buffer[src_index];
+    }
+}
+
 pub const DateTime = struct {
     year: u16,
     month: u8,
