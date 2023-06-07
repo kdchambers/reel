@@ -55,6 +55,7 @@ pub const reserveQuad = color_pipeline.reserveQuad;
 pub const reserveQuads = color_pipeline.reserveQuads;
 pub const drawTriangle = color_pipeline.drawTriangle;
 pub const drawQuad = color_pipeline.drawQuad;
+pub const drawQuadMultiColor = color_pipeline.drawQuadMultiColor;
 pub const overwriteQuad = color_pipeline.overwriteQuad;
 pub const drawRoundedRect = color_pipeline.drawRoundedRect;
 pub const drawCircle = color_pipeline.drawCircle;
