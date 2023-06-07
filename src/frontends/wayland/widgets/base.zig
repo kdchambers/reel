@@ -1390,6 +1390,7 @@ pub const IconButton = struct {
         const margin_v: f32 = margin_pixels * screen_scale.vertical;
         const icon_size_pixels: f32 = switch (self.icon) {
             .add_circle_24px => 24.0,
+            .delete_16px => 16.0,
             else => 32.0,
         };
         const icon_width: f32 = icon_size_pixels * screen_scale.horizontal;

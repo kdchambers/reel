@@ -25,9 +25,9 @@ pub const format_labels = [_][]const u8{
 };
 
 pub const recording_quality_labels = [_][]const u8{
-    "low",
-    "medium",
-    "high",
+    "Low",
+    "Medium",
+    "High",
 };
 
 pub const image_format_labels = [_][]const u8{
@@ -193,6 +193,8 @@ window_region: RegionAnchors,
 open_sidemenu_button: widgets.IconButton,
 open_settings_button: widgets.IconButton,
 add_source_button: widgets.IconButton,
+
+close_app_button: widgets.IconButton,
 
 select_video_source_popup: widgets.ListSelectPopup,
 select_webcam_source_popup: widgets.ListSelectPopup,

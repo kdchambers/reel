@@ -44,6 +44,7 @@ const Dimensions2D = geometry.Dimensions2D;
 const Extent2D = geometry.Extent2D;
 const Extent3D = geometry.Extent3D;
 const Coordinates2D = geometry.Coordinates2D;
+const Coordinates3D = geometry.Coordinates3D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 const ui_layer = geometry.ui_layer;
 
@@ -146,7 +147,7 @@ pub const ButtonClicked = enum(u16) {
     left,
 };
 
-const decoration_height_pixels = 30.0;
+const decoration_height_pixels = 32.0;
 
 var is_draw_required: bool = true;
 var is_render_requested: bool = true;
@@ -267,6 +268,13 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.window_region.bottom = 1.0;
     ui_state.window_region.top = -1.0;
 
+    ui_state.close_app_button.init();
+    ui_state.close_app_button.on_hover_background_color = RGBA.fromInt(0, 0, 0, 20);
+    ui_state.close_app_button.on_hover_icon_color = RGBA.black;
+    ui_state.close_app_button.background_color = RGBA.transparent;
+    ui_state.close_app_button.icon_color = RGBA.black;
+    ui_state.close_app_button.icon = .close_32px;
+
     ui_state.open_settings_button.init();
     ui_state.open_settings_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
     ui_state.open_settings_button.on_hover_icon_color = RGBA.white;
@@ -344,7 +352,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         entry.remove_icon.icon_color = RGBA.fromInt(220, 220, 220, 255);
         entry.remove_icon.on_hover_icon_color = RGBA.white;
         entry.remove_icon.background_color = RGBA.transparent;
-        entry.remove_icon.on_hover_background_color = RGBA.transparent;
+        entry.remove_icon.on_hover_background_color = RGBA.fromInt(0, 0, 0, 30);
         entry.remove_icon.icon = .delete_16px;
     }
 
@@ -425,6 +433,11 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = true;
         if (response.active_index != null)
             is_draw_required = true;
+    }
+
+    if (ui_state.close_app_button.update().clicked) {
+        request_encoder.write(.core_shutdown) catch unreachable;
+        return request_encoder.decoder();
     }
 
     {
@@ -697,15 +710,6 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         is_draw_required = false;
         renderer.resetVertexBuffers();
 
-        if (ui_state.window_decoration_requested) {
-            //
-            // We just reset the face_writer so a failure shouldn't really be possible
-            // NOTE: This will modify ui_state.window_region to make sure we don't
-            //       draw over the window decoration
-            //
-            drawWindowDecoration() catch unreachable;
-        }
-
         //
         // Redrawing invalidates all of the hover zones. This clears the internal
         // mouse events buffer
@@ -716,6 +720,15 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         // Reset cursor back to normal. Hoverzones have been invalidated
         //
         setCursorState(.normal);
+
+        if (ui_state.window_decoration_requested) {
+            //
+            // We just reset the face_writer so a failure shouldn't really be possible
+            // NOTE: This will modify ui_state.window_region to make sure we don't
+            //       draw over the window decoration
+            //
+            drawWindowDecoration() catch unreachable;
+        }
 
         //
         // Switch here based on screen dimensions
@@ -852,7 +865,7 @@ fn drawWindowDecoration() !void {
     const height: f32 = decoration_height_pixels * screen_scale.vertical;
     {
         const background_color = RGB.fromInt(200, 200, 200);
-        const extent = geometry.Extent3D(f32){
+        const extent = Extent3D(f32){
             .x = -1.0,
             .y = -1.0,
             .z = ui_layer.bottom,
@@ -860,6 +873,15 @@ fn drawWindowDecoration() !void {
             .height = height,
         };
         _ = renderer.drawQuad(extent, background_color.toRGBA(), .top_left);
+
+        const button_width: f32 = 32.0 * screen_scale.horizontal;
+        const button_height: f32 = 32.0 * screen_scale.vertical;
+        const close_button_placement = Coordinates3D(f32){
+            .x = 1.0 - button_width,
+            .y = -1.0 + button_height,
+            .z = ui_layer.middle,
+        };
+        ui_state.close_app_button.draw(close_button_placement, 0.0, screen_scale);
     }
     ui_state.window_region.top = -1.0 + height;
 }
