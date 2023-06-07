@@ -23,7 +23,8 @@ const AnchorPoint = geometry.AnchorPoint;
 const graphics = @import("../graphics.zig");
 const RGBA = graphics.RGBA;
 
-const Timer = @import("../utils/Timer.zig");
+const utils = @import("../utils.zig");
+const Timer = utils.Timer;
 
 const shared_render_pass = @import("render_pass.zig");
 
@@ -91,9 +92,13 @@ var unscaled_canvas_mapped_memory: []RGBA(u8) = undefined;
 
 var scale_method: vk.Filter = .nearest;
 
+const DrawHandle = u32;
+
 // Binds stream handles to `stream_buffer` entries
 // E.G: stream_handle_buffer[0] = 55 (handle 55 corresponds to `stream_buffer[0]`)
 var stream_handle_buffer = [1]u32{std.math.maxInt(u32)} ** max_stream_count;
+
+var draw_handle_buffer = [1]DrawHandle{std.math.maxInt(DrawHandle)} ** max_draw_count;
 
 const Stream = struct {
     dimensions: Dimensions2D(f32),
@@ -133,7 +138,7 @@ pub inline fn drawVideoFrame(extent: Extent3D(f32)) void {
     draw_quad_count += 1;
 }
 
-pub inline fn addVideoSource(stream_handle: u32, relative_extent: Extent2D(f32)) void {
+pub inline fn addVideoSource(stream_handle: u32, relative_extent: Extent2D(f32)) DrawHandle {
     const stream_index = streamIndexFromHandle(stream_handle);
     assert(stream_count > stream_index);
     assert(source_count < max_draw_count);
@@ -149,11 +154,13 @@ pub inline fn addVideoSource(stream_handle: u32, relative_extent: Extent2D(f32))
     assert(relative_extent.width + relative_extent.x <= 1.0);
     assert(relative_extent.height + relative_extent.y <= 1.0);
 
-    draw_context_buffer[source_count] = .{
+    const draw_handle = assignNewDrawHandle();
+    var draw_context_ptr = drawContextFromHandle(draw_handle);
+    draw_context_ptr.* = .{
         .relative_extent = relative_extent,
         .stream_handle = stream_handle,
     };
-    source_count += 1;
+    return draw_handle;
 }
 
 var source_extent_buffer: [8]Extent3D(f32) = undefined;
@@ -265,6 +272,34 @@ pub inline fn moveEdgeBottom(source_index: u16, value: f32) void {
     assert(new_y + new_height <= 1.0);
 }
 
+pub inline fn assignNewDrawHandle() DrawHandle {
+    const next_free_handle: DrawHandle = source_count;
+    for (&draw_handle_buffer) |*mapped_buffer_index| {
+        if (mapped_buffer_index.* == std.math.maxInt(DrawHandle)) {
+            mapped_buffer_index.* = next_free_handle;
+            source_count += 1;
+            return next_free_handle;
+        }
+    }
+    unreachable;
+}
+
+pub inline fn drawContextFromHandle(draw_handle: DrawHandle) *DrawContext {
+    for (draw_handle_buffer, 0..) |mapped_buffer_index, i| {
+        if (mapped_buffer_index == draw_handle)
+            return &draw_context_buffer[i];
+    }
+    unreachable;
+}
+
+pub inline fn drawContextIndexFromHandle(draw_handle: DrawHandle) usize {
+    for (draw_handle_buffer, 0..) |mapped_buffer_index, i| {
+        if (mapped_buffer_index == draw_handle)
+            return i;
+    }
+    unreachable;
+}
+
 pub inline fn assignNewStreamHandle() u32 {
     const next_free_handle: u32 = stream_count;
     for (&stream_handle_buffer) |*mapped_buffer_index| {
@@ -285,20 +320,73 @@ pub inline fn streamFromHandle(stream_handle: u32) *Stream {
     unreachable;
 }
 
-pub inline fn streamIndexFromHandle(stream_handle: u32) u32 {
+pub inline fn streamIndexFromHandle(stream_handle: u32) usize {
     for (stream_handle_buffer, 0..) |mapped_buffer_index, i| {
         if (mapped_buffer_index == stream_handle)
-            return @intCast(u32, i);
+            return i;
     }
     unreachable;
 }
+
+pub fn removeStream(stream_handle: u32) void {
+    assert(pending_remove_stream_handle == null);
+    pending_remove_stream_handle = stream_handle;
+}
+
+fn destroyStream(stream_handle: u32) void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
+    const stream_ptr = streamFromHandle(stream_handle);
+    for (&stream_handle_buffer) |*mapped_buffer_index| {
+        if (mapped_buffer_index.* == stream_handle) {
+            mapped_buffer_index.* = std.math.maxInt(u32);
+            break;
+        }
+    }
+    device_dispatch.destroyImage(logical_device, stream_ptr.image, null);
+    device_dispatch.unmapMemory(logical_device, stream_ptr.memory);
+    device_dispatch.freeMemory(logical_device, stream_ptr.memory, null);
+
+    //
+    // Remove all draw commands for this stream
+    //
+    var draw_index_signed: i32 = @intCast(i32, source_count);
+    while (draw_index_signed >= 0) : (draw_index_signed -= 1) {
+        const draw_index = @intCast(usize, draw_index_signed);
+        //
+        // This draw command references the stream_handle we are deleting.
+        //
+        if (draw_context_buffer[draw_index].stream_handle == stream_handle) {
+            std.log.info("Found draw context at index {d}. Deleting.", .{draw_index});
+            //
+            // Remove the buffer entry
+            //
+            utils.leftShiftRemove(DrawContext, &draw_context_buffer, draw_index);
+            source_count -= 1;
+            // Since we're left shifting, we have to decrement the index again or else 
+            // we'll just be seeing the same buffer value next iteration
+            draw_index_signed -= 1;
+            //
+            // Set the handle -> buffer index binding to null so it can be reused
+            //
+            draw_handle_buffer[draw_index] = std.math.maxInt(DrawHandle);
+        }
+    }
+    stream_count -= 1;
+}
+
+var pending_remove_stream_handle: ?u32 = null;
 
 pub fn createStream(
     supported_image_format: SupportedImageFormat,
     source_dimensions: Dimensions2D(u32),
 ) !u32 {
+    if (stream_count == max_stream_count)
+        return error.StreamLimitReached;
+
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
+
     const stream_handle = assignNewStreamHandle();
     const stream_ptr: *Stream = streamFromHandle(stream_handle);
     stream_ptr.dimensions = .{
@@ -450,6 +538,11 @@ pub fn createStream(
 }
 
 pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
+    if (pending_remove_stream_handle) |stream_handle| {
+        destroyStream(stream_handle);
+        pending_remove_stream_handle = null;
+    }
+
     if (draw_quad_count == 0)
         return;
 

@@ -84,6 +84,7 @@ pub const writeStreamFrame = video_pipeline.writeStreamFrame;
 pub const drawVideoFrame = video_pipeline.drawVideoFrame;
 pub const addVideoSource = video_pipeline.addVideoSource;
 pub const createStream = video_pipeline.createStream;
+pub const removeStream = video_pipeline.removeStream;
 pub const resizeCanvas = video_pipeline.resizeCanvas;
 
 pub const videoSourceExtents = video_pipeline.videoSourceExtents;

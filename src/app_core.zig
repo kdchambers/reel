@@ -163,8 +163,6 @@ var sample_buffer: [sample_multiple * 3]f32 = undefined;
 
 var screencapture_start: ?i128 = null;
 
-var stream_count: u32 = 0;
-
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
         return error.IncorrectState;
@@ -289,7 +287,23 @@ pub fn run() !void {
                 },
                 .screencapture_remove_source => {
                     const stream_index = request_buffer.readInt(u16) catch unreachable;
-                    std.log.info("Removing video stream {d}", .{stream_index});
+                    const screencapture_source_handle = model.video_streams[stream_index].source_index;
+                    const renderer_stream_handle = stream_binding_buffer[screencapture_source_handle];
+                    std.log.info("Removing video stream. Renderer handle: {d} Screencapture handle: {d}", .{
+                        renderer_stream_handle,
+                        screencapture_source_handle,
+                    });
+                    screencapture_interface.streamClose(screencapture_source_handle);
+                    renderer.removeStream(renderer_stream_handle);
+                    const video_stream_count: usize = model.video_streams.len;
+                    assert(video_stream_count > 0);
+                    utils.leftShiftRemove(Model.VideoStream, video_stream_buffer[0..video_stream_count], stream_index);
+                    model.video_streams = video_stream_buffer[0 .. video_stream_count - 1];
+                    assert(model.video_streams.len == video_stream_count - 1);
+
+                    update_encoder_mutex.lock();
+                    update_encoder.write(.video_source_added) catch unreachable;
+                    update_encoder_mutex.unlock();
                 },
                 .screencapture_request_source => {
                     //
@@ -406,7 +420,7 @@ pub fn run() !void {
                         .width = 1.0,
                         .height = 1.0,
                     };
-                    renderer.addVideoSource(webcam_stream_handle, relative_extent);
+                    _ = renderer.addVideoSource(webcam_stream_handle, relative_extent);
                     const byte_count: usize = pixel_count * @sizeOf(RGBA(u8));
                     const pixel_byte_buffer = @ptrCast([*]u8, webcam_pixel_buffer[0].ptr)[0..byte_count];
                     renderer.writeStreamFrame(webcam_stream_handle, pixel_byte_buffer) catch unreachable;
@@ -712,7 +726,7 @@ fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
 // Screen capture callbacks
 //
 
-var stream_binding_buffer: [8]u32 = undefined;
+var stream_binding_buffer = [1]u32{std.math.maxInt(u32)} ** 8;
 
 fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyopaque) void {
     const stream_info = screencapture_interface.streamInfo(stream_handle);
@@ -729,19 +743,20 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
         .width = 1.0,
         .height = 1.0,
     };
-    renderer.addVideoSource(stream_binding_buffer[stream_handle], relative_extent);
+    _ = renderer.addVideoSource(stream_binding_buffer[stream_handle], relative_extent);
 
     std.log.info("Stream opened!", .{});
 
-    model.video_streams = video_stream_buffer[0 .. stream_count + 1];
-    model.video_streams[stream_count] = .{
+    const stream_count = model.video_streams.len;
+    video_stream_buffer[stream_count] = .{
         .frame_index = 0,
         .pixels = undefined,
         .provider_ref = .{ .index = 0, .kind = .screen_capture },
         .source_index = stream_handle,
         .dimensions = stream_info.dimensions,
     };
-    stream_count += 1;
+    model.video_streams = video_stream_buffer[0 .. stream_count + 1];
+    assert(model.video_streams.len == (stream_count + 1));
 
     update_encoder_mutex.lock();
     update_encoder.write(.video_source_added) catch unreachable;
