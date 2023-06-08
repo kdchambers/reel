@@ -107,7 +107,17 @@ pub fn bestInterface() Interface {
     unreachable;
 }
 
-pub fn availableBackends(backend_buffer: *[4]Backend) []Backend {
+var backend_buffer: [4]Backend = undefined;
+
+pub fn createInterface(backend: Backend) Interface {
+    return switch (backend) {
+        .pulseaudio => backend_pulse.interface(),
+        .pipewire => backend_pipewire.interface(),
+        else => unreachable,
+    };
+}
+
+pub fn availableBackends() []Backend {
     var backend_count: u32 = 0;
     if (backend_pipewire.isSupported()) {
         backend_buffer[backend_count] = .pipewire;

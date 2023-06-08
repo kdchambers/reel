@@ -227,12 +227,17 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     frontend_interface = frontend.interface(options.frontend);
     frontend_interface.init(gpa) catch return error.FrontendInitFail;
 
-    audio_source_interface = audio_source.bestInterface();
-
-    audio_source_interface.init(
-        &handleAudioSourceInitSuccess,
-        &handleAudioSourceInitFail,
-    ) catch return error.AudioInputInitFail;
+    for (audio_source.availableBackends()) |backend| {
+        audio_source_interface = audio_source.createInterface(backend);
+        audio_source_interface.init(
+            &handleAudioSourceInitSuccess,
+            &handleAudioSourceInitFail,
+        ) catch continue;
+        break;
+    } else {
+        std.log.err("Failed to connect to audio source backend", .{});
+        return error.AudioInputInitFail;
+    }
 }
 
 // TODO: Hack
