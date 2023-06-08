@@ -287,7 +287,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.open_sidemenu_button.init();
     ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
-    ui_state.open_sidemenu_button.background_color = RGBA.transparent;
+    ui_state.open_sidemenu_button.background_color = RGBA.fromInt(36, 39, 47, 255);
     ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
     ui_state.open_sidemenu_button.icon = .arrow_back_32px;
     ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
