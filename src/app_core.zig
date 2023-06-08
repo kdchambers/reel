@@ -502,7 +502,7 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
         screencapture_start = std.time.nanoTimestamp();
 
     for (model.video_streams) |*stream| {
-        if (stream.source_index == stream_handle) {
+        if (stream.provider_ref.kind == .screen_capture and stream.source_index == stream_handle) {
             const pixel_count: usize = width * height;
             stream.pixels = pixels[0..pixel_count];
             assert(stream.provider_ref.index == 0);
