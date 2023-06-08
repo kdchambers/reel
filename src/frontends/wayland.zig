@@ -246,6 +246,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     ui_state.window_decoration_requested = true;
 
+    ui_state.add_source_state = .closed;
+    ui_state.video_source_mouse_event_count = 0;
+    ui_state.sidebar_state = .closed;
+
     initWaylandClient() catch return error.WaylandClientInitFail;
 
     event_system.init() catch |err| {
@@ -359,10 +363,6 @@ pub fn init(allocator: std.mem.Allocator) !void {
         entry.remove_icon.icon = .delete_16px;
     }
 
-    ui_state.add_source_state = .closed;
-
-    ui_state.video_source_mouse_event_count = 0;
-
     //
     // TODO: Don't hardcode bin count
     //
@@ -465,26 +465,21 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         }
     }
 
-    {
+    //
+    // TODO: This is kind of a hack. In this case this button isn't valid but still has a
+    //       mouse event slot index that's pointing to another widgets mouse event. If it triggers
+    //       it will update some random vertices and clear the hover state so that the widget it
+    //       actually belongs to won't trigger an update. Come up with a proper way to invalid
+    //       widgets that aren't redrawn so that updates are gauranteed to have no effect
+    //
+    if (screen_dimensions.width < 1200) {
         const response = ui_state.open_sidemenu_button.update();
         if (response.clicked) {
             switch (ui_state.sidebar_state) {
                 .open => {
-                    ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
-                    ui_state.open_sidemenu_button.background_color = RGBA.transparent;
-                    ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
-                    // ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
-                    ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
-                    ui_state.open_sidemenu_button.icon = .arrow_back_32px;
                     ui_state.sidebar_state = .closed;
                 },
                 .closed => {
-                    ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
-                    ui_state.open_sidemenu_button.background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
-                    ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
-                    ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
-                    // ui_state.open_sidemenu_button.on_hover_background_color = RGBA{ .r = 255, .g = 255, .b = 255, .a = 20 };
-                    ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
                     ui_state.sidebar_state = .open;
                 },
             }
@@ -584,15 +579,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 //
                 // Close the righthand sidebar once we've finished adding a new source
                 //
-                // TODO: Implement a cleaner way of switching between button states
-                //       Or just use two seperate buttons
-                ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
-                ui_state.open_sidemenu_button.background_color = RGBA.transparent;
-                ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
-                ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
-                ui_state.open_sidemenu_button.icon = .arrow_back_32px;
                 ui_state.sidebar_state = .closed;
-
                 is_draw_required = true;
             }
         },
@@ -608,15 +595,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 //
                 // Close the righthand sidebar once we've finished adding a new source
                 //
-                // TODO: Implement a cleaner way of switching between button states
-                //       Or just use two seperate buttons
-                ui_state.open_sidemenu_button.on_hover_icon_color = RGBA.white;
-                ui_state.open_sidemenu_button.background_color = RGBA.transparent;
-                ui_state.open_sidemenu_button.icon_color = RGBA{ .r = 202, .g = 202, .b = 202, .a = 255 };
-                ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
-                ui_state.open_sidemenu_button.icon = .arrow_back_32px;
                 ui_state.sidebar_state = .closed;
-
                 is_draw_required = true;
             }
         },

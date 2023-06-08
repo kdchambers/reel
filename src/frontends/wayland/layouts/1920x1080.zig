@@ -49,8 +49,18 @@ pub fn draw(
     const window = ui_state.window_region;
 
     const have_horizontal_space: bool = (ui_root.screen_dimensions.width >= 1200);
-    if(have_horizontal_space)
+    if (have_horizontal_space)
         ui_state.sidebar_state = .open;
+
+    if (ui_state.sidebar_state == .closed) {
+        ui_state.open_sidemenu_button.background_color = RGBA.transparent;
+        ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
+        ui_state.open_sidemenu_button.icon = .arrow_back_32px;
+    } else {
+        ui_state.open_sidemenu_button.background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
+        ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
+        ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
+    }
 
     var icon_bar_region: Region = .{};
     {
@@ -103,7 +113,7 @@ pub fn draw(
                 ui_state.open_sidemenu_button.draw(close_sidebar_button_region.placement(), 4.0, screen_scale);
             }
 
-            const scene_controls_background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
+            const scene_controls_background_color = RGBA.fromInt(36, 39, 47, 255);
             const scene_controls_extent = right_sidebar_region.toExtent();
             assert(scene_controls_extent.z == right_sidebar_region.z);
             _ = renderer.drawQuad(scene_controls_extent, scene_controls_background_color, .bottom_left);
@@ -191,7 +201,7 @@ pub fn draw(
                         // NOTE: Placement is `top_right`
                         //
                         .y = -1.0 + (160.0 * screen_scale.vertical),
-                        .z = ui_layer.middle,
+                        .z = ui_layer.high,
                     };
                     ui_state.source_provider_list.draw(
                         menu_placement,
@@ -209,7 +219,7 @@ pub fn draw(
                         // NOTE: Placement is `top_right`
                         //
                         .y = -1.0 + (160.0 * screen_scale.vertical),
-                        .z = ui_layer.middle,
+                        .z = ui_layer.high,
                     };
                     ui_state.select_video_source_popup.draw(
                         menu_placement,
@@ -459,10 +469,9 @@ pub fn draw(
         scene_volume_bar_region.anchor.left = preview_region.left();
         scene_volume_bar_region.margin.left = 10.0 * screen_scale.horizontal;
         scene_volume_bar_region.anchor.bottom = activity_region.top();
-        scene_volume_bar_region.margin.bottom = 15.0 * screen_scale.vertical;
+        scene_volume_bar_region.margin.bottom = 40.0 * screen_scale.vertical;
         scene_volume_bar_region.width = 400.0 * screen_scale.horizontal;
         scene_volume_bar_region.height = 30.0 * screen_scale.vertical;
-
         ui_state.scene_volume_level.draw(scene_volume_bar_region.toExtent(), screen_scale);
 
         if (model.video_streams.len > 0) {
