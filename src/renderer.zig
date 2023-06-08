@@ -387,10 +387,7 @@ pub fn renderFrame() !void {
     switch (acquire_image_result.result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
-            std.log.warn("error_out_of_date_khr or suboptimal_khr", .{});
-            assert(false);
-            // try recreateSwapchain(screen_dimensions);
-            return;
+            return error.SwapchainOutdated;
         },
         .error_out_of_host_memory => return error.VulkanHostOutOfMemory,
         .error_out_of_device_memory => return error.VulkanDeviceOutOfMemory,
@@ -447,9 +444,7 @@ pub fn renderFrame() !void {
     switch (present_result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
-            assert(false);
-            // try recreateSwapchain(screen_dimensions);
-            return;
+            return error.SwapchainOutdated;
         },
         .error_out_of_host_memory => return error.VulkanHostOutOfMemory,
         .error_out_of_device_memory => return error.VulkanDeviceOutOfMemory,

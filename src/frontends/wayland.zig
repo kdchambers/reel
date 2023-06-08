@@ -260,7 +260,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
         @ptrCast(*renderer.Display, wayland_core.display),
         @ptrCast(*renderer.Surface, surface),
         screen_dimensions,
-    ) catch return error.VulkanRendererInitFail;
+    ) catch |err| {
+        std.log.err("Failed to initialize vulkan renderer. Error: {}", .{err});
+        return error.VulkanRendererInitFail;
+    };
     errdefer renderer.deinit();
 
     ui_state.window_region.left = -1.0;
@@ -770,8 +773,12 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                 rendering_start = std.time.nanoTimestamp();
 
             _ = profiler.push(.render);
-            renderer.renderFrame() catch
-                return error.VulkanRendererRenderFrameFail;
+            renderer.renderFrame() catch |err| {
+                switch (err) {
+                    error.SwapchainOutdated => renderer.resizeSwapchain(screen_dimensions) catch return error.VulkanRendererRenderFrameFail,
+                    else => return error.VulkanRendererRenderFrameFail,
+                }
+            };
             profiler.pop(.render);
 
             rendered_frame_count += 1;
