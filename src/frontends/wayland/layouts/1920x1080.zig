@@ -48,6 +48,10 @@ pub fn draw(
 ) !void {
     const window = ui_state.window_region;
 
+    const have_horizontal_space: bool = (ui_root.screen_dimensions.width >= 1200);
+    if(have_horizontal_space)
+        ui_state.sidebar_state = .open;
+
     var icon_bar_region: Region = .{};
     {
         icon_bar_region.anchor.left = window.left;
@@ -86,38 +90,42 @@ pub fn draw(
             right_sidebar_region.width = 400.0 * screen_scale.horizontal;
             right_sidebar_region.anchor.bottom = window.bottom;
 
-            var close_sidebar_button_region: Region = .{};
-            close_sidebar_button_region.anchor.left = right_sidebar_region.left();
-            close_sidebar_button_region.anchor.top = right_sidebar_region.top();
-            close_sidebar_button_region.z = ui_layer.middle;
-            close_sidebar_button_region.width = 32.0 * screen_scale.horizontal;
-            close_sidebar_button_region.height = 32.0 * screen_scale.vertical;
-            close_sidebar_button_region.margin.top = 10.0 * screen_scale.vertical;
-            close_sidebar_button_region.margin.left = 10.0 * screen_scale.horizontal;
-
-            ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
-            ui_state.open_sidemenu_button.draw(close_sidebar_button_region.placement(), 4.0, screen_scale);
+            if (!have_horizontal_space) {
+                var close_sidebar_button_region: Region = .{};
+                close_sidebar_button_region.anchor.left = right_sidebar_region.left();
+                close_sidebar_button_region.anchor.top = right_sidebar_region.top();
+                close_sidebar_button_region.z = ui_layer.middle;
+                close_sidebar_button_region.width = 32.0 * screen_scale.horizontal;
+                close_sidebar_button_region.height = 32.0 * screen_scale.vertical;
+                close_sidebar_button_region.margin.top = 10.0 * screen_scale.vertical;
+                close_sidebar_button_region.margin.left = 10.0 * screen_scale.horizontal;
+                ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
+                ui_state.open_sidemenu_button.draw(close_sidebar_button_region.placement(), 4.0, screen_scale);
+            }
 
             const scene_controls_background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
             const scene_controls_extent = right_sidebar_region.toExtent();
             assert(scene_controls_extent.z == right_sidebar_region.z);
             _ = renderer.drawQuad(scene_controls_extent, scene_controls_background_color, .bottom_left);
 
-            const top_margin: f32 = 44.0 * screen_scale.vertical;
+            const top_margin_pixels: f32 = if (have_horizontal_space) 0.0 else 44.0;
+            const top_margin: f32 = top_margin_pixels * screen_scale.vertical;
+            const source_bar_height: f32 = 40.0 * screen_scale.vertical;
+            const source_bar_y: f32 = window.top + top_margin + source_bar_height;
 
             const header_bar_extent = Extent3D(f32){
                 .x = scene_controls_extent.x,
-                .y = -1.0 + (40.0 * screen_scale.vertical) + top_margin,
+                .y = source_bar_y,
                 .z = ui_layer.middle,
                 .width = scene_controls_extent.width,
-                .height = 40.0 * screen_scale.vertical,
+                .height = source_bar_height,
             };
             const header_bar_text_extent = Extent3D(f32){
                 .x = scene_controls_extent.x,
-                .y = -1.0 + (40.0 * screen_scale.vertical) + 0.001 + top_margin,
+                .y = source_bar_y,
                 .z = ui_layer.middle,
                 .width = scene_controls_extent.width / 4.0,
-                .height = 40.0 * screen_scale.vertical,
+                .height = source_bar_height,
             };
             const header_bar_color = RGBA{ .r = 30, .g = 33, .b = 39, .a = 255 };
             _ = renderer.drawQuad(header_bar_extent, header_bar_color, .bottom_left);
@@ -126,7 +134,7 @@ pub fn draw(
             {
                 const add_circle_placement = Coordinates3D(f32){
                     .x = 1.0 - (40.0 * screen_scale.horizontal),
-                    .y = -1.0 + (40.0 * screen_scale.vertical) + top_margin,
+                    .y = source_bar_y,
                     .z = ui_layer.middle,
                 };
                 ui_state.add_source_button.draw(add_circle_placement, 8.0, screen_scale);
@@ -151,9 +159,10 @@ pub fn draw(
                     const source_provider_index: usize = stream.provider_ref.index;
                     const source_name: []const u8 = switch (stream.provider_ref.kind) {
                         .screen_capture => blk: {
-                            break :blk if(model.video_source_providers[source_provider_index].sources) |sources|
+                            break :blk if (model.video_source_providers[source_provider_index].sources) |sources|
                                 sources[stream.source_index].name
-                            else "unknown";
+                            else
+                                "unknown";
                         },
                         .webcam => model.webcam_source_providers[source_provider_index].sources[stream.source_index].name,
                     };
@@ -381,8 +390,6 @@ pub fn draw(
             .width = @intToFloat(f32, frame_dimensions.width),
             .height = @intToFloat(f32, frame_dimensions.height),
         };
-
-        const have_horizontal_space: bool = (ui_root.screen_dimensions.width >= 1400);
 
         const margin_pixels: f32 = 10.0;
         const margin_horizontal: f32 = margin_pixels * screen_scale.horizontal;
