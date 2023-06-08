@@ -133,8 +133,6 @@ fn queryStreams(allocator: std.mem.Allocator) []StreamInfo {
 
 pub fn deinit() void {
     teardownPipewire();
-    // TODO:
-    // stream_state = .closed;
 }
 
 pub fn _init(successCallback: *const screencapture.InitOnSuccessFn, _: *const screencapture.InitOnErrorFn) void {
@@ -164,8 +162,12 @@ fn streamState(self: StreamHandle) StreamState {
     return .running;
 }
 
-fn streamClose(self: StreamHandle) void {
-    _ = self;
+fn streamClose(stream_handle: StreamHandle) void {
+    _ = stream_handle;
+    //
+    // TODO: This is a hack that just works for one stream
+    //
+    teardownPipewire();
 }
 
 pub fn openStream(
@@ -1366,14 +1368,10 @@ pub fn init() !void {
         1,
     );
 
-    // stream_state = .init_pending;
-
     pw.pw_thread_loop_unlock(thread_loop);
 }
 
 fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
-    // TODO:
-    // assert(stream_state == .open);
     const buffer = pw.pw_stream_dequeue_buffer(stream);
     const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
     const alignment = @alignOf(screencapture.PixelType);
@@ -1391,9 +1389,9 @@ fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
     _ = pw.pw_stream_queue_buffer(stream, buffer);
 }
 
-fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod) callconv(.C) void {
-    // if (stream_state == .closed)
-    //     return;
+fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: ?*const pw.spa_pod) callconv(.C) void {
+    if (params == null)
+        return;
 
     if (id == pw.SPA_PARAM_Format) {
         stream_format = parseStreamFormat(params);
@@ -1403,8 +1401,6 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const pw.spa_pod)
             stream_format.height,
             @tagName(stream_format.format),
         });
-        // TODO;
-        // stream_state = .open;
         onStreamOpenSuccessCallback(0, &.{});
     }
 }
@@ -1434,15 +1430,10 @@ fn onCoreDoneCallback(_: ?*anyopaque, id: u32, seq: i32) callconv(.C) void {
 }
 
 fn teardownPipewire() void {
-    // TODO:
-    // stream_state = .closed;
-    // TODO: Use a mutex
-    //       It's possible that we're still using a pipewire buffer when entering this
-    //       function as the onFrameReady callback is on a separate thread
-    std.time.sleep(10);
-    // TODO: Handle return
+    pw.pw_thread_loop_lock(thread_loop);
     _ = pw.pw_stream_disconnect(stream);
     pw.pw_stream_destroy(stream);
+    pw.pw_thread_loop_unlock(thread_loop);
 
     pw.pw_thread_loop_stop(thread_loop);
     pw.pw_thread_loop_destroy(thread_loop);
