@@ -110,7 +110,9 @@ const Stream = struct {
 
 pub const SupportedImageFormat = enum {
     rgba,
+    rgbx,
     bgrx,
+    bgra,
 };
 
 pub fn resetVertexBuffer() void {
@@ -363,7 +365,7 @@ fn destroyStream(stream_handle: u32) void {
             //
             utils.leftShiftRemove(DrawContext, &draw_context_buffer, draw_index);
             source_count -= 1;
-            // Since we're left shifting, we have to decrement the index again or else 
+            // Since we're left shifting, we have to decrement the index again or else
             // we'll just be seeing the same buffer value next iteration
             draw_index_signed -= 1;
             //
@@ -401,8 +403,8 @@ pub fn createStream(
     });
 
     const image_format = switch (supported_image_format) {
-        .rgba => vk.Format.r8g8b8a8_unorm,
-        .bgrx => vk.Format.b8g8r8a8_unorm,
+        .rgba, .rgbx => vk.Format.r8g8b8a8_unorm,
+        .bgra, .bgrx => vk.Format.b8g8r8a8_unorm,
     };
 
     const pixel_count = source_dimensions.width * source_dimensions.height;

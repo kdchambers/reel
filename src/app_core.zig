@@ -767,7 +767,9 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     const stream_info = screencapture_interface.streamInfo(stream_handle);
     const supported_image_format: renderer.SupportedVideoImageFormat = switch (stream_info.pixel_format.?) {
         .rgba => .rgba,
+        .rgbx => .rgbx,
         .bgrx => .bgrx,
+        .bgra => .bgra,
         else => unreachable,
     };
     stream_binding_buffer[stream_handle] = renderer.createStream(supported_image_format, stream_info.dimensions) catch unreachable;
