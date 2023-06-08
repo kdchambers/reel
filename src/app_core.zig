@@ -151,7 +151,7 @@ var gpa: std.mem.Allocator = undefined;
 
 var microphone_audio_stream = audio_source.StreamHandle{ .index = std.math.maxInt(u32) };
 var desktop_audio_stream = audio_source.StreamHandle{ .index = std.math.maxInt(u32) };
-var audio_sources_ref: []audio_source.SourceInfo = undefined;
+var audio_sources_ref: []const audio_source.SourceInfo = undefined;
 
 var active_audio_stream: *audio_source.StreamHandle = &microphone_audio_stream;
 
@@ -540,6 +540,8 @@ pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16)
         model.audio_streams[0].sample_buffer.appendOverwrite(pcm_buffer);
         const power_spectrum = audio_utils.samplesToPowerSpectrum(pcm_buffer);
         model.audio_streams[0].volume_db = audio_utils.powerSpectrumToVolumeDb(power_spectrum);
+    } else {
+        std.log.info("Warning! audio callback stream doesn't match", .{});
     }
 }
 
@@ -554,7 +556,7 @@ fn handleAudioSourceInitSuccess() void {
     audio_source_interface.listSources(gpa, handleSourceListReady);
 }
 
-fn handleSourceListReady(audio_sources: []audio_source.SourceInfo) void {
+fn handleSourceListReady(audio_sources: []const audio_source.SourceInfo) void {
     std.log.info("Audio devices found: {d}", .{audio_sources.len});
 
     if (audio_sources.len == 0) {

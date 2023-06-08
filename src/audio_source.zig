@@ -27,7 +27,7 @@ pub const DeinitFn = fn () void;
 pub const GetStateFn = fn () State;
 
 pub const ListSourcesFn = fn (allocator: std.mem.Allocator, callback: *const ListReadyCallbackFn) void;
-pub const ListReadyCallbackFn = fn (source_info: []SourceInfo) void;
+pub const ListReadyCallbackFn = fn (source_info: []const SourceInfo) void;
 
 pub const StreamHandle = packed struct(u32) {
     index: u32,

@@ -112,14 +112,22 @@ pub fn deinit() void {
     symbols.deinit();
 }
 
+const source_buffer = [1]root.SourceInfo{.{
+    .name = "default sink",
+    .description = "default sink",
+    .source_type = .microphone,
+}};
+
 fn listSources(allocator: std.mem.Allocator, listReadyCallback: *const ListReadyCallbackFn) void {
     _ = allocator;
-    listReadyCallback(&.{});
+    listReadyCallback(&source_buffer);
 }
 
 pub fn state() State {
     return backend_state;
 }
+
+var onStreamCreateSuccess: *const CreateStreamSuccessCallbackFn = undefined;
 
 pub fn createStream(
     source_index_opt: ?u32,
@@ -130,9 +138,9 @@ pub fn createStream(
     assert(backend_state == .initialized);
 
     onSamplesReady = samplesReadyCallback;
+    onStreamCreateSuccess = onSuccess;
 
     _ = source_index_opt;
-    _ = onSuccess;
     _ = onFail;
 
     thread_loop = symbols.threadLoopNew("Pipewire thread loop", null);
@@ -326,5 +334,6 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params_opt: ?*const spa.Pod) 
             audio_info.rate,
             audio_info.channels,
         });
+        onStreamCreateSuccess(.{ .index = 0 });
     }
 }
