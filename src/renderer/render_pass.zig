@@ -40,7 +40,19 @@ pub fn init(
 ) !void {
     cache.multi_sampled_image_memory_index = multi_sampled_image_memory_index;
     buffer_size_pixels = swapchain_dimensions.width * swapchain_dimensions.height;
+    try createDepthImage(
+        swapchain_dimensions.width,
+        swapchain_dimensions.height,
+        cache.multi_sampled_image_memory_index,
+    );
 
+    if (have_multisample) {
+        try createMultiSampledImage(swapchain_dimensions, multi_sampled_image_memory_index);
+    }
+    pass = try createRenderPass(swapchain_format);
+}
+
+pub fn requiredMemoryTypeIndices() !u64 {
     antialias_sample_count = blk: {
         const physical_device_properties = vulkan_core.instance_dispatch.getPhysicalDeviceProperties(vulkan_core.physical_device);
         const sample_counts = physical_device_properties.limits.framebuffer_color_sample_counts;
@@ -69,16 +81,62 @@ pub fn init(
         break :blk .{ .@"1_bit" = true };
     };
 
-    try createDepthImage(
-        swapchain_dimensions.width,
-        swapchain_dimensions.height,
-        cache.multi_sampled_image_memory_index,
-    );
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
 
-    if (have_multisample) {
-        try createMultiSampledImage(swapchain_dimensions, multi_sampled_image_memory_index);
+    var required_bits: u64 = std.math.maxInt(u64);
+    {
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = .d32_sfloat,
+            .tiling = .optimal,
+            .extent = vk.Extent3D{
+                .width = 1920,
+                .height = 1080,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = .undefined,
+            .usage = .{ .transient_attachment_bit = true, .depth_stencil_attachment_bit = true },
+            .samples = antialias_sample_count,
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+        const temp_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+        const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, temp_image);
+        required_bits &= memory_requirements.memory_type_bits;
+        device_dispatch.destroyImage(logical_device, temp_image, null);
     }
-    pass = try createRenderPass(swapchain_format);
+
+    {
+        const image_create_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = .b8g8r8a8_unorm,
+            .tiling = .optimal,
+            .extent = vk.Extent3D{
+                .width = 1920,
+                .height = 1080,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .initial_layout = .undefined,
+            .usage = .{ .transient_attachment_bit = true, .color_attachment_bit = true },
+            .samples = antialias_sample_count,
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+        };
+        const temp_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+        const memory_requirements = device_dispatch.getImageMemoryRequirements(logical_device, temp_image);
+        required_bits &= memory_requirements.memory_type_bits;
+        device_dispatch.destroyImage(logical_device, temp_image, null);
+    }
+    return required_bits;
 }
 
 pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u32)) !void {
@@ -272,7 +330,7 @@ fn createRenderPass(swapchain_format: vk.Format) !vk.RenderPass {
 
     const depth_attachment_ref = vk.AttachmentReference{
         .attachment = 1,
-        .layout = .depth_stencil_read_only_optimal,
+        .layout = .depth_stencil_attachment_optimal,
     };
 
     const subpasses: [1]vk.SubpassDescription = if (have_multisample) .{

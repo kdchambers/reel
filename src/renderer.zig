@@ -126,6 +126,7 @@ var inflight_fences: [max_frames_in_flight]vk.Fence = undefined;
 var framebuffers: []vk.Framebuffer = undefined;
 
 var allocator: std.mem.Allocator = undefined;
+var supported_gpu_memory_types: u64 = 0;
 
 pub inline fn init(
     ally: std.mem.Allocator,
@@ -137,8 +138,11 @@ pub inline fn init(
     allocator = ally;
 
     try vulkan_core.init(@ptrCast(*vk.wl_display, wayland_display), @ptrCast(*vk.wl_surface, wayland_surface));
-    cpu_memory_index = findCpuLocalMemoryIndex(required_cpu_memory) orelse return error.InsufficientMemory;
-    gpu_memory_index = findGpuLocalMemoryIndex(required_gpu_memory) orelse return error.InsufficientMemory;
+
+    supported_gpu_memory_types = try render_pass.requiredMemoryTypeIndices();
+
+    cpu_memory_index = findCpuLocalMemoryIndex(required_cpu_memory) orelse return error.FindValidMemoryFail;
+    gpu_memory_index = findGpuLocalMemoryIndex(required_gpu_memory) orelse return error.FindValidMemoryFail;
 
     if (comptime required_cpu_memory > 0)
         try cpu_memory_allocator.init(cpu_memory_index, required_cpu_memory);
@@ -629,7 +633,8 @@ fn findGpuLocalMemoryIndex(minimum_size_bytes: u32) ?u32 {
         }
 
         const memory_flags = memory_entry.property_flags;
-        if (memory_flags.device_local_bit) {
+        const has_required_bits = (supported_gpu_memory_types & (@as(u64, 1) << @intCast(u6, memory_type_index))) != 0;
+        if (has_required_bits and memory_flags.device_local_bit) {
             if (selected_memory_type_index_opt) |*selected_memory_type_index| {
                 if (heap_size > selected_heap_size) {
                     selected_memory_type_index.* = memory_type_index;
