@@ -1,6 +1,27 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Keith Chambers
 
+pub const spa_audio_max_channels = 64;
+
+extern fn _spa_format_parse(format: *const spa_pod, media_type: *u32, media_subtype: *u32) callconv(.C) i32;
+extern fn _spa_format_audio_raw_parse(format: *const spa_pod, info: *spa_audio_info_raw) callconv(.C) i32;
+
+pub const spa_format_parse = _spa_format_parse;
+pub const spa_format_audio_raw_parse = _spa_format_audio_raw_parse;
+
+pub const spa_pod = extern struct {
+    size: u32,
+    type: u32,
+};
+
+pub const spa_audio_info_raw = extern struct {
+    format: spa_audio_format,
+    flags: u32,
+    rate: u32,
+    channels: u32,
+    position: [spa_audio_max_channels]u32,
+};
+
 pub const spa_audio_format = enum(u32) {
     unknown,
     encodeded,

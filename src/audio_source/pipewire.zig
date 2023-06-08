@@ -62,12 +62,16 @@ pub const InitErrors = error{
 pub const CreateStreamError = error{
     PipewireStreamCreateFail,
     PipewireStreamStartFail,
+    PipewireStreamConnectFail,
+    PipewireConnectThreadFail,
 };
 
-var is_stream_ready: bool = false;
-
 var sourceListReadyCallback: *const ListReadyCallbackFn = undefined;
+var onSamplesReady: *const SamplesReadyCallbackFn = undefined;
 var backend_state: State = .closed;
+
+var onInitSuccess: *const InitSuccessCallbackFn = undefined;
+var onInitFail: *const InitFailCallbackFn = undefined;
 
 pub fn isSupported() bool {
     if (libpipewire_handle_opt == null) {
@@ -80,21 +84,6 @@ pub fn isSupported() bool {
             return false;
         };
     }
-
-    if (is_stream_ready)
-        return true;
-
-    //
-    // It seems we need to actually create a stream to determine if
-    // we can actually use pipewire.
-    //
-    setupStream() catch {
-        std.log.info("Failed to setup pipewire audio source", .{});
-        return false;
-    };
-
-    is_stream_ready = true;
-
     return true;
 }
 
@@ -113,27 +102,19 @@ pub fn interface() root.Interface {
     };
 }
 
-pub fn init(
-    onSuccess: *const InitSuccessCallbackFn,
-    onFail: *const InitFailCallbackFn,
-) InitErrors!void {
-    _ = onSuccess;
-    _ = onFail;
-
-    assert(false);
-}
-
 pub fn deinit() void {
-    symbols.threadLoopStop(thread_loop);
+    symbols.threadLoopLock(thread_loop);
     symbols.streamDestroy(stream);
+    symbols.threadLoopUnlock(thread_loop);
+
+    symbols.threadLoopStop(thread_loop);
     symbols.threadLoopDestroy(thread_loop);
     symbols.deinit();
 }
 
 fn listSources(allocator: std.mem.Allocator, listReadyCallback: *const ListReadyCallbackFn) void {
     _ = allocator;
-    _ = listReadyCallback;
-    assert(false);
+    listReadyCallback(&.{});
 }
 
 pub fn state() State {
@@ -148,123 +129,16 @@ pub fn createStream(
 ) CreateStreamError!void {
     assert(backend_state == .initialized);
 
+    onSamplesReady = samplesReadyCallback;
+
     _ = source_index_opt;
-    _ = samplesReadyCallback;
     _ = onSuccess;
     _ = onFail;
-
-    assert(false);
-}
-
-fn streamStart(s: StreamHandle) void {
-    _ = s;
-    // assert(stream.index < max_concurrent_streams);
-    // assert(stream_buffer[stream.index].state == .paused);
-    // stream_buffer[stream.index].state = .running;
-}
-
-fn streamPause(s: StreamHandle) void {
-    _ = s;
-    // assert(stream.index < max_concurrent_streams);
-    // assert(stream_buffer[stream.index].state == .running);
-    // stream_buffer[stream.index].state = .paused;
-}
-
-fn streamClose(s: StreamHandle) void {
-    _ = s;
-    // assert(stream.index < max_concurrent_streams);
-    // handles.stream_unref(stream_buffer[stream.index].pulse_stream);
-    // stream_buffer[stream.index].state = .closed;
-    // assert(stream_buffer[stream.index].state == .closed);
-}
-
-fn streamState(s: StreamHandle) StreamState {
-    _ = s;
-    return .running;
-    // assert(stream.index < max_concurrent_streams);
-    // return stream_buffer[stream.index].state;
-}
-
-// pub fn init(
-//     onSuccess: *const audio.InitSuccessCallbackFn,
-//     onFail: *const audio.InitFailCallbackFn,
-// ) InitErrors!void {
-//     std.debug.assert(backend_state == .closed);
-
-//     onInitFailCallback = onFail;
-//     onInitSuccessCallback = onSuccess;
-
-//     if (!is_stream_ready) {
-//         try setupStream();
-//         is_stream_ready = true;
-//     }
-
-//     backend_state = .initialized;
-//     onInitSuccessCallback();
-// }
-
-const stream_events = pw.StreamEvents{
-    .state_changed = onStateChangedCallback,
-    .param_changed = onParamChangedCallback,
-    .process = onProcessCallback,
-    .io_changed = null,
-    .add_buffer = null,
-    .remove_buffer = null,
-    .drained = null,
-    .command = null,
-    .trigger_done = null,
-    .destroy = null,
-    .control_info = null,
-};
-
-fn onStateChangedCallback(_: ?*anyopaque, old: pw.StreamState, new: pw.StreamState, error_message: [*c]const u8) callconv(.C) void {
-    _ = old;
-    const error_string: [*c]const u8 = error_message orelse "none";
-    std.log.warn("pipewire state changed. \"{s}\". Error: {s}", .{ symbols.streamStateAsString(new), error_string });
-}
-
-fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
-    const buffer = symbols.streamDequeueBuffer(stream);
-    const buffer_bytes = buffer.*.buffer.*.datas[0].data orelse return;
-    const buffer_size_bytes = buffer.*.buffer.*.datas[0].chunk.*.size;
-    const sample_count = @divExact(buffer_size_bytes, @sizeOf(i16));
-    _ = buffer_bytes;
-    _ = sample_count;
-    // onReadSamplesCallback(@ptrCast([*]i16, @alignCast(2, buffer_bytes))[0..sample_count]);
-    _ = symbols.streamQueueBuffer(stream, buffer);
-}
-
-fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: [*c]const spa.Pod) callconv(.C) void {
-    _ = params;
-    std.log.info("Param changed format (unknown) {d}", .{id});
-    if (id == @enumToInt(spa.ParamType.format)) {
-        std.log.info("Param changed format", .{});
-        // if (pw.spa_format_parse(params, &audio_format.media_type, &audio_format.media_subtype) < 0) {
-        //     return;
-        // }
-        // if (audio_format.media_type != pw.SPA_MEDIA_TYPE_audio or audio_format.media_subtype != pw.SPA_MEDIA_SUBTYPE_raw) {
-        //     std.log.info("Rejecting non-raw audio format", .{});
-        //     return;
-        // }
-        // _ = pw.spa_format_audio_raw_parse(params, &audio_format.info.raw);
-        // std.log.info("Audiof format: Rate {d} Channels {d}", .{
-        //     audio_format.info.raw.rate,
-        //     audio_format.info.raw.channels,
-        // });
-        // format_confirmed = true;
-    }
-}
-
-fn setupStream() error{ PipewireConnectServerFail, CreateStreamFail, ConnectStreamFail }!void {
-    var argc: i32 = 1;
-    var argv = [_][*:0]const u8{"reel"};
-
-    symbols.init(@ptrCast(*i32, &argc), @ptrCast(*[*][*:0]const u8, &argv));
 
     thread_loop = symbols.threadLoopNew("Pipewire thread loop", null);
 
     if (symbols.threadLoopStart(thread_loop) < 0) {
-        return error.PipewireConnectServerFail;
+        return error.PipewireConnectThreadFail;
     }
     symbols.threadLoopLock(thread_loop);
 
@@ -284,7 +158,7 @@ fn setupStream() error{ PipewireConnectServerFail, CreateStreamFail, ConnectStre
         stream_properties,
         &stream_events,
         null,
-    ) orelse return error.CreateStreamFail;
+    ) orelse return error.PipewireStreamCreateFail;
 
     const AudioFormatParam = extern struct {
         const KeyPair = extern struct {
@@ -359,26 +233,98 @@ fn setupStream() error{ PipewireConnectServerFail, CreateStreamFail, ConnectStre
     );
     if (ret_code != 0) {
         std.log.info("Failed to connect to stream. Error: {s}", .{c.strerror(-ret_code)});
-        return error.ConnectStreamFail;
+        return error.PipewireStreamConnectFail;
     }
+
+    symbols.threadLoopUnlock(thread_loop);
 }
 
-// pub fn open(
-//     device_name_opt: ?[*:0]const u8,
-//     onSuccess: *const audio.OpenSuccessCallbackFn,
-//     onFail: *const audio.OpenFailCallbackFn,
-// ) OpenErrors!void {
-//     _ = device_name_opt;
+fn streamStart(stream_handle: StreamHandle) void {
+    _ = stream_handle;
+    @panic("Implement streamStart in audio_source pipewire backend");
+}
 
-//     onOpenFailCallback = onFail;
-//     onOpenSuccessCallback = onSuccess;
+fn streamPause(stream_handle: StreamHandle) void {
+    _ = stream_handle;
+    @panic("Implement streamPause in audio_source pipewire backend");
+}
 
-//     std.debug.assert(backend_state == .initialized);
+fn streamClose(stream_handle: StreamHandle) void {
+    _ = stream_handle;
+    @panic("Implement streamClose in audio_source pipewire backend");
+}
 
-//     //
-//     // Activate the read thread
-//     //
-//     symbols.pw_thread_loop_unlock(thread_loop);
+fn streamState(stream_handle: StreamHandle) StreamState {
+    _ = stream_handle;
+    @panic("Implement streamState in audio_source pipewire backend");
+}
 
-//     onOpenSuccessCallback();
-// }
+pub fn init(
+    onSuccess: *const InitSuccessCallbackFn,
+    onFail: *const InitFailCallbackFn,
+) InitErrors!void {
+    std.debug.assert(backend_state == .closed);
+
+    onInitFail = onFail;
+    onInitSuccess = onSuccess;
+
+    var argc: i32 = 1;
+    var argv = [_][*:0]const u8{"reel"};
+    symbols.init(@ptrCast(*i32, &argc), @ptrCast(*[*][*:0]const u8, &argv));
+
+    backend_state = .initialized;
+    onInitSuccess();
+}
+
+const stream_events = pw.StreamEvents{
+    .state_changed = onStateChangedCallback,
+    .param_changed = onParamChangedCallback,
+    .process = onProcessCallback,
+    .io_changed = null,
+    .add_buffer = null,
+    .remove_buffer = null,
+    .drained = null,
+    .command = null,
+    .trigger_done = null,
+    .destroy = null,
+    .control_info = null,
+};
+
+fn onStateChangedCallback(_: ?*anyopaque, old: pw.StreamState, new: pw.StreamState, error_message: [*c]const u8) callconv(.C) void {
+    _ = old;
+    const error_string: [*c]const u8 = error_message orelse "none";
+    std.log.warn("pipewire state changed. \"{s}\". Error: {s}", .{ symbols.streamStateAsString(new), error_string });
+}
+
+fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
+    const buffer = symbols.streamDequeueBuffer(stream);
+    const buffer_bytes = buffer.*.buffer.*.datas[0].data orelse return;
+    const buffer_size_bytes = buffer.*.buffer.*.datas[0].chunk.*.size;
+    const sample_count = @divExact(buffer_size_bytes, @sizeOf(i16));
+    const stream_handle = StreamHandle{ .index = 0 };
+    onSamplesReady(stream_handle, @ptrCast([*]i16, @alignCast(2, buffer_bytes))[0..sample_count]);
+    _ = symbols.streamQueueBuffer(stream, buffer);
+}
+
+fn onParamChangedCallback(_: ?*anyopaque, id: u32, params_opt: ?*const spa.Pod) callconv(.C) void {
+    const params = params_opt orelse return;
+    if (id == @enumToInt(spa.ParamType.format)) {
+        var media_type: u32 = 0;
+        var media_subtype: u32 = 0;
+
+        if (spa.formatParse(params, &media_type, &media_subtype) < 0) {
+            return;
+        }
+        if (@intToEnum(spa.MediaType, media_type) != .audio or @intToEnum(spa.MediaSubtype, media_subtype) != .raw) {
+            std.log.info("Rejecting non-raw audio format", .{});
+            return;
+        }
+
+        var audio_info: spa.AudioInfoRaw = undefined;
+        _ = spa.formatAudioRawParse(params, &audio_info);
+        std.log.info("Audio format: Rate {d} Channels {d}", .{
+            audio_info.rate,
+            audio_info.channels,
+        });
+    }
+}

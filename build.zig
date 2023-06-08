@@ -86,11 +86,23 @@ pub fn build(b: *Build) void {
     // Pipewire Screencast
     //
     // TODO: Remove header dependencies
-    const flags = [_][]const u8{
-        "-I/usr/include/pipewire-0.3",
-        "-I/usr/include/spa-0.2",
-    };
-    exe.addCSourceFile("src/screencapture/pipewire/pipewire_stream_extra.c", &flags);
+    {
+        const flags = [_][]const u8{
+            "-I/usr/include/pipewire-0.3",
+            "-I/usr/include/spa-0.2",
+        };
+        exe.addCSourceFile("src/screencapture/pipewire/pipewire_stream_extra.c", &flags);
+    }
+
+    {
+        //
+        // spa header contains a bunch of inline functions and macros, and zig isn't
+        // able to translate / import it atm. Therefore I'm using this c file to basically
+        // un-inline those functions and make them available to fix.
+        //
+        const flags = [_][]const u8{"-I/usr/include/spa-0.2"};
+        exe.addCSourceFile("src/bindings/spa/wrapper.c", &flags);
+    }
 
     //
     // TODO: Remove header dependencies

@@ -17,6 +17,11 @@ pub const Buffer = extern struct {
     datas: [*]Data,
 };
 
+pub const formatParse = b.spa_format_parse;
+pub const formatAudioRawParse = b.spa_format_audio_raw_parse;
+
+pub const AudioInfoRaw = b.spa_audio_info_raw;
+
 pub const Meta = extern struct {
     pub const Type = enum(u32) {
         invalid,
@@ -56,10 +61,7 @@ pub const Callbacks = extern struct {
     overflow: *const fn (data: ?*anyopaque, size: u32) i32,
 };
 
-pub const Pod = extern struct {
-    kind: u32,
-    size: u32,
-};
+pub const Pod = b.spa_pod;
 
 pub const ParamType = enum(i32) {
     invalid,
