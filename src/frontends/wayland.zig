@@ -868,6 +868,16 @@ fn drawWindowDecoration() !void {
             .z = ui_layer.middle,
         };
         ui_state.close_app_button.draw(close_button_placement, 0.0, screen_scale);
+
+        const title_left_margin: f32 = 10.0 * screen_scale.horizontal;
+        const window_title_extent = Extent3D(f32){
+            .x = -1.0 + title_left_margin,
+            .y = -1.0 + height,
+            .z = ui_layer.middle,
+            .width = 1.0,
+            .height = height,
+        };
+        _ = renderer.drawText("Reel", window_title_extent, screen_scale, .medium, .regular, RGBA.black, .middle_left);
     }
     ui_state.window_region.top = -1.0 + height;
 }
