@@ -556,6 +556,19 @@ fn handleAudioSourceInitSuccess() void {
 
 fn handleSourceListReady(audio_sources: []audio_source.SourceInfo) void {
     std.log.info("Audio devices found: {d}", .{audio_sources.len});
+
+    if (audio_sources.len == 0) {
+        audio_source_interface.createStream(
+            null,
+            &onAudioSamplesReady,
+            &handleAudioSourceCreateStreamSuccess,
+            &handleAudioSourceCreateStreamFail,
+        ) catch |err| {
+            std.log.err("audio_source: Failed to connect to device. Error: {}", .{err});
+        };
+        return;
+    }
+
     audio_sources_ref = audio_sources;
     var have_microphone: bool = false;
     // var have_desktop: bool = false;
