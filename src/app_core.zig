@@ -729,6 +729,20 @@ fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
 
 var stream_binding_buffer = [1]u32{std.math.maxInt(u32)} ** 8;
 
+const default_screen_names = [_][]const u8{
+    "Screen 1",
+    "Screen 2",
+    "Screen 3",
+    "Screen 4",
+    "Screen 5",
+    "Screen 6",
+    "Screen 7",
+    "Screen 8",
+    "Screen 9",
+};
+
+var video_source_buffer: [8]Model.VideoSourceProvider.Source = undefined;
+
 fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyopaque) void {
     const stream_info = screencapture_interface.streamInfo(stream_handle);
     const supported_image_format: renderer.SupportedVideoImageFormat = switch (stream_info.pixel_format.?) {
@@ -747,6 +761,18 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     _ = renderer.addVideoSource(stream_binding_buffer[stream_handle], relative_extent);
 
     std.log.info("Stream opened!", .{});
+
+    //
+    // The screencapture backend didn't give us any information about our sources.
+    // Now that we've opened one, we know it's dimensions and format at least and
+    // can add that information to the source_provider
+    //
+    if (!screencapture_interface.info.query_streams) {
+        const current_source_index: usize = if (model.video_source_providers[0].sources == null) 0 else model.video_source_providers[0].sources.?.len;
+        video_source_buffer[current_source_index].name = default_screen_names[current_source_index];
+        video_source_buffer[current_source_index].dimensions = stream_info.dimensions;
+        model.video_source_providers[0].sources = video_source_buffer[0 .. current_source_index + 1];
+    }
 
     const stream_count = model.video_streams.len;
     video_stream_buffer[stream_count] = .{
