@@ -3,7 +3,7 @@ ___
 
 ⚠️ **Early development warning** ⚠️
 
-A 0.1 MPV release is targetting for the end of June; until then it's not advised to attempt building Reel unless you have some familiarity with zig and are willing to manually install dependencies.
+A MPV release is targetted for early July; until then it's not advised to attempt building Reel unless you have some familiarity with zig.
 
 If you're interested in this project you probably want to checkout one of the following:
 
@@ -32,9 +32,9 @@ The following is a course-grained summary of what features / backends have been 
 | Webcam Backend Pipewire | ❌ |
 | Audio Input Backend ALSA | ❌ |
 | Audio Input Backend Pulse | ✅ |
-| Audio Input Backend Pipewire | ✅ |
+| Audio Input Backend Pipewire | ⚠️ |
 | Audio Input Backend Jack | ❌ |
-| Screencapture Backend Pipewire | ✅ |
+| Screencapture Backend Pipewire | ⚠️ |
 | Screencapture Backend Wlroots | ✅ |
 | Screencapture Backend KDE | ❌ |
 
