@@ -479,16 +479,14 @@ pub fn run() !void {
 
 pub fn deinit() void {
     audio_source_interface.deinit();
-
     for (model.audio_streams) |*audio_stream| {
         audio_stream.sample_buffer.deinit(gpa);
     }
-
+    screencapture_interface.deinit();
     video4linux.deinit(gpa);
-
     frontend_interface.deinit();
+    renderer.deinit();
     if (comptime build_options.have_wayland) wayland_core.deinit();
-
     log.info("Shutting down app core", .{});
 }
 
