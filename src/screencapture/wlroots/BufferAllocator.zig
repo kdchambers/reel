@@ -53,6 +53,12 @@ pub fn init(initial_size: u64, shared_memory: *wl.Shm) !WaylandAllocator {
     };
 }
 
+pub fn deinit(self: *@This()) void {
+    self.used = 0;
+    self.memory_pool.destroy();
+    std.os.munmap(@alignCast(4096, self.mapped_memory));
+}
+
 pub fn create(self: *@This(), width: u32, height: u32, stride: u32, format: wl.Shm.Format) !Buffer {
     std.debug.assert(width <= std.math.maxInt(i32));
     std.debug.assert(height <= std.math.maxInt(i32));

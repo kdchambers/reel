@@ -139,7 +139,16 @@ pub fn init(
     }
 }
 
-pub fn deinit() void {}
+pub fn deinit() void {
+    wayland_core.capture_callback = null;
+    for (&stream_buffer) |*stream| {
+        stream.stream_state = .paused;
+        for (&stream.buffers) |buffer| {
+            buffer.buffer.destroy();
+        }
+    }
+    buffer_allocator.deinit();
+}
 
 fn queryStreamInfo(allocator: std.mem.Allocator) []screencapture.StreamInfo {
     assert(wayland_core.outputs.len <= 32);
