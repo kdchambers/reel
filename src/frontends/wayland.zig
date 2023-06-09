@@ -774,6 +774,11 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
 
 pub fn deinit() void {
     std.log.info("wayland deinit", .{});
+
+    frame_callback.destroy();
+    cursor_surface.destroy();
+    xdg_surface.destroy();
+
     const current_time_ns = std.time.nanoTimestamp();
     const rendering_duration = @intCast(u64, current_time_ns - rendering_start);
     const rendering_duration_seconds = @intToFloat(f32, rendering_duration) / std.time.ns_per_s;
