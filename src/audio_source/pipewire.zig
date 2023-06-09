@@ -42,6 +42,7 @@ const required_pipewire_symbols = pw.SymbolList{
     .streamQueueBuffer = true,
     .streamNewSimple = true,
     .streamStateAsString = true,
+    .streamDisconnect = true,
     .streamDestroy = true,
     .streamConnect = true,
 };
@@ -104,6 +105,7 @@ pub fn interface() root.Interface {
 
 pub fn deinit() void {
     symbols.threadLoopLock(thread_loop);
+    _ = symbols.streamDisconnect(stream);
     symbols.streamDestroy(stream);
     symbols.threadLoopUnlock(thread_loop);
 
@@ -143,7 +145,7 @@ pub fn createStream(
     _ = source_index_opt;
     _ = onFail;
 
-    thread_loop = symbols.threadLoopNew("Pipewire thread loop", null);
+    thread_loop = symbols.threadLoopNew("Pipewire audio capture thread loop", null);
 
     if (symbols.threadLoopStart(thread_loop) < 0) {
         return error.PipewireConnectThreadFail;
