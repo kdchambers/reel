@@ -187,6 +187,7 @@ pub inline fn init(
 }
 
 pub inline fn deinit() void {
+    waitForFences(&inflight_fences) catch {};
     allocator.free(swapchain_image_views);
     allocator.free(swapchain_images);
     allocator.free(command_buffers);
