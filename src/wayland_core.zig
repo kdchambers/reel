@@ -82,17 +82,35 @@ pub fn init(allocator: std.mem.Allocator) !void {
 }
 
 pub fn deinit() void {
-    display = undefined;
-    screencopy_manager_opt = null;
-    registry = undefined;
-    compositor = undefined;
-    xdg_wm_base = undefined;
-    wayland_fd = -1;
-    shared_memory = undefined;
-    seat = undefined;
-    pointer = undefined;
-
     display_list.deinit();
+
+    if (display.roundtrip() != .SUCCESS) assert(false);
+
+    if (screencopy_manager_opt) |*screencopy_manager| {
+        screencopy_manager.*.destroy();
+    }
+
+    if (window_decorations_opt) |*window_decorations| {
+        window_decorations.*.destroy();
+    }
+
+    shared_memory.destroy();
+    xdg_wm_base.destroy();
+
+    pointer.destroy();
+    seat.destroy();
+
+    registry.destroy();
+    _ = display.flush();
+
+    //
+    // Hack: On Gnome (Mutter) I'm getting a compositor crash when calling disconnect.
+    //       I haven't been able to track down the cause but it seems there's a race condition
+    //       at play. Strangely this doesn't happen on Ctrl-C.
+    //
+    std.time.sleep(std.time.ns_per_ms * 200);
+
+    display.disconnect();
 
     state = .uninitialized;
 }
