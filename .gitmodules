@@ -13,3 +13,6 @@
 [submodule "deps/reel-assets"]
 	path = deps/reel-assets
 	url = https://github.com/kdchambers/reel-assets
+[submodule "deps/FFmpeg"]
+	path = deps/FFmpeg
+	url = https://github.com/FFmpeg/FFmpeg
