@@ -7,9 +7,7 @@
 
 #### ⚠️ **Early development warning** ⚠️
 
-A MPV release is targetted for early July; until then it's not advised to attempt building Reel unless you have some familiarity with zig.
-
-If you're interested in this project you probably want to checkout one of the following:
+A MPV release is targetted for early July. However, if you're interested in this project now you can checkout one of the following.
 
 - [frequently asked questions](./doc/FAQ.md)
 - [design document](doc/DESIGN.md)
