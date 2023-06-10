@@ -27,7 +27,7 @@ If you're interested in this project you probably want to checkout one of the fo
 
 First install the required dependencies for your distribution.
 
-- [Fedora](doc/BUILD_FEDORA.md#Fedora)
+- [Fedora](doc/BUILD.md#Fedora)
 
 To build, you'll need a master build of the zig compiler. The latest verified version is **0.11.0-dev.3132**, but if out of date will be updated soon.
 
