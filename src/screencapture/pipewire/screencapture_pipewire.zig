@@ -17,7 +17,6 @@ const c = @cImport({
 
 const pw = @cImport({
     @cInclude("spa/param/video/format-utils.h");
-    @cInclude("spa/debug/types.h");
     @cInclude("spa/param/video/type-info.h");
     @cInclude("pipewire/pipewire.h");
 });
@@ -132,7 +131,8 @@ fn queryStreams(allocator: std.mem.Allocator) []StreamInfo {
 }
 
 pub fn deinit() void {
-    teardownPipewire();
+    if (backend_stream == .active)
+        teardownPipewire();
 }
 
 pub fn _init(successCallback: *const screencapture.InitOnSuccessFn, _: *const screencapture.InitOnErrorFn) void {
@@ -165,9 +165,8 @@ fn streamState(self: StreamHandle) StreamState {
 fn streamClose(stream_handle: StreamHandle) void {
     _ = stream_handle;
     //
-    // TODO: This is a hack that just works for one stream
+    // TODO: Implement multiple streams
     //
-    teardownPipewire();
 }
 
 pub fn openStream(
@@ -1296,7 +1295,7 @@ pub fn init() !void {
 
     pw.pw_init(@ptrCast([*]i32, &argc), @ptrCast([*c][*c][*c]u8, &argv));
 
-    thread_loop = pw.pw_thread_loop_new("Pipewire thread loop", null) orelse return error.CreateThreadLoopFail;
+    thread_loop = pw.pw_thread_loop_new("Pipewire screencast thread loop", null) orelse return error.CreateThreadLoopFail;
     var context = pw.pw_context_new(
         pw.pw_thread_loop_get_loop(thread_loop),
         null,
@@ -1437,7 +1436,6 @@ fn teardownPipewire() void {
 
     pw.pw_thread_loop_stop(thread_loop);
     pw.pw_thread_loop_destroy(thread_loop);
-    std.log.info("Disconnecting from stream", .{});
 }
 
 fn extractMessageStart(

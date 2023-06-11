@@ -7,7 +7,6 @@
 // and link in the object file
 //
 
-#include <spa/debug/types.h>
 #include <spa/param/video/format-utils.h>
 #include <spa/param/video/type-info.h>
 #include <spa/param/video/format.h>
