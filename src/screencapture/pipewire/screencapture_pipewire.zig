@@ -93,19 +93,69 @@ const stream_events = pw.pw_stream_events{
     .control_info = null,
 };
 
-pub var stream_format: StreamFormat = undefined;
+const Stream = struct {
+    const null_handle: screencapture.StreamHandle = std.math.maxInt(u16);
+
+    handle: screencapture.StreamHandle,
+    state: screencapture.StreamState,
+    stream: *pw.pw_stream,
+    thread_loop: *pw.pw_thread_loop,
+    format: StreamFormat,
+
+    pub fn deinit(self: *@This()) void {
+        pw.pw_thread_loop_lock(self.thread_loop);
+        _ = pw.pw_stream_disconnect(self.stream);
+        pw.pw_stream_destroy(self.stream);
+        pw.pw_thread_loop_unlock(self.thread_loop);
+        pw.pw_thread_loop_stop(self.thread_loop);
+        pw.pw_thread_loop_destroy(self.thread_loop);
+        self.state = .uninitialized;
+        self.handle = Stream.null_handle;
+    }
+};
+
+const null_stream = Stream{
+    .handle = Stream.null_handle,
+    .state = .uninitialized,
+    .stream = undefined,
+    .thread_loop = undefined,
+    .format = undefined,
+};
+
+const max_stream_count = 16;
+var stream_buffer = [1]Stream{null_stream} ** max_stream_count;
 
 var backend_stream: screencapture.State = .uninitialized;
 
 pub var frameReadyCallback: *const screencapture.OnFrameReadyFn = undefined;
 
 var stream_listener: pw.spa_hook = undefined;
-var stream: *pw.pw_stream = undefined;
-var thread_loop: *pw.pw_thread_loop = undefined;
 var server_version_sync: i32 = undefined;
 
 var request_count: u32 = 0;
 var session_count: u32 = 0;
+
+var next_stream_handle: u16 = 0;
+
+pub fn newStream() *Stream {
+    inline for (&stream_buffer) |*stream| {
+        if (stream.handle == Stream.null_handle) {
+            stream.*.handle = next_stream_handle;
+            next_stream_handle += 1;
+            return stream;
+        }
+    }
+    unreachable;
+}
+
+pub inline fn streamFromHandle(stream_handle: u32) *Stream {
+    inline for (&stream_buffer) |*stream| {
+        if (stream.handle == stream_handle)
+            return stream;
+    }
+    std.log.err("screencapture(pipewire): stream_handle {d} is not valid", .{stream_handle});
+    unreachable;
+}
 
 var onStreamOpenSuccessCallback: *const screencapture.OpenStreamOnSuccessFn = undefined;
 
@@ -144,7 +194,8 @@ const StreamState = screencapture.StreamState;
 const StreamInfo = screencapture.StreamInfo;
 
 fn streamInfo(stream_handle: StreamHandle) StreamInfo {
-    _ = stream_handle;
+    const stream_ptr: *const Stream = streamFromHandle(stream_handle);
+    const stream_format = stream_ptr.format;
     return .{
         .name = "unknown",
         .dimensions = .{ .width = stream_format.width, .height = stream_format.height },
@@ -157,16 +208,12 @@ fn streamPause(self: StreamHandle, is_paused: bool) void {
     _ = is_paused;
 }
 
-fn streamState(self: StreamHandle) StreamState {
-    _ = self;
-    return .running;
+fn streamState(stream_handle: StreamHandle) StreamState {
+    return streamFromHandle(stream_handle).state;
 }
 
 fn streamClose(stream_handle: StreamHandle) void {
-    _ = stream_handle;
-    //
-    // TODO: Implement multiple streams
-    //
+    streamFromHandle(stream_handle).deinit();
 }
 
 pub fn openStream(
@@ -1293,19 +1340,21 @@ pub fn init() !void {
     var argc: i32 = 1;
     var argv = [_][*:0]const u8{"reel"};
 
+    var stream_ptr: *Stream = newStream();
+
     pw.pw_init(@ptrCast([*]i32, &argc), @ptrCast([*c][*c][*c]u8, &argv));
 
-    thread_loop = pw.pw_thread_loop_new("Pipewire screencast thread loop", null) orelse return error.CreateThreadLoopFail;
+    stream_ptr.thread_loop = pw.pw_thread_loop_new("Pipewire screencast thread loop", null) orelse return error.CreateThreadLoopFail;
     var context = pw.pw_context_new(
-        pw.pw_thread_loop_get_loop(thread_loop),
+        pw.pw_thread_loop_get_loop(stream_ptr.thread_loop),
         null,
         0,
     );
-    if (pw.pw_thread_loop_start(thread_loop) < 0) {
+    if (pw.pw_thread_loop_start(stream_ptr.thread_loop) < 0) {
         std.log.err("Failed to start pw thread loop", .{});
     }
 
-    pw.pw_thread_loop_lock(thread_loop);
+    pw.pw_thread_loop_lock(stream_ptr.thread_loop);
     var core = pw.pw_context_connect_fd(
         context,
         c.fcntl(pipewire_fd, c.F_DUPFD_CLOEXEC, @as(i32, 5)),
@@ -1313,7 +1362,7 @@ pub fn init() !void {
         0,
     ) orelse {
         std.log.err("Failed to create pipewire core object with fd", .{});
-        pw.pw_thread_loop_unlock(thread_loop);
+        pw.pw_thread_loop_unlock(stream_ptr.thread_loop);
         return;
     };
 
@@ -1326,17 +1375,17 @@ pub fn init() !void {
         "Screen",
         c.NULL,
     );
-    stream = pw.pw_stream_new(
+    stream_ptr.stream = pw.pw_stream_new(
         core,
         "reel-screencapture",
         stream_properties,
     ) orelse return error.CreateNewStreamFail;
 
     pw.pw_stream_add_listener(
-        stream,
+        stream_ptr.stream,
         &stream_listener,
         &stream_events,
-        null,
+        stream_ptr,
     );
 
     var params: [1]*pw.spa_pod = undefined;
@@ -1359,7 +1408,7 @@ pub fn init() !void {
     params[0] = buildPipewireParams(&pod_builder);
 
     _ = pw.pw_stream_connect(
-        stream,
+        stream_ptr.stream,
         pw.PW_DIRECTION_INPUT,
         start_responses.pipewire_node_id,
         pw.PW_STREAM_FLAG_AUTOCONNECT | pw.PW_STREAM_FLAG_MAP_BUFFERS,
@@ -1367,40 +1416,47 @@ pub fn init() !void {
         1,
     );
 
-    pw.pw_thread_loop_unlock(thread_loop);
+    pw.pw_thread_loop_unlock(stream_ptr.thread_loop);
 }
 
-fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
-    const buffer = pw.pw_stream_dequeue_buffer(stream);
-    const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
-    const alignment = @alignOf(screencapture.PixelType);
-    const buffer_pixels = @ptrCast([*]const screencapture.PixelType, @alignCast(alignment, buffer_bytes));
+fn onProcessCallback(userdata_opt: ?*anyopaque) callconv(.C) void {
+    if (userdata_opt) |userdata| {
+        const stream_ptr = @ptrCast(*const Stream, @alignCast(@alignOf(Stream), userdata));
+        const buffer = pw.pw_stream_dequeue_buffer(stream_ptr.stream);
+        const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
+        const alignment = @alignOf(screencapture.PixelType);
+        const buffer_pixels = @ptrCast([*]const screencapture.PixelType, @alignCast(alignment, buffer_bytes));
 
-    frameReadyCallback(
-        //
-        // TODO: This should be the stream_handle
-        //
-        0,
-        stream_format.width,
-        stream_format.height,
-        buffer_pixels,
-    );
-    _ = pw.pw_stream_queue_buffer(stream, buffer);
+        frameReadyCallback(
+            stream_ptr.handle,
+            stream_ptr.format.width,
+            stream_ptr.format.height,
+            buffer_pixels,
+        );
+        _ = pw.pw_stream_queue_buffer(stream_ptr.stream, buffer);
+    } else {
+        std.log.err("screencapture(pipewire): userdata pointer null in onProcessCallback", .{});
+        assert(false);
+    }
 }
 
-fn onParamChangedCallback(_: ?*anyopaque, id: u32, params: ?*const pw.spa_pod) callconv(.C) void {
+fn onParamChangedCallback(userdata_opt: ?*anyopaque, id: u32, params: ?*const pw.spa_pod) callconv(.C) void {
     if (params == null)
         return;
-
-    if (id == pw.SPA_PARAM_Format) {
-        stream_format = parseStreamFormat(params);
-
-        std.log.info("Pipewire stream opened. {d} x {d} {s}", .{
-            stream_format.width,
-            stream_format.height,
-            @tagName(stream_format.format),
-        });
-        onStreamOpenSuccessCallback(0, &.{});
+    if (userdata_opt) |userdata| {
+        if (id == pw.SPA_PARAM_Format) {
+            var stream_ptr = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
+            stream_ptr.format = parseStreamFormat(params);
+            std.log.info("Pipewire stream opened. {d} x {d} {s}", .{
+                stream_ptr.format.width,
+                stream_ptr.format.height,
+                @tagName(stream_ptr.format.format),
+            });
+            onStreamOpenSuccessCallback(stream_ptr.handle, &.{});
+        }
+    } else {
+        std.log.err("screencapture(pipewire): userdata pointer null in onParamChangedCallback", .{});
+        assert(false);
     }
 }
 
@@ -1424,18 +1480,19 @@ fn onCoreErrorCallback(_: ?*anyopaque, id: u32, seq: i32, res: i32, message: [*c
 
 fn onCoreDoneCallback(_: ?*anyopaque, id: u32, seq: i32) callconv(.C) void {
     if (id == pw.PW_ID_CORE and server_version_sync == seq) {
-        pw.pw_thread_loop_signal(thread_loop, false);
+        for (stream_buffer) |stream| {
+            if (stream.handle != Stream.null_handle)
+                pw.pw_thread_loop_signal(stream.thread_loop, false);
+        }
     }
 }
 
 fn teardownPipewire() void {
-    pw.pw_thread_loop_lock(thread_loop);
-    _ = pw.pw_stream_disconnect(stream);
-    pw.pw_stream_destroy(stream);
-    pw.pw_thread_loop_unlock(thread_loop);
-
-    pw.pw_thread_loop_stop(thread_loop);
-    pw.pw_thread_loop_destroy(thread_loop);
+    for (&stream_buffer) |*stream| {
+        if (stream.handle != Stream.null_handle and stream.state != .uninitialized) {
+            stream.deinit();
+        }
+    }
 }
 
 fn extractMessageStart(
