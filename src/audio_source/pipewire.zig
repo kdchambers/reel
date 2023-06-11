@@ -48,10 +48,58 @@ const required_pipewire_symbols = pw.SymbolList{
 };
 
 var symbols: pw.Symbols(required_pipewire_symbols) = undefined;
-var stream: *pw.Stream = undefined;
-var thread_loop: *pw.ThreadLoop = undefined;
-
 var libpipewire_handle_opt: ?DynLib = null;
+
+const Stream = struct {
+    const null_handle = std.math.maxInt(u32);
+
+    handle: u32,
+    state: root.StreamState,
+    stream: *pw.Stream,
+    thread_loop: *pw.ThreadLoop,
+
+    fn deinit(self: *@This()) void {
+        assert(self.handle != null_handle);
+
+        symbols.threadLoopLock(self.thread_loop);
+        _ = symbols.streamDisconnect(self.stream);
+        symbols.streamDestroy(self.stream);
+        symbols.threadLoopUnlock(self.thread_loop);
+
+        symbols.threadLoopStop(self.thread_loop);
+        symbols.threadLoopDestroy(self.thread_loop);
+    }
+};
+
+const null_stream = Stream{
+    .handle = Stream.null_handle,
+    .state = .closed,
+    .stream = undefined,
+    .thread_loop = undefined,
+};
+
+const max_stream_count = 16;
+var stream_buffer = [1]Stream{null_stream} ** max_stream_count;
+var next_stream_handle: u32 = 0;
+
+pub fn newStream() *Stream {
+    inline for (&stream_buffer) |*stream| {
+        if (stream.handle == Stream.null_handle) {
+            stream.*.handle = next_stream_handle;
+            next_stream_handle += 1;
+            return stream;
+        }
+    }
+    unreachable;
+}
+
+pub inline fn streamFromHandle(stream_handle: u32) *Stream {
+    inline for (&stream_buffer) |*stream| {
+        if (stream.handle == stream_handle)
+            return stream;
+    }
+    unreachable;
+}
 
 pub const InitErrors = error{
     PipewireConnectServerFail,
@@ -104,13 +152,10 @@ pub fn interface() root.Interface {
 }
 
 pub fn deinit() void {
-    symbols.threadLoopLock(thread_loop);
-    _ = symbols.streamDisconnect(stream);
-    symbols.streamDestroy(stream);
-    symbols.threadLoopUnlock(thread_loop);
-
-    symbols.threadLoopStop(thread_loop);
-    symbols.threadLoopDestroy(thread_loop);
+    for (&stream_buffer) |*stream| {
+        if (stream.handle != Stream.null_handle)
+            stream.deinit();
+    }
     symbols.deinit();
 }
 
@@ -142,15 +187,17 @@ pub fn createStream(
     onSamplesReady = samplesReadyCallback;
     onStreamCreateSuccess = onSuccess;
 
+    var stream_ptr: *Stream = newStream();
+
     _ = source_index_opt;
     _ = onFail;
 
-    thread_loop = symbols.threadLoopNew("Pipewire audio capture thread loop", null);
+    stream_ptr.thread_loop = symbols.threadLoopNew("Pipewire audio capture thread loop", null);
 
-    if (symbols.threadLoopStart(thread_loop) < 0) {
+    if (symbols.threadLoopStart(stream_ptr.thread_loop) < 0) {
         return error.PipewireConnectThreadFail;
     }
-    symbols.threadLoopLock(thread_loop);
+    symbols.threadLoopLock(stream_ptr.thread_loop);
 
     const stream_properties = symbols.propertiesNew(
         pw.keys.media_type,
@@ -162,12 +209,12 @@ pub fn createStream(
         @as(usize, 0), // NULL
     );
 
-    stream = symbols.streamNewSimple(
-        symbols.threadLoopGetLoop(thread_loop),
+    stream_ptr.stream = symbols.streamNewSimple(
+        symbols.threadLoopGetLoop(stream_ptr.thread_loop),
         "audio-capture",
         stream_properties,
         &stream_events,
-        null,
+        stream_ptr,
     ) orelse return error.PipewireStreamCreateFail;
 
     const AudioFormatParam = extern struct {
@@ -230,7 +277,7 @@ pub fn createStream(
 
     var param_ptr = &audio_format_param;
     var ret_code = symbols.streamConnect(
-        stream,
+        stream_ptr.stream,
         .input,
         pw.id_any,
         .{
@@ -246,7 +293,7 @@ pub fn createStream(
         return error.PipewireStreamConnectFail;
     }
 
-    symbols.threadLoopUnlock(thread_loop);
+    symbols.threadLoopUnlock(stream_ptr.thread_loop);
 }
 
 fn streamStart(stream_handle: StreamHandle) void {
@@ -260,13 +307,11 @@ fn streamPause(stream_handle: StreamHandle) void {
 }
 
 fn streamClose(stream_handle: StreamHandle) void {
-    _ = stream_handle;
-    @panic("Implement streamClose in audio_source pipewire backend");
+    streamFromHandle(stream_handle.index).deinit();
 }
 
 fn streamState(stream_handle: StreamHandle) StreamState {
-    _ = stream_handle;
-    @panic("Implement streamState in audio_source pipewire backend");
+    return streamFromHandle(stream_handle.index).state;
 }
 
 pub fn init(
@@ -306,14 +351,21 @@ fn onStateChangedCallback(_: ?*anyopaque, old: pw.StreamState, new: pw.StreamSta
     std.log.warn("pipewire state changed. \"{s}\". Error: {s}", .{ symbols.streamStateAsString(new), error_string });
 }
 
-fn onProcessCallback(_: ?*anyopaque) callconv(.C) void {
-    const buffer = symbols.streamDequeueBuffer(stream);
-    const buffer_bytes = buffer.*.buffer.*.datas[0].data orelse return;
-    const buffer_size_bytes = buffer.*.buffer.*.datas[0].chunk.*.size;
-    const sample_count = @divExact(buffer_size_bytes, @sizeOf(i16));
-    const stream_handle = StreamHandle{ .index = 0 };
-    onSamplesReady(stream_handle, @ptrCast([*]i16, @alignCast(2, buffer_bytes))[0..sample_count]);
-    _ = symbols.streamQueueBuffer(stream, buffer);
+fn onProcessCallback(userdata_opt: ?*anyopaque) callconv(.C) void {
+    if (userdata_opt) |userdata| {
+        const stream_ptr = @ptrCast(*const Stream, @alignCast(@alignOf(Stream), userdata));
+        assert(stream_ptr.handle != Stream.null_handle);
+        const buffer = symbols.streamDequeueBuffer(stream_ptr.stream);
+        const buffer_bytes = buffer.*.buffer.*.datas[0].data orelse return;
+        const buffer_size_bytes = buffer.*.buffer.*.datas[0].chunk.*.size;
+        const sample_count = @divExact(buffer_size_bytes, @sizeOf(i16));
+        const stream_handle = StreamHandle{ .index = 0 };
+        onSamplesReady(stream_handle, @ptrCast([*]i16, @alignCast(2, buffer_bytes))[0..sample_count]);
+        _ = symbols.streamQueueBuffer(stream_ptr.stream, buffer);
+    } else {
+        std.log.err("audio_source(pipewire): onProcessCallback userdata is null", .{});
+        assert(false);
+    }
 }
 
 fn onParamChangedCallback(_: ?*anyopaque, id: u32, params_opt: ?*const spa.Pod) callconv(.C) void {
