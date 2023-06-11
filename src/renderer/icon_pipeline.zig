@@ -116,6 +116,7 @@ pub const Font = fontana.Font(.{
 
 var texture_atlas: Atlas = undefined;
 var font: Font = undefined;
+var font_bold: Font = undefined;
 
 const pen_options = fontana.PenOptions{
     .pixel_format = .r8,
@@ -124,13 +125,31 @@ const pen_options = fontana.PenOptions{
 pub var pen_medium: Font.PenConfig(pen_options) = undefined;
 pub var pen_small: Font.PenConfig(pen_options) = undefined;
 
-const asset_path_font = "deps/reel-assets/fonts/Lato-Regular.ttf";
+pub var pen_bold_small: Font.PenConfig(pen_options) = undefined;
+
+const font_lato_regular_path = "deps/reel-assets/fonts/Lato-Regular.ttf";
+const font_lato_bold_path = "deps/reel-assets/fonts/Lato-Bold.ttf";
 const atlas_codepoints = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!.%:-/()";
 
 fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
     font = blk: {
-        const file_handle = std.fs.cwd().openFile(asset_path_font, .{ .mode = .read_only }) catch |err| {
-            std.log.err("Failed to open: \"{s}\". Error: {}", .{ asset_path_font, err });
+        const file_handle = std.fs.cwd().openFile(font_lato_regular_path, .{ .mode = .read_only }) catch |err| {
+            std.log.err("Failed to open: \"{s}\". Error: {}", .{ font_lato_regular_path, err });
+            return err;
+        };
+        defer file_handle.close();
+        const max_size_bytes = 10 * 1024 * 1024;
+        const font_file_bytes = file_handle.readToEndAlloc(allocator, max_size_bytes) catch return error.FontInitFail;
+        break :blk Font.construct(font_file_bytes) catch |err| {
+            std.log.err("Failed to initialize font. Error: {}", .{err});
+            return error.FontInitFail;
+        };
+    };
+    errdefer font.deinit(allocator);
+
+    font_bold = blk: {
+        const file_handle = std.fs.cwd().openFile(font_lato_bold_path, .{ .mode = .read_only }) catch |err| {
+            std.log.err("Failed to open: \"{s}\". Error: {}", .{ font_lato_bold_path, err });
             return err;
         };
         defer file_handle.close();
@@ -183,6 +202,22 @@ fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
         ) catch return error.FontPenInitFail;
     }
     errdefer pen_small.deinit(allocator);
+
+    {
+        const points_per_pixel = 100;
+        const font_point_size: f64 = 10.0;
+        pen_bold_small = font_bold.createPen(
+            pen_options,
+            allocator,
+            font_point_size,
+            points_per_pixel,
+            atlas_codepoints,
+            font_texture.width,
+            font_texture.pixels.ptr,
+            &texture_atlas,
+        ) catch return error.FontPenInitFail;
+    }
+    errdefer pen_bold_small.deinit(allocator);
 
     for (icon_path_list, 0..) |icon_path, i| {
         var image = zigimg.Image.fromFilePath(allocator, icon_path) catch return error.LoadAssetFail;
@@ -301,6 +336,7 @@ const PenSize = enum {
 const PenWeight = enum {
     light,
     regular,
+    bold,
 };
 
 pub fn calculateRenderedDimensions(text: []const u8, pen_size: PenSize) Dimensions2D(f32) {
@@ -333,6 +369,7 @@ pub fn overwriteText(
     color: RGBA(u8),
     comptime layout_anchor: LayoutAnchor,
 ) void {
+    const pre_vertices_used = vertices_used;
     assert(vertex_range.count % 4 == 0);
     assert(vertex_range.count >= text.len * 4);
     @memset(vertices_buffer[vertex_range.start..vertex_range.end()], Vertex.null_value);
@@ -347,6 +384,10 @@ pub fn overwriteText(
         .regular => switch (pen_size) {
             .small => &pen_small,
             .medium => &pen_medium,
+            else => unreachable,
+        },
+        .bold => switch (pen_size) {
+            .small => &pen_bold_small,
             else => unreachable,
         },
     };
@@ -379,6 +420,7 @@ pub fn overwriteText(
         .y = snapped_y,
     };
     _ = pen_ptr.write(text, snapped_placement, screen_scale, &text_writer_interface) catch unreachable;
+    assert(pre_vertices_used == vertices_used);
 }
 
 pub fn drawIcon(
@@ -443,6 +485,10 @@ pub fn drawText(
         .regular => switch (pen_size) {
             .small => &pen_small,
             .medium => &pen_medium,
+            else => unreachable,
+        },
+        .bold => switch (pen_size) {
+            .small => &pen_bold_small,
             else => unreachable,
         },
     };
