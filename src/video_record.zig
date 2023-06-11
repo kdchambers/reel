@@ -160,19 +160,6 @@ pub fn close() void {
     std.log.info("{d} seconds of video written", .{video_written / 1000.0});
 }
 
-fn getVaapiFormat(_: [*c]libav.CodecContext, pixel_formats: [*c]const i32) callconv(.C) i32 {
-    std.log.info("getVaapiFormat", .{});
-    const formats_ptr = @ptrCast([*]const libav.PixelFormat, pixel_formats);
-    var i: usize = 0;
-    while (formats_ptr[i] != .NONE) {
-        std.log.info("Format: {}", .{formats_ptr[i]});
-        if (formats_ptr[i] == .VAAPI)
-            return @enumToInt(libav.PixelFormat.VAAPI);
-    }
-    assert(false);
-    return @enumToInt(libav.PixelFormat.NONE);
-}
-
 pub fn open(options: RecordOptions) !void {
     context.dimensions = options.dimensions;
     if (builtin.mode == .Debug)
@@ -247,8 +234,7 @@ pub fn open(options: RecordOptions) !void {
     video_codec_context.framerate = .{ .num = @intCast(i32, options.fps), .den = 1 };
     video_codec_context.gop_size = 60;
     video_codec_context.max_b_frames = 4;
-    video_codec_context.pix_fmt = @enumToInt(libav.PixelFormat.VAAPI);
-    video_codec_context.get_format = &getVaapiFormat;
+    video_codec_context.pix_fmt = libav.libav.AV_PIX_FMT_VAAPI;
 
     const ret = libav.av_hwdevice_ctx_create(&hw_device_context, .vaapi, "/dev/dri/renderD128", null, 0);
     if (ret != 0) {
@@ -271,8 +257,10 @@ pub fn open(options: RecordOptions) !void {
 
     var frames_context = @ptrCast(*libav.HWFramesContext, @alignCast(@alignOf(libav.HWFramesContext), hw_frames_ref.data));
 
-    frames_context.format = @enumToInt(libav.PixelFormat.VAAPI);
-    frames_context.sw_format = @enumToInt(libav.PixelFormat.NV12);
+    // frames_context.format = @enumToInt(libav.PixelFormat.VAAPI);
+    // frames_context.sw_format = @enumToInt(libav.PixelFormat.NV12);
+    frames_context.format = libav.libav.AV_PIX_FMT_VAAPI;
+    frames_context.sw_format = libav.libav.AV_PIX_FMT_NV12;
     frames_context.width = video_codec_context.width;
     frames_context.height = video_codec_context.height;
     frames_context.initial_pool_size = 20;
@@ -610,7 +598,8 @@ fn writeVideoFrame(pixels: [*]const PixelType, frame_index: i64) !void {
     video_frame.linesize[0] = @intCast(i32, context.dimensions.width);
     video_frame.linesize[1] = @intCast(i32, context.dimensions.width);
 
-    video_frame.format = @enumToInt(libav.PixelFormat.NV12);
+    // video_frame.format = @enumToInt(libav.PixelFormat.NV12);
+    video_frame.format = libav.libav.AV_PIX_FMT_NV12;
     video_frame.width = @intCast(i32, context.dimensions.width);
     video_frame.height = @intCast(i32, context.dimensions.height);
     video_frame.pict_type = @enumToInt(libav.PictureType.none);
