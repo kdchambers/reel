@@ -389,7 +389,7 @@ pub const Selector = struct {
                 .height = extent.height,
             };
             _ = renderer.drawQuad(seperator_extent, self.border_color, .bottom_left);
-            _ = renderer.drawText(self.labels[0], middle_section_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
+            _ = renderer.drawText(self.labels[0], middle_section_extent, screen_scale, .small, .bold, RGBA(u8).white, .center);
         }
 
         const last_index = self.labels.len - 1;
@@ -421,7 +421,7 @@ pub const Selector = struct {
                 };
                 _ = renderer.drawQuad(seperator_extent, self.border_color, .bottom_left);
 
-                _ = renderer.drawText(self.labels[i], middle_section_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
+                _ = renderer.drawText(self.labels[i], middle_section_extent, screen_scale, .small, .bold, RGBA(u8).white, .center);
                 event_system.overwriteMouseEventSlot(&self.mouse_event_slots.get()[i], middle_section_extent, .{});
             }
         }
@@ -477,7 +477,7 @@ pub const Selector = struct {
             vertex_count += renderer.drawArc(bottom_right_arc_placement, radius, background_color, 0, 90, 10).count;
             self.vertex_range_buffer[last_index].count = vertex_count + 8;
 
-            _ = renderer.drawText(self.labels[last_index], middle_section_extent, screen_scale, .small, .regular, RGBA(u8).white, .center);
+            _ = renderer.drawText(self.labels[last_index], middle_section_extent, screen_scale, .small, .bold, RGBA(u8).white, .center);
         }
     }
 };
