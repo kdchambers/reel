@@ -412,7 +412,7 @@ pub fn overwriteText(
         .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
         .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
-    const y_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height);
+    const y_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.height);
     const y_threshold: f32 = y_increment / 2.0;
     const snapped_y = snap(text_placement.y, y_increment, y_threshold);
     const snapped_placement = Coordinates2D(f32){
@@ -442,12 +442,12 @@ pub fn drawIcon(
         .width = size * screen_scale.horizontal,
         .height = size * screen_scale.vertical,
     };
-    const texture_extent_pixels = icon_extent_list[@enumToInt(icon)];
+    const texture_extent_pixels = icon_extent_list[@intFromEnum(icon)];
     const texture_extent = Extent2D(f32){
-        .x = @intToFloat(f32, texture_extent_pixels.x),
-        .y = @intToFloat(f32, texture_extent_pixels.y),
-        .width = @intToFloat(f32, texture_extent_pixels.width),
-        .height = @intToFloat(f32, texture_extent_pixels.height),
+        .x = @floatFromInt(f32, texture_extent_pixels.x),
+        .y = @floatFromInt(f32, texture_extent_pixels.y),
+        .width = @floatFromInt(f32, texture_extent_pixels.width),
+        .height = @floatFromInt(f32, texture_extent_pixels.height),
     };
     return drawGreyscale(extent, texture_extent, color, anchor_point);
 }
@@ -514,7 +514,7 @@ pub fn drawText(
         .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
         .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
-    const y_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.height);
+    const y_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.height);
     const y_threshold: f32 = y_increment / 2.0;
     const snapped_y = snap(text_placement.y, y_increment, y_threshold);
     const snapped_placement = Coordinates2D(f32){
@@ -546,7 +546,7 @@ const TextWriterInterface = struct {
         screen_extent: geometry.Extent2D(f32),
         texture_extent: geometry.Extent2D(f32),
     ) f32 {
-        const x_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
+        const x_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.width);
         const x_threshold: f32 = x_increment / 4.0;
         const snapped_x = snap(screen_extent.x, x_increment, x_threshold);
         const truncated_extent = geometry.Extent3D(f32){
@@ -595,7 +595,7 @@ const BufferTextWriterInterface = struct {
         //
         // See comments in TextWriterInterface for notes on pixel snapping / clamping
         //
-        const x_increment: f32 = 2.0 / @intToFloat(f32, renderer.swapchain_dimensions.width);
+        const x_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.width);
         const x_threshold: f32 = x_increment / 4.0;
         const snapped_x = snap(screen_extent.x, x_increment, x_threshold);
         const truncated_extent = Extent3D(f32){
@@ -688,8 +688,8 @@ pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dim
             .{
                 .x = 0.0,
                 .y = 0.0,
-                .width = @intToFloat(f32, screen_dimensions.width),
-                .height = @intToFloat(f32, screen_dimensions.height),
+                .width = @floatFromInt(f32, screen_dimensions.width),
+                .height = @floatFromInt(f32, screen_dimensions.height),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
             },
@@ -1322,8 +1322,8 @@ fn createGraphicsPipeline(
         vk.Viewport{
             .x = 0.0,
             .y = 0.0,
-            .width = @intToFloat(f32, screen_dimensions.width),
-            .height = @intToFloat(f32, screen_dimensions.height),
+            .width = @floatFromInt(f32, screen_dimensions.width),
+            .height = @floatFromInt(f32, screen_dimensions.height),
             .min_depth = 0.0,
             .max_depth = 1.0,
         },

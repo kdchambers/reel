@@ -85,7 +85,7 @@ pub fn Encoder(comptime Encoding: type, comptime buffer_size: comptime_int) type
                     return null;
                 assert(self.index < self.buffer.len);
                 defer self.index += 1;
-                return @intToEnum(Encoding, self.buffer[self.index]);
+                return @enumFromInt(Encoding, self.buffer[self.index]);
             }
 
             pub fn readString(self: *@This()) []const u8 {
@@ -126,7 +126,7 @@ pub fn Encoder(comptime Encoding: type, comptime buffer_size: comptime_int) type
             if (self.used == self.buffer.len)
                 return error.EndOfBuffer;
             assert(self.used < self.buffer.len);
-            self.buffer[self.used] = @enumToInt(request);
+            self.buffer[self.used] = @intFromEnum(request);
             self.used += 1;
         }
 

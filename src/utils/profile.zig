@@ -69,7 +69,7 @@ pub fn Profiler(comptime profile_enabled: bool, comptime Action: type) type {
                 .action = action,
                 .parent = @intCast(u16, self.entry_index),
             };
-            const action_index = @enumToInt(action);
+            const action_index = @intFromEnum(action);
             self.stats_buffer[action_index].times_called += 1;
             self.entry_index = self.entry_count;
             self.entry_count += 1;
@@ -86,7 +86,7 @@ pub fn Profiler(comptime profile_enabled: bool, comptime Action: type) type {
             const action = self.entry_buffer[entry_index].action;
             self.entry_buffer[entry_index].start_ns = current - self.entry_buffer[entry_index].start_ns;
             assert(matched_action == action);
-            const action_index = @enumToInt(action);
+            const action_index = @intFromEnum(action);
             self.stats_buffer[action_index].slowest_ns = @max(self.stats_buffer[action_index].slowest_ns, duration);
             self.stats_buffer[action_index].fastest_ns = @min(self.stats_buffer[action_index].fastest_ns, duration);
 

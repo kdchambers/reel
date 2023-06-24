@@ -159,7 +159,7 @@ pub fn open(
     video_stream_index = ret_code;
     stream = format_context.streams[@intCast(usize, video_stream_index)];
 
-    const codec_id = @intToEnum(av.CodecID, stream.codecpar[0].codec_id);
+    const codec_id = @enumFromInt(av.CodecID, stream.codecpar[0].codec_id);
     decoder = av.codecFindDecoder(codec_id);
     if (decoder == null)
         return error.FindDecoderFail;

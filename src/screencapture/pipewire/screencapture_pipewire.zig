@@ -744,7 +744,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "u", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        const persist_mode: u32 = @enumToInt(PersistMode.until_revoked);
+        const persist_mode: u32 = @intFromEnum(PersistMode.until_revoked);
         if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @ptrCast(*const void, &persist_mode)) != 1)
             return error.AppendBasicFail;
 
@@ -1060,9 +1060,9 @@ fn openPipewireRemote(
 
 pub fn init() !void {
     comptime {
-        assert(c.DBUS_BUS_SESSION == @enumToInt(dbus.BusType.session));
-        assert(c.DBUS_BUS_SYSTEM == @enumToInt(dbus.BusType.system));
-        assert(c.DBUS_BUS_STARTER == @enumToInt(dbus.BusType.starter));
+        assert(c.DBUS_BUS_SESSION == @intFromEnum(dbus.BusType.session));
+        assert(c.DBUS_BUS_SYSTEM == @intFromEnum(dbus.BusType.system));
+        assert(c.DBUS_BUS_STARTER == @intFromEnum(dbus.BusType.starter));
     }
 
     const property_name = "AvailableCursorModes";

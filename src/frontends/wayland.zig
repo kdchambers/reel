@@ -411,8 +411,8 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             stream_drag_context = .{
                 .start_coordinates = renderer.sourceRelativePlacement(@intCast(u16, i)),
                 .start_mouse_coordinates = .{
-                    .x = @floatToInt(u16, @floor(mouse_coordinates.x)),
-                    .y = @floatToInt(u16, @floor(mouse_coordinates.y)),
+                    .x = @intFromFloat(u16, @floor(mouse_coordinates.x)),
+                    .y = @intFromFloat(u16, @floor(mouse_coordinates.y)),
                 },
                 .mouse_event_slot_index = slot,
                 .source_index = @intCast(u16, i),
@@ -508,7 +508,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     {
         const response = ui_state.activity_start_button.update();
         if (response.clicked) {
-            switch (@intToEnum(UIState.Activity, ui_state.activity_section.active_index)) {
+            switch (@enumFromInt(UIState.Activity, ui_state.activity_section.active_index)) {
                 .record => {
                     switch (model.recording_context.state) {
                         .idle => request_encoder.write(.record_start) catch unreachable,
@@ -610,7 +610,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                         std.log.info("Left edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .left,
-                            .start_value = @intToFloat(f32, relative_extent.x),
+                            .start_value = @floatFromInt(f32, relative_extent.x),
                             .start_mouse_value = @floatCast(f32, mouse_coordinates.x),
                             .source_index = @intCast(u16, i),
                         };
@@ -619,7 +619,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                         std.log.info("Right edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .right,
-                            .start_value = @intToFloat(f32, relative_extent.x + relative_extent.width),
+                            .start_value = @floatFromInt(f32, relative_extent.x + relative_extent.width),
                             .start_mouse_value = @floatCast(f32, mouse_coordinates.x),
                             .source_index = @intCast(u16, i),
                         };
@@ -628,7 +628,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                         std.log.info("Top edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .top,
-                            .start_value = @fabs(@intToFloat(f32, relative_extent.y) - @intToFloat(f32, relative_extent.height)),
+                            .start_value = @fabs(@floatFromInt(f32, relative_extent.y) - @floatFromInt(f32, relative_extent.height)),
                             .start_mouse_value = @floatCast(f32, mouse_coordinates.y),
                             .source_index = @intCast(u16, i),
                         };
@@ -637,7 +637,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
                         std.log.info("Bottom edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .bottom,
-                            .start_value = @intToFloat(f32, relative_extent.y),
+                            .start_value = @floatFromInt(f32, relative_extent.y),
                             .start_mouse_value = @floatCast(f32, mouse_coordinates.y),
                             .source_index = @intCast(u16, i),
                         };
@@ -781,8 +781,8 @@ pub fn deinit() void {
 
     const current_time_ns = std.time.nanoTimestamp();
     const rendering_duration = @intCast(u64, current_time_ns - rendering_start);
-    const rendering_duration_seconds = @intToFloat(f32, rendering_duration) / std.time.ns_per_s;
-    const frames_rendered_per_second = @intToFloat(f32, rendered_frame_count) / rendering_duration_seconds;
+    const rendering_duration_seconds = @floatFromInt(f32, rendering_duration) / std.time.ns_per_s;
+    const frames_rendered_per_second = @floatFromInt(f32, rendered_frame_count) / rendering_duration_seconds;
     std.log.info("wayland fps: {d}", .{frames_rendered_per_second});
 }
 
@@ -956,12 +956,12 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
             if (configure.width > 0 and configure.width != screen_dimensions.width) {
                 framebuffer_resized = true;
                 screen_dimensions.width = @intCast(u16, configure.width);
-                screen_scale.horizontal = 2.0 / @intToFloat(f32, screen_dimensions.width);
+                screen_scale.horizontal = 2.0 / @floatFromInt(f32, screen_dimensions.width);
             }
             if (configure.height > 0 and configure.height != screen_dimensions.height) {
                 framebuffer_resized = true;
                 screen_dimensions.height = @intCast(u16, configure.height);
-                screen_scale.vertical = 2.0 / @intToFloat(f32, screen_dimensions.height);
+                screen_scale.vertical = 2.0 / @floatFromInt(f32, screen_dimensions.height);
             }
             std.log.info("xdg_toplevel configure. Dimensions {d} x {d}", .{
                 screen_dimensions.width,
@@ -1040,8 +1040,8 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
 
             if (stream_drag_context) |drag| {
                 const mouse_delta = Coordinates2D(i32){
-                    .x = @floatToInt(i32, motion_mouse_x) - @intCast(i32, drag.start_mouse_coordinates.x),
-                    .y = @intCast(i32, drag.start_mouse_coordinates.y) - @floatToInt(i32, motion_mouse_y),
+                    .x = @intFromFloat(i32, motion_mouse_x) - @intCast(i32, drag.start_mouse_coordinates.x),
+                    .y = @intCast(i32, drag.start_mouse_coordinates.y) - @intFromFloat(i32, motion_mouse_y),
                 };
                 const new_placement = Coordinates2D(u16){
                     .x = @intCast(u16, @max(0, drag.start_coordinates.x + mouse_delta.x)),
@@ -1090,7 +1090,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 .y = mouse_coordinates.y,
             };
 
-            const mouse_button = @intToEnum(MouseButton, button.button);
+            const mouse_button = @enumFromInt(MouseButton, button.button);
             button_clicked = .none;
 
             if (mouse_button == .left)
@@ -1107,12 +1107,12 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
             if (mouse_button == .left and button_state == .released) {
                 if (stream_drag_context) |drag| {
                     const mouse_delta = Coordinates2D(i32){
-                        .x = @floatToInt(i32, mouse_coordinates.x) - @intCast(i32, drag.start_mouse_coordinates.x),
-                        .y = @intCast(i32, drag.start_mouse_coordinates.y) - @floatToInt(i32, mouse_coordinates.y),
+                        .x = @intFromFloat(i32, mouse_coordinates.x) - @intCast(i32, drag.start_mouse_coordinates.x),
+                        .y = @intCast(i32, drag.start_mouse_coordinates.y) - @intFromFloat(i32, mouse_coordinates.y),
                     };
                     const extent_ptr: *Extent2D(f32) = &drag.mouse_event_slot_index.getPtr().extent;
-                    extent_ptr.x += @intToFloat(f32, mouse_delta.x) * screen_scale.horizontal;
-                    extent_ptr.y += -@intToFloat(f32, mouse_delta.y) * screen_scale.vertical;
+                    extent_ptr.x += @floatFromInt(f32, mouse_delta.x) * screen_scale.horizontal;
+                    extent_ptr.y += -@floatFromInt(f32, mouse_delta.y) * screen_scale.vertical;
                     stream_drag_context = null;
                 }
 
@@ -1130,8 +1130,8 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
             });
 
             {
-                const mouse_x = @floatToInt(u16, mouse_coordinates.x);
-                const mouse_y = @floatToInt(u16, mouse_coordinates.y);
+                const mouse_x = @intFromFloat(u16, mouse_coordinates.x);
+                const mouse_y = @intFromFloat(u16, mouse_coordinates.y);
 
                 std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{
                     mouse_x,
@@ -1187,15 +1187,15 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 }
             }
 
-            if (@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height)
+            if (@intFromFloat(u16, mouse_coordinates.y) > screen_dimensions.height)
                 return;
 
-            if (@floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width)
+            if (@intFromFloat(u16, mouse_coordinates.x) > screen_dimensions.width)
                 return;
 
             if (ui_state.window_decoration_requested and mouse_button == .left) {
                 // Start interactive window move if mouse coordinates are in window decorations bounds
-                if (@floatToInt(u32, mouse_coordinates.y) <= decoration_height_pixels) {
+                if (@intFromFloat(u32, mouse_coordinates.y) <= decoration_height_pixels) {
                     xdg_toplevel.move(wayland_core.seat, button.serial);
                 }
             }

@@ -334,7 +334,7 @@ fn onStreamStateCallback(pulse_stream: *pa.Stream, userdata: ?*anyopaque) callco
                 //
                 // Calculate the index based on where the pointer is positioned in `stream_buffer`
                 //
-                .index = @intCast(u32, @divExact(@ptrToInt(stream) - @ptrToInt(&stream_buffer[0]), @sizeOf(Stream))),
+                .index = @intCast(u32, @divExact(@intFromPtr(stream) - @intFromPtr(&stream_buffer[0]), @sizeOf(Stream))),
             });
         },
         .failed => {
@@ -400,7 +400,7 @@ fn streamReadCallback(pulse_stream: *pa.Stream, bytes_available_count: u64, user
             //
             // Calculate the index based on where the pointer is positioned in `stream_buffer`
             //
-            StreamHandle{ .index = @intCast(u32, @divExact(@ptrToInt(stream) - @ptrToInt(&stream_buffer[0]), @sizeOf(Stream))) },
+            StreamHandle{ .index = @intCast(u32, @divExact(@intFromPtr(stream) - @intFromPtr(&stream_buffer[0]), @sizeOf(Stream))) },
             pcm_buffer[0..@divExact(bytes_read_count, @sizeOf(i16))],
         );
     } else {

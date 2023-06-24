@@ -320,7 +320,7 @@ pub fn drawArc(
     const degreesToRadians = std.math.degreesToRadians;
 
     const base_rotation = degreesToRadians(f32, rotation_begin);
-    const rotation_per_point = degreesToRadians(f32, rotation_length / @intToFloat(f32, point_count - 1));
+    const rotation_per_point = degreesToRadians(f32, rotation_length / @floatFromInt(f32, point_count - 1));
 
     var vertices = vertices_buffer[vertices_used .. vertices_used + point_count + 1];
 
@@ -340,7 +340,7 @@ pub fn drawArc(
 
     var i: u16 = 1;
     while (i < point_count) : (i += 1) {
-        const angle_radians: f64 = base_rotation + (rotation_per_point * @intToFloat(f32, i));
+        const angle_radians: f64 = base_rotation + (rotation_per_point * @floatFromInt(f32, i));
         vertices[i + 1] = Vertex{
             .x = @floatCast(f32, center.x + (radius.h * @cos(angle_radians))),
             .y = @floatCast(f32, center.y + (radius.v * @sin(angle_radians))),
@@ -389,8 +389,8 @@ pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dim
             .{
                 .x = 0.0,
                 .y = 0.0,
-                .width = @intToFloat(f32, screen_dimensions.width),
-                .height = @intToFloat(f32, screen_dimensions.height),
+                .width = @floatFromInt(f32, screen_dimensions.width),
+                .height = @floatFromInt(f32, screen_dimensions.height),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
             },
@@ -558,8 +558,8 @@ fn createGraphicsPipeline(
         vk.Viewport{
             .x = 0.0,
             .y = 0.0,
-            .width = @intToFloat(f32, screen_dimensions.width),
-            .height = @intToFloat(f32, screen_dimensions.height),
+            .width = @floatFromInt(f32, screen_dimensions.width),
+            .height = @floatFromInt(f32, screen_dimensions.height),
             .min_depth = 0.0,
             .max_depth = 1.0,
         },

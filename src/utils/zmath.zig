@@ -963,7 +963,7 @@ test "zmath.round" {
         try expect(approxEqAbs(vr, fr, 0.0));
         try expect(approxEqAbs(vr8, fr8, 0.0));
         try expect(approxEqAbs(vr16, fr16, 0.0));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -1001,7 +1001,7 @@ pub fn trunc(v: anytype) @TypeOf(v) {
         }
     } else {
         const mask = abs(v) < splatNoFraction(T);
-        const result = floatToIntAndBack(v);
+        const result = intFromFloatAndBack(v);
         return select(mask, result, v);
     }
 }
@@ -1052,7 +1052,7 @@ test "zmath.trunc" {
         try expect(approxEqAbs(vr, fr, 0.0));
         try expect(approxEqAbs(vr8, fr8, 0.0));
         try expect(approxEqAbs(vr16, fr16, 0.0));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -1090,7 +1090,7 @@ pub fn floor(v: anytype) @TypeOf(v) {
         }
     } else {
         const mask = abs(v) < splatNoFraction(T);
-        var result = floatToIntAndBack(v);
+        var result = intFromFloatAndBack(v);
         const larger_mask = result > v;
         const larger = select(larger_mask, splat(T, -1.0), splat(T, 0.0));
         result = result + larger;
@@ -1144,7 +1144,7 @@ test "zmath.floor" {
         try expect(approxEqAbs(vr, fr, 0.0));
         try expect(approxEqAbs(vr8, fr8, 0.0));
         try expect(approxEqAbs(vr16, fr16, 0.0));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -1182,7 +1182,7 @@ pub fn ceil(v: anytype) @TypeOf(v) {
         }
     } else {
         const mask = abs(v) < splatNoFraction(T);
-        var result = floatToIntAndBack(v);
+        var result = intFromFloatAndBack(v);
         const smaller_mask = result < v;
         const smaller = select(smaller_mask, splat(T, -1.0), splat(T, 0.0));
         result = result - smaller;
@@ -1236,7 +1236,7 @@ test "zmath.ceil" {
         try expect(approxEqAbs(vr, fr, 0.0));
         try expect(approxEqAbs(vr8, fr8, 0.0));
         try expect(approxEqAbs(vr16, fr16, 0.0));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -1409,7 +1409,7 @@ pub inline fn swizzle(
     comptime z: F32x4Component,
     comptime w: F32x4Component,
 ) F32x4 {
-    return @shuffle(f32, v, undefined, [4]i32{ @enumToInt(x), @enumToInt(y), @enumToInt(z), @enumToInt(w) });
+    return @shuffle(f32, v, undefined, [4]i32{ @intFromEnum(x), @intFromEnum(y), @intFromEnum(z), @intFromEnum(w) });
 }
 
 pub inline fn mod(v0: anytype, v1: anytype) @TypeOf(v0, v1) {
@@ -1512,7 +1512,7 @@ test "zmath.sin" {
         try expect(approxEqAbs(vr, fr, epsilon));
         try expect(approxEqAbs(vr8, fr8, epsilon));
         try expect(approxEqAbs(vr16, fr16, epsilon));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -1560,7 +1560,7 @@ test "zmath.cos" {
         try expect(approxEqAbs(vr, fr, epsilon));
         try expect(approxEqAbs(vr8, fr8, epsilon));
         try expect(approxEqAbs(vr16, fr16, epsilon));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -1657,7 +1657,7 @@ test "zmath.sincos32xN" {
         try expect(approxEqAbs(sc[1], c4, epsilon));
         try expect(approxEqAbs(sc8[1], c8, epsilon));
         try expect(approxEqAbs(sc16[1], c16, epsilon));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -3349,7 +3349,7 @@ pub fn hsvToRgb(hsv: F32x4) F32x4 {
     const q = v * (f32x4s(1.0) - f * s);
     const t = v * (f32x4s(1.0) - (f32x4s(1.0) - f) * s);
 
-    const ii = @floatToInt(i32, mod(i, f32x4s(6.0))[0]);
+    const ii = @intFromFloat(i32, mod(i, f32x4s(6.0))[0]);
     const rgb = switch (ii) {
         0 => blk: {
             const vt = select(boolx4(true, false, false, false), v, t);
@@ -3586,7 +3586,7 @@ test "zmath.sincos32" {
         try expect(math.approxEqAbs(f32, sc[1], c, epsilon));
         try expect(math.approxEqAbs(f32, s0, s, epsilon));
         try expect(math.approxEqAbs(f32, c0, c, epsilon));
-        f += 0.12345 * @intToFloat(f32, i);
+        f += 0.12345 * @floatFromInt(f32, i);
     }
 }
 
@@ -3640,7 +3640,7 @@ test "zmath.asin32" {
         try expect(approxEqAbs(r4, splat(F32x4, r1), epsilon));
         try expect(approxEqAbs(r8, splat(F32x8, r1), epsilon));
         try expect(approxEqAbs(r16, splat(F32x16, r1), epsilon));
-        f += 0.09 * @intToFloat(f32, i);
+        f += 0.09 * @floatFromInt(f32, i);
     }
 }
 
@@ -3694,14 +3694,14 @@ test "zmath.acos32" {
         try expect(approxEqAbs(r4, splat(F32x4, r1), epsilon));
         try expect(approxEqAbs(r8, splat(F32x8, r1), epsilon));
         try expect(approxEqAbs(r16, splat(F32x16, r1), epsilon));
-        f += 0.09 * @intToFloat(f32, i);
+        f += 0.09 * @floatFromInt(f32, i);
     }
 }
 
 pub fn modAngle32(in_angle: f32) f32 {
     const angle = in_angle + math.pi;
     var temp: f32 = @fabs(angle);
-    temp = temp - (2.0 * math.pi * @intToFloat(f32, @floatToInt(i32, temp / math.pi)));
+    temp = temp - (2.0 * math.pi * @floatFromInt(f32, @intFromFloat(i32, temp / math.pi)));
     temp = temp - math.pi;
     if (angle < 0.0) {
         temp = -temp;
@@ -4233,7 +4233,7 @@ pub fn fftInitUnityTable(out_unity_table: []F32x4) void {
 
     const v0123 = f32x4(0.0, 1.0, 2.0, 3.0);
     var length = out_unity_table.len / 4;
-    var vlstep = f32x4s(0.5 * math.pi / @intToFloat(f32, length));
+    var vlstep = f32x4s(0.5 * math.pi / @floatFromInt(f32, length));
 
     while (true) {
         length /= 4;
@@ -4311,8 +4311,8 @@ pub fn ifft(re: []F32x4, im: []const F32x4, unity_table: []const F32x4) void {
     var re_temp = re_temp_storage[0..re.len];
     var im_temp = im_temp_storage[0..im.len];
 
-    const rnp = f32x4s(1.0 / @intToFloat(f32, length));
-    const rnm = f32x4s(-1.0 / @intToFloat(f32, length));
+    const rnp = f32x4s(1.0 / @floatFromInt(f32, length));
+    const rnm = f32x4s(-1.0 / @floatFromInt(f32, length));
 
     for (re, 0..) |_, i| {
         re_temp[i] = re[i] * rnp;
@@ -4382,7 +4382,7 @@ test "zmath.ifft" {
         var im = [_]F32x4{f32x4s(0.0)} ** 128;
 
         for (&re, 0..) |*v, i| {
-            const f = @intToFloat(f32, i * 4);
+            const f = @floatFromInt(f32, i * 4);
             v.* = f32x4(f + 1.0, f + 2.0, f + 3.0, f + 4.0);
         }
 
@@ -4390,14 +4390,14 @@ test "zmath.ifft" {
         fft(re[0..], im[0..], unity_table[0..512]);
 
         for (re, 0..) |v, i| {
-            const f = @intToFloat(f32, i * 4);
+            const f = @floatFromInt(f32, i * 4);
             try expect(!approxEqAbs(v, f32x4(f + 1.0, f + 2.0, f + 3.0, f + 4.0), epsilon));
         }
 
         ifft(re[0..], im[0..], unity_table[0..512]);
 
         for (re, 0..) |v, i| {
-            const f = @intToFloat(f32, i * 4);
+            const f = @floatFromInt(f32, i * 4);
             try expect(approxEqAbs(v, f32x4(f + 1.0, f + 2.0, f + 3.0, f + 4.0), epsilon));
         }
     }
@@ -4431,7 +4431,7 @@ inline fn splatAbsMask(comptime T: type) T {
     return @splat(veclen(T), @bitCast(f32, @as(u32, 0x7fff_ffff)));
 }
 
-fn floatToIntAndBack(v: anytype) @TypeOf(v) {
+fn intFromFloatAndBack(v: anytype) @TypeOf(v) {
     // This routine won't handle nan, inf and numbers greater than 8_388_608.0 (will generate undefined values).
     @setRuntimeSafety(false);
 
@@ -4442,29 +4442,29 @@ fn floatToIntAndBack(v: anytype) @TypeOf(v) {
     comptime var i: u32 = 0;
     // vcvttps2dq
     inline while (i < len) : (i += 1) {
-        vi32[i] = @floatToInt(i32, v[i]);
+        vi32[i] = @intFromFloat(i32, v[i]);
     }
 
     var vf32: [len]f32 = undefined;
     i = 0;
     // vcvtdq2ps
     inline while (i < len) : (i += 1) {
-        vf32[i] = @intToFloat(f32, vi32[i]);
+        vf32[i] = @floatFromInt(f32, vi32[i]);
     }
 
     return vf32;
 }
-test "zmath.floatToIntAndBack" {
+test "zmath.intFromFloatAndBack" {
     {
-        const v = floatToIntAndBack(f32x4(1.1, 2.9, 3.0, -4.5));
+        const v = intFromFloatAndBack(f32x4(1.1, 2.9, 3.0, -4.5));
         try expect(approxEqAbs(v, f32x4(1.0, 2.0, 3.0, -4.0), 0.0));
     }
     {
-        const v = floatToIntAndBack(f32x8(1.1, 2.9, 3.0, -4.5, 2.5, -2.5, 1.1, -100.2));
+        const v = intFromFloatAndBack(f32x8(1.1, 2.9, 3.0, -4.5, 2.5, -2.5, 1.1, -100.2));
         try expect(approxEqAbs(v, f32x8(1.0, 2.0, 3.0, -4.0, 2.0, -2.0, 1.0, -100.0), 0.0));
     }
     {
-        const v = floatToIntAndBack(f32x4(math.inf_f32, 2.9, math.nan_f32, math.qnan_f32));
+        const v = intFromFloatAndBack(f32x4(math.inf_f32, 2.9, math.nan_f32, math.qnan_f32));
         try expect(v[1] == 2.0);
     }
 }

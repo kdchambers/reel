@@ -152,11 +152,11 @@ pub fn close() void {
     state = .closed;
     std.log.info("video_encoder: shutdown successful", .{});
 
-    const audio_written = @intToFloat(f32, samples_written) / 44100.0;
+    const audio_written = @floatFromInt(f32, samples_written) / 44100.0;
     std.log.info("{d} seconds of audio written", .{audio_written});
 
     const ms_per_frame: f32 = 1000.0 / 60.0;
-    const video_written = @intToFloat(f32, video_frames_written) * ms_per_frame;
+    const video_written = @floatFromInt(f32, video_frames_written) * ms_per_frame;
     std.log.info("{d} seconds of video written", .{video_written / 1000.0});
 }
 
@@ -228,7 +228,7 @@ pub fn open(options: RecordOptions) !void {
 
     video_codec_context.width = @intCast(i32, options.dimensions.width);
     video_codec_context.height = @intCast(i32, options.dimensions.height);
-    video_codec_context.color_range = @enumToInt(libav.ColorRange.jpeg);
+    video_codec_context.color_range = @intFromEnum(libav.ColorRange.jpeg);
     video_codec_context.bit_rate = 1024 * 1024 * 16;
     video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
     video_codec_context.framerate = .{ .num = @intCast(i32, options.fps), .den = 1 };
@@ -257,8 +257,8 @@ pub fn open(options: RecordOptions) !void {
 
     var frames_context = @ptrCast(*libav.HWFramesContext, @alignCast(@alignOf(libav.HWFramesContext), hw_frames_ref.data));
 
-    // frames_context.format = @enumToInt(libav.PixelFormat.VAAPI);
-    // frames_context.sw_format = @enumToInt(libav.PixelFormat.NV12);
+    // frames_context.format = @intFromEnum(libav.PixelFormat.VAAPI);
+    // frames_context.sw_format = @intFromEnum(libav.PixelFormat.NV12);
     frames_context.format = libav.libav.AV_PIX_FMT_VAAPI;
     frames_context.sw_format = libav.libav.AV_PIX_FMT_NV12;
     frames_context.width = video_codec_context.width;
@@ -328,7 +328,7 @@ pub fn open(options: RecordOptions) !void {
         std.log.info("Supported Audio sample formats", .{});
         var i: usize = 0;
         while (sample_formats[i] != -1) : (i += 1) {
-            std.log.info("{s}", .{@tagName(@intToEnum(libav.SampleFormat, sample_formats[i]))});
+            std.log.info("{s}", .{@tagName(@enumFromInt(libav.SampleFormat, sample_formats[i]))});
         }
     }
 
@@ -344,7 +344,7 @@ pub fn open(options: RecordOptions) !void {
     audio_codec_context.sample_rate = 44100;
     audio_codec_context.channels = 2;
     audio_codec_context.channel_layout = libav.ChannelLayout.stereo;
-    audio_codec_context.sample_fmt = @enumToInt(libav.SampleFormat.fltp);
+    audio_codec_context.sample_fmt = @intFromEnum(libav.SampleFormat.fltp);
     audio_codec_context.bit_rate = 320000;
 
     var audio_codec_options: ?*libav.Dictionary = null;
@@ -360,7 +360,7 @@ pub fn open(options: RecordOptions) !void {
 
     audio_frame = libav.frameAlloc() orelse return error.AllocateFrameFailed;
 
-    audio_frame.format = @enumToInt(libav.SampleFormat.fltp);
+    audio_frame.format = @intFromEnum(libav.SampleFormat.fltp);
     audio_frame.channel_layout = libav.ChannelLayout.stereo;
     audio_frame.nb_samples = audio_codec_context.frame_size;
 
@@ -419,7 +419,7 @@ pub fn open(options: RecordOptions) !void {
         audio_codec_context.bit_rate,
         audio_codec_context.channels,
         audio_codec_context.channel_layout,
-        @intToEnum(libav.SampleFormat, audio_codec_context.sample_fmt),
+        @enumFromInt(libav.SampleFormat, audio_codec_context.sample_fmt),
     });
 
     processing_thread = try std.Thread.spawn(.{}, eventLoop, .{});
@@ -488,7 +488,7 @@ fn finishVideoStream(frame_index: i64) void {
 fn encodeAudioFrames(samples: []const f32) !void {
     assert(samples.len % 2048 == 0);
 
-    audio_frame.format = @enumToInt(libav.SampleFormat.fltp);
+    audio_frame.format = @intFromEnum(libav.SampleFormat.fltp);
     audio_frame.nb_samples = audio_codec_context.frame_size;
 
     assert(audio_codec_context.frame_size == 1024);
@@ -598,16 +598,16 @@ fn writeVideoFrame(pixels: [*]const PixelType, frame_index: i64) !void {
     video_frame.linesize[0] = @intCast(i32, context.dimensions.width);
     video_frame.linesize[1] = @intCast(i32, context.dimensions.width);
 
-    // video_frame.format = @enumToInt(libav.PixelFormat.NV12);
+    // video_frame.format = @intFromEnum(libav.PixelFormat.NV12);
     video_frame.format = libav.libav.AV_PIX_FMT_NV12;
     video_frame.width = @intCast(i32, context.dimensions.width);
     video_frame.height = @intCast(i32, context.dimensions.height);
-    video_frame.pict_type = @enumToInt(libav.PictureType.none);
+    video_frame.pict_type = @intFromEnum(libav.PictureType.none);
 
     video_frames_written += 1;
     video_frame.pts = frame_index;
 
-    video_frame.pict_type = @enumToInt(libav.PictureType.none);
+    video_frame.pict_type = @intFromEnum(libav.PictureType.none);
 
     const ret_code = libav.av_hwframe_transfer_data(hardware_frame, video_frame, 0);
     if (ret_code < 0) {

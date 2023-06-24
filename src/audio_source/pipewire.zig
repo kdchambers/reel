@@ -243,17 +243,17 @@ pub fn createStream(
             .{
                 .key = .media_type,
                 .kind = .id,
-                .value = @enumToInt(spa.MediaType.audio),
+                .value = @intFromEnum(spa.MediaType.audio),
             },
             .{
                 .key = .media_subtype,
                 .kind = .id,
-                .value = @enumToInt(spa.MediaSubtype.raw),
+                .value = @intFromEnum(spa.MediaSubtype.raw),
             },
             .{
                 .key = .audio_format,
                 .kind = .id,
-                .value = @enumToInt(spa.AudioFormat.s16_le),
+                .value = @intFromEnum(spa.AudioFormat.s16_le),
             },
             .{
                 .key = .audio_rate,
@@ -269,8 +269,8 @@ pub fn createStream(
                 .key = .audio_position,
                 .size = 16,
                 .kind = .array,
-                .value = @enumToInt(spa.AudioChannel.fr),
-                .padding = @enumToInt(spa.AudioChannel.fl),
+                .value = @intFromEnum(spa.AudioChannel.fr),
+                .padding = @intFromEnum(spa.AudioChannel.fl),
             },
         },
     };
@@ -370,14 +370,14 @@ fn onProcessCallback(userdata_opt: ?*anyopaque) callconv(.C) void {
 
 fn onParamChangedCallback(_: ?*anyopaque, id: u32, params_opt: ?*const spa.Pod) callconv(.C) void {
     const params = params_opt orelse return;
-    if (id == @enumToInt(spa.ParamType.format)) {
+    if (id == @intFromEnum(spa.ParamType.format)) {
         var media_type: u32 = 0;
         var media_subtype: u32 = 0;
 
         if (spa.formatParse(params, &media_type, &media_subtype) < 0) {
             return;
         }
-        if (@intToEnum(spa.MediaType, media_type) != .audio or @intToEnum(spa.MediaSubtype, media_subtype) != .raw) {
+        if (@enumFromInt(spa.MediaType, media_type) != .audio or @enumFromInt(spa.MediaSubtype, media_subtype) != .raw) {
             std.log.info("Rejecting non-raw audio format", .{});
             return;
         }

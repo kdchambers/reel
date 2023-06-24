@@ -152,9 +152,9 @@ pub fn createBestInterface(onFrameReady: *const OnFrameReadyFn) ?Interface {
     const backends = detectBackends();
     var best_match_index: u16 = std.math.maxInt(u16);
     for (backends) |backend| {
-        best_match_index = @min(best_match_index, @enumToInt(backend));
+        best_match_index = @min(best_match_index, @intFromEnum(backend));
     }
-    const selected_backend = @intToEnum(Backend, best_match_index);
+    const selected_backend = @enumFromInt(Backend, best_match_index);
     std.log.info("Screencast backend selected: {s}", .{
         @tagName(selected_backend),
     });

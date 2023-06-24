@@ -186,17 +186,17 @@ pub fn videoSourceExtents(screen_scale: ScaleFactor2D(f32)) []Extent3D(f32) {
 
 pub fn sourceRelativePlacement(source_index: u16) Coordinates2D(u16) {
     return .{
-        .x = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
-        .y = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
+        .x = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
+        .y = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
     };
 }
 
 pub fn sourceRelativeExtent(source_index: u16) Extent2D(u16) {
     return .{
-        .x = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
-        .y = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
-        .width = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.width * canvas_dimensions.width),
-        .height = @floatToInt(u16, draw_context_buffer[source_index].relative_extent.height * canvas_dimensions.height),
+        .x = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
+        .y = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
+        .width = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.width * canvas_dimensions.width),
+        .height = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.height * canvas_dimensions.height),
     };
 }
 
@@ -204,8 +204,8 @@ pub fn moveSource(source_index: u16, placement: Coordinates2D(u16)) void {
     const relative_extent_ptr: *Extent2D(f32) = &draw_context_buffer[source_index].relative_extent;
     const max_x: f32 = 1.0 - relative_extent_ptr.width;
     const max_y: f32 = 1.0 - relative_extent_ptr.height;
-    relative_extent_ptr.x = @max(0.0, @min(max_x, @intToFloat(f32, placement.x) / canvas_dimensions.width));
-    relative_extent_ptr.y = @max(0.0, @min(max_y, @intToFloat(f32, placement.y) / canvas_dimensions.height));
+    relative_extent_ptr.x = @max(0.0, @min(max_x, @floatFromInt(f32, placement.x) / canvas_dimensions.width));
+    relative_extent_ptr.y = @max(0.0, @min(max_y, @floatFromInt(f32, placement.y) / canvas_dimensions.height));
     assert(relative_extent_ptr.x >= 0.0);
     assert(relative_extent_ptr.x <= 1.0);
     assert(relative_extent_ptr.y >= 0.0);
@@ -392,8 +392,8 @@ pub fn createStream(
     const stream_handle = assignNewStreamHandle();
     const stream_ptr: *Stream = streamFromHandle(stream_handle);
     stream_ptr.dimensions = .{
-        .width = @intToFloat(f32, source_dimensions.width),
-        .height = @intToFloat(f32, source_dimensions.height),
+        .width = @floatFromInt(f32, source_dimensions.width),
+        .height = @floatFromInt(f32, source_dimensions.height),
     };
 
     std.log.info("renderer: Adding stream #{d} with dimensions: {d} x {d}", .{
@@ -575,8 +575,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         assert(relative_extent.y + relative_extent.height <= 1.0);
 
         const scale_factor = ScaleFactor2D(f32){
-            .horizontal = stream_ptr.dimensions.width / @intToFloat(f32, unscaled_canvas_dimensions.width),
-            .vertical = stream_ptr.dimensions.height / @intToFloat(f32, unscaled_canvas_dimensions.height),
+            .horizontal = stream_ptr.dimensions.width / @floatFromInt(f32, unscaled_canvas_dimensions.width),
+            .vertical = stream_ptr.dimensions.height / @floatFromInt(f32, unscaled_canvas_dimensions.height),
         };
         //
         // Assert we're not upscaling the image as that isn't supported currently
@@ -594,8 +594,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         var src_region_offsets = [2]vk.Offset3D{
             .{ .x = 0, .y = 0, .z = 0 },
             .{
-                .x = @floatToInt(i32, stream_ptr.dimensions.width),
-                .y = @floatToInt(i32, stream_ptr.dimensions.height),
+                .x = @intFromFloat(i32, stream_ptr.dimensions.width),
+                .y = @intFromFloat(i32, stream_ptr.dimensions.height),
                 .z = 1,
             },
         };
@@ -616,13 +616,13 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
         const dst_region_offsets = [2]vk.Offset3D{
             .{
-                .x = @floatToInt(i32, @floor(top_left.x)),
-                .y = @floatToInt(i32, @floor(top_left.y)),
+                .x = @intFromFloat(i32, @floor(top_left.x)),
+                .y = @intFromFloat(i32, @floor(top_left.y)),
                 .z = 0,
             },
             .{
-                .x = @floatToInt(i32, @floor(bottom_right.x)),
-                .y = @floatToInt(i32, @floor(bottom_right.y)),
+                .x = @intFromFloat(i32, @floor(bottom_right.x)),
+                .y = @intFromFloat(i32, @floor(bottom_right.y)),
                 .z = 1,
             },
         };
@@ -667,20 +667,20 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         var src_region_offsets = [2]vk.Offset3D{
             .{ .x = 0, .y = 0, .z = 0 },
             .{
-                .x = @floatToInt(i32, stream_ptr.dimensions.width),
-                .y = @floatToInt(i32, stream_ptr.dimensions.height),
+                .x = @intFromFloat(i32, stream_ptr.dimensions.width),
+                .y = @intFromFloat(i32, stream_ptr.dimensions.height),
                 .z = 1,
             },
         };
 
         const scale_factor = ScaleFactor2D(f32){
-            .horizontal = stream_ptr.dimensions.width / @intToFloat(f32, unscaled_canvas_dimensions.width),
-            .vertical = stream_ptr.dimensions.height / @intToFloat(f32, unscaled_canvas_dimensions.height),
+            .horizontal = stream_ptr.dimensions.width / @floatFromInt(f32, unscaled_canvas_dimensions.width),
+            .vertical = stream_ptr.dimensions.height / @floatFromInt(f32, unscaled_canvas_dimensions.height),
         };
 
         const dst_dimensions = Dimensions2D(f32){
-            .width = @intToFloat(f32, unscaled_canvas_dimensions.width),
-            .height = @intToFloat(f32, unscaled_canvas_dimensions.height),
+            .width = @floatFromInt(f32, unscaled_canvas_dimensions.width),
+            .height = @floatFromInt(f32, unscaled_canvas_dimensions.height),
         };
 
         const top_left = Coordinates2D(f32){
@@ -694,13 +694,13 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
         const dst_region_offsets = [2]vk.Offset3D{
             .{
-                .x = @floatToInt(i32, @floor(top_left.x)),
-                .y = @floatToInt(i32, @floor(top_left.y)),
+                .x = @intFromFloat(i32, @floor(top_left.x)),
+                .y = @intFromFloat(i32, @floor(top_left.y)),
                 .z = 0,
             },
             .{
-                .x = @floatToInt(i32, @floor(bottom_right.x)),
-                .y = @floatToInt(i32, @floor(bottom_right.y)),
+                .x = @intFromFloat(i32, @floor(bottom_right.x)),
+                .y = @intFromFloat(i32, @floor(bottom_right.y)),
                 .z = 1,
             },
         };
@@ -795,8 +795,8 @@ pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dim
             .{
                 .x = 0.0,
                 .y = 0.0,
-                .width = @intToFloat(f32, screen_dimensions.width),
-                .height = @intToFloat(f32, screen_dimensions.height),
+                .width = @floatFromInt(f32, screen_dimensions.width),
+                .height = @floatFromInt(f32, screen_dimensions.height),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
             },
@@ -847,8 +847,8 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
     assert(dimensions.width > 0);
     assert(dimensions.height > 0);
 
-    const width_equal = (dimensions.width == @floatToInt(u32, canvas_dimensions.width));
-    const height_equal = (dimensions.height == @floatToInt(u32, canvas_dimensions.height));
+    const width_equal = (dimensions.width == @intFromFloat(u32, canvas_dimensions.width));
+    const height_equal = (dimensions.height == @intFromFloat(u32, canvas_dimensions.height));
 
     if (width_equal and height_equal)
         return;
@@ -867,7 +867,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
         //
         std.time.sleep(std.time.ns_per_ms * 1);
 
-        const current_pixel_count = @floatToInt(usize, canvas_dimensions.width) * @floatToInt(usize, canvas_dimensions.height);
+        const current_pixel_count = @intFromFloat(usize, canvas_dimensions.width) * @intFromFloat(usize, canvas_dimensions.height);
         device_dispatch.destroyImageView(logical_device, canvas_image_view, null);
         device_dispatch.destroyImage(logical_device, canvas_image, null);
         if (current_pixel_count < pixel_count) {
@@ -880,12 +880,12 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
         }
     }
     canvas_dimensions = .{
-        .width = @intToFloat(f32, dimensions.width),
-        .height = @intToFloat(f32, dimensions.height),
+        .width = @floatFromInt(f32, dimensions.width),
+        .height = @floatFromInt(f32, dimensions.height),
     };
 
-    assert(@floatToInt(u32, canvas_dimensions.width) == dimensions.width);
-    assert(@floatToInt(u32, canvas_dimensions.height) == dimensions.height);
+    assert(@intFromFloat(u32, canvas_dimensions.width) == dimensions.width);
+    assert(@intFromFloat(u32, canvas_dimensions.height) == dimensions.height);
 
     const bytes_per_pixel = 4;
     const image_size_bytes: usize = pixel_count * bytes_per_pixel;
@@ -1475,8 +1475,8 @@ fn createGraphicsPipeline(
         vk.Viewport{
             .x = 0.0,
             .y = 0.0,
-            .width = @intToFloat(f32, initial_viewport_dimensions.width),
-            .height = @intToFloat(f32, initial_viewport_dimensions.height),
+            .width = @floatFromInt(f32, initial_viewport_dimensions.width),
+            .height = @floatFromInt(f32, initial_viewport_dimensions.height),
             .min_depth = 0.0,
             .max_depth = 1.0,
         },

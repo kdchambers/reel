@@ -415,18 +415,18 @@ pub const SampleFormat = enum(i32) {
 };
 
 comptime {
-    assert(@enumToInt(SampleFormat.u8) == libav.AV_SAMPLE_FMT_U8);
-    assert(@enumToInt(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
-    assert(@enumToInt(SampleFormat.s32) == libav.AV_SAMPLE_FMT_S32);
-    assert(@enumToInt(SampleFormat.flt) == libav.AV_SAMPLE_FMT_FLT);
-    assert(@enumToInt(SampleFormat.dbl) == libav.AV_SAMPLE_FMT_DBL);
-    assert(@enumToInt(SampleFormat.u8p) == libav.AV_SAMPLE_FMT_U8P);
-    assert(@enumToInt(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
-    assert(@enumToInt(SampleFormat.s32p) == libav.AV_SAMPLE_FMT_S32P);
-    assert(@enumToInt(SampleFormat.fltp) == libav.AV_SAMPLE_FMT_FLTP);
-    assert(@enumToInt(SampleFormat.dblp) == libav.AV_SAMPLE_FMT_DBLP);
-    assert(@enumToInt(SampleFormat.s64) == libav.AV_SAMPLE_FMT_S64);
-    assert(@enumToInt(SampleFormat.s64p) == libav.AV_SAMPLE_FMT_S64P);
+    assert(@intFromEnum(SampleFormat.u8) == libav.AV_SAMPLE_FMT_U8);
+    assert(@intFromEnum(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
+    assert(@intFromEnum(SampleFormat.s32) == libav.AV_SAMPLE_FMT_S32);
+    assert(@intFromEnum(SampleFormat.flt) == libav.AV_SAMPLE_FMT_FLT);
+    assert(@intFromEnum(SampleFormat.dbl) == libav.AV_SAMPLE_FMT_DBL);
+    assert(@intFromEnum(SampleFormat.u8p) == libav.AV_SAMPLE_FMT_U8P);
+    assert(@intFromEnum(SampleFormat.s16) == libav.AV_SAMPLE_FMT_S16);
+    assert(@intFromEnum(SampleFormat.s32p) == libav.AV_SAMPLE_FMT_S32P);
+    assert(@intFromEnum(SampleFormat.fltp) == libav.AV_SAMPLE_FMT_FLTP);
+    assert(@intFromEnum(SampleFormat.dblp) == libav.AV_SAMPLE_FMT_DBLP);
+    assert(@intFromEnum(SampleFormat.s64) == libav.AV_SAMPLE_FMT_S64);
+    assert(@intFromEnum(SampleFormat.s64p) == libav.AV_SAMPLE_FMT_S64P);
 }
 
 pub const CodecID = enum(u32) {
@@ -957,49 +957,49 @@ pub const CodecID = enum(u32) {
 
 comptime {
     // TODO: More checks
-    assert(@enumToInt(CodecID.AAC) == libav.AV_CODEC_ID_AAC);
+    assert(@intFromEnum(CodecID.AAC) == libav.AV_CODEC_ID_AAC);
 }
 
 // comptime {
-//     assert(@enumToInt(PixelFormat.YUV420P) == libav.AV_PIX_FMT_YUV420P);
-//     assert(@enumToInt(PixelFormat.YUYV422) == libav.AV_PIX_FMT_YUYV422);
-//     assert(@enumToInt(PixelFormat.RGB24) == libav.AV_PIX_FMT_RGB24);
-//     assert(@enumToInt(PixelFormat.BGR24) == libav.AV_PIX_FMT_BGR24);
-//     assert(@enumToInt(PixelFormat.YUV422P) == libav.AV_PIX_FMT_YUV422P);
-//     assert(@enumToInt(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
-//     assert(@enumToInt(PixelFormat.YUV410P) == libav.AV_PIX_FMT_YUV410P);
-//     assert(@enumToInt(PixelFormat.YUV411P) == libav.AV_PIX_FMT_YUV411P);
-//     assert(@enumToInt(PixelFormat.GRAY8) == libav.AV_PIX_FMT_GRAY8);
-//     assert(@enumToInt(PixelFormat.MONOWHITE) == libav.AV_PIX_FMT_MONOWHITE);
-//     assert(@enumToInt(PixelFormat.MONOBLACK) == libav.AV_PIX_FMT_MONOBLACK);
-//     assert(@enumToInt(PixelFormat.PAL8) == libav.AV_PIX_FMT_PAL8);
-//     assert(@enumToInt(PixelFormat.YUVJ420P) == libav.AV_PIX_FMT_YUVJ420P);
-//     assert(@enumToInt(PixelFormat.YUVJ422P) == libav.AV_PIX_FMT_YUVJ422P);
-//     assert(@enumToInt(PixelFormat.YUVJ444P) == libav.AV_PIX_FMT_YUVJ444P);
-//     assert(@enumToInt(PixelFormat.UYVY422) == libav.AV_PIX_FMT_UYVY422);
-//     assert(@enumToInt(PixelFormat.UYYVYY411) == libav.AV_PIX_FMT_UYYVYY411);
-//     assert(@enumToInt(PixelFormat.BGR8) == libav.AV_PIX_FMT_BGR8);
-//     assert(@enumToInt(PixelFormat.BGR4) == libav.AV_PIX_FMT_BGR4);
-//     assert(@enumToInt(PixelFormat.BGR4_BYTE) == libav.AV_PIX_FMT_BGR4_BYTE);
-//     assert(@enumToInt(PixelFormat.RGB8) == libav.AV_PIX_FMT_RGB8);
-//     assert(@enumToInt(PixelFormat.RGB4) == libav.AV_PIX_FMT_RGB4);
-//     assert(@enumToInt(PixelFormat.RGB4_BYTE) == libav.AV_PIX_FMT_RGB4_BYTE);
-//     assert(@enumToInt(PixelFormat.NV12) == libav.AV_PIX_FMT_NV12);
-//     assert(@enumToInt(PixelFormat.NV21) == libav.AV_PIX_FMT_NV21);
-//     assert(@enumToInt(PixelFormat.ARGB) == libav.AV_PIX_FMT_ARGB);
-//     assert(@enumToInt(PixelFormat.RGBA) == libav.AV_PIX_FMT_RGBA);
-//     assert(@enumToInt(PixelFormat.ABGR) == libav.AV_PIX_FMT_ABGR);
-//     assert(@enumToInt(PixelFormat.BGRA) == libav.AV_PIX_FMT_BGRA);
-//     assert(@enumToInt(PixelFormat.GRAY16BE) == libav.AV_PIX_FMT_GRAY16BE);
-//     assert(@enumToInt(PixelFormat.GRAY16LE) == libav.AV_PIX_FMT_GRAY16LE);
-//     assert(@enumToInt(PixelFormat.YUV440P) == libav.AV_PIX_FMT_YUV440P);
-//     assert(@enumToInt(PixelFormat.YUVJ440P) == libav.AV_PIX_FMT_YUVJ440P);
-//     assert(@enumToInt(PixelFormat.YUVA420P) == libav.AV_PIX_FMT_YUVA420P);
-//     assert(@enumToInt(PixelFormat.RGB48BE) == libav.AV_PIX_FMT_RGB48BE);
-//     assert(@enumToInt(PixelFormat.RGB48LE) == libav.AV_PIX_FMT_RGB48LE);
-//     assert(@enumToInt(PixelFormat.RGB565BE) == libav.AV_PIX_FMT_RGB565BE);
-//     assert(@enumToInt(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
-//     assert(@enumToInt(PixelFormat.VAAPI) == libav.AV_PIX_FMT_VAAPI);
+//     assert(@intFromEnum(PixelFormat.YUV420P) == libav.AV_PIX_FMT_YUV420P);
+//     assert(@intFromEnum(PixelFormat.YUYV422) == libav.AV_PIX_FMT_YUYV422);
+//     assert(@intFromEnum(PixelFormat.RGB24) == libav.AV_PIX_FMT_RGB24);
+//     assert(@intFromEnum(PixelFormat.BGR24) == libav.AV_PIX_FMT_BGR24);
+//     assert(@intFromEnum(PixelFormat.YUV422P) == libav.AV_PIX_FMT_YUV422P);
+//     assert(@intFromEnum(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
+//     assert(@intFromEnum(PixelFormat.YUV410P) == libav.AV_PIX_FMT_YUV410P);
+//     assert(@intFromEnum(PixelFormat.YUV411P) == libav.AV_PIX_FMT_YUV411P);
+//     assert(@intFromEnum(PixelFormat.GRAY8) == libav.AV_PIX_FMT_GRAY8);
+//     assert(@intFromEnum(PixelFormat.MONOWHITE) == libav.AV_PIX_FMT_MONOWHITE);
+//     assert(@intFromEnum(PixelFormat.MONOBLACK) == libav.AV_PIX_FMT_MONOBLACK);
+//     assert(@intFromEnum(PixelFormat.PAL8) == libav.AV_PIX_FMT_PAL8);
+//     assert(@intFromEnum(PixelFormat.YUVJ420P) == libav.AV_PIX_FMT_YUVJ420P);
+//     assert(@intFromEnum(PixelFormat.YUVJ422P) == libav.AV_PIX_FMT_YUVJ422P);
+//     assert(@intFromEnum(PixelFormat.YUVJ444P) == libav.AV_PIX_FMT_YUVJ444P);
+//     assert(@intFromEnum(PixelFormat.UYVY422) == libav.AV_PIX_FMT_UYVY422);
+//     assert(@intFromEnum(PixelFormat.UYYVYY411) == libav.AV_PIX_FMT_UYYVYY411);
+//     assert(@intFromEnum(PixelFormat.BGR8) == libav.AV_PIX_FMT_BGR8);
+//     assert(@intFromEnum(PixelFormat.BGR4) == libav.AV_PIX_FMT_BGR4);
+//     assert(@intFromEnum(PixelFormat.BGR4_BYTE) == libav.AV_PIX_FMT_BGR4_BYTE);
+//     assert(@intFromEnum(PixelFormat.RGB8) == libav.AV_PIX_FMT_RGB8);
+//     assert(@intFromEnum(PixelFormat.RGB4) == libav.AV_PIX_FMT_RGB4);
+//     assert(@intFromEnum(PixelFormat.RGB4_BYTE) == libav.AV_PIX_FMT_RGB4_BYTE);
+//     assert(@intFromEnum(PixelFormat.NV12) == libav.AV_PIX_FMT_NV12);
+//     assert(@intFromEnum(PixelFormat.NV21) == libav.AV_PIX_FMT_NV21);
+//     assert(@intFromEnum(PixelFormat.ARGB) == libav.AV_PIX_FMT_ARGB);
+//     assert(@intFromEnum(PixelFormat.RGBA) == libav.AV_PIX_FMT_RGBA);
+//     assert(@intFromEnum(PixelFormat.ABGR) == libav.AV_PIX_FMT_ABGR);
+//     assert(@intFromEnum(PixelFormat.BGRA) == libav.AV_PIX_FMT_BGRA);
+//     assert(@intFromEnum(PixelFormat.GRAY16BE) == libav.AV_PIX_FMT_GRAY16BE);
+//     assert(@intFromEnum(PixelFormat.GRAY16LE) == libav.AV_PIX_FMT_GRAY16LE);
+//     assert(@intFromEnum(PixelFormat.YUV440P) == libav.AV_PIX_FMT_YUV440P);
+//     assert(@intFromEnum(PixelFormat.YUVJ440P) == libav.AV_PIX_FMT_YUVJ440P);
+//     assert(@intFromEnum(PixelFormat.YUVA420P) == libav.AV_PIX_FMT_YUVA420P);
+//     assert(@intFromEnum(PixelFormat.RGB48BE) == libav.AV_PIX_FMT_RGB48BE);
+//     assert(@intFromEnum(PixelFormat.RGB48LE) == libav.AV_PIX_FMT_RGB48LE);
+//     assert(@intFromEnum(PixelFormat.RGB565BE) == libav.AV_PIX_FMT_RGB565BE);
+//     assert(@intFromEnum(PixelFormat.YUV444P) == libav.AV_PIX_FMT_YUV444P);
+//     assert(@intFromEnum(PixelFormat.VAAPI) == libav.AV_PIX_FMT_VAAPI);
 // }
 
 pub const PixelFormat = enum(i32) {

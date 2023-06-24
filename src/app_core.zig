@@ -328,7 +328,7 @@ pub fn run() !void {
                 .screenshot_format_set => {
                     const format_index = request_buffer.readInt(u16) catch 0;
                     assert(format_index < @typeInfo(Model.ImageFormat).Enum.fields.len);
-                    model.screenshot_format = @intToEnum(Model.ImageFormat, format_index);
+                    model.screenshot_format = @enumFromInt(Model.ImageFormat, format_index);
                     std.log.info("Screenshot output format set to: {s}", .{@tagName(model.screenshot_format)});
                 },
                 .screenshot_display_set => {
@@ -387,12 +387,12 @@ pub fn run() !void {
                 .record_stop => model.recording_context.state = .closing,
                 .record_format_set => {
                     const format_index = request_buffer.readInt(u16) catch 0;
-                    model.recording_context.format = @intToEnum(Model.VideoFormat, format_index);
+                    model.recording_context.format = @enumFromInt(Model.VideoFormat, format_index);
                     std.log.info("Video format set to {s}", .{@tagName(model.recording_context.format)});
                 },
                 .record_quality_set => {
                     const quality_index = request_buffer.readInt(u16) catch 0;
-                    model.recording_context.quality = @intToEnum(Model.VideoQuality, quality_index);
+                    model.recording_context.quality = @enumFromInt(Model.VideoQuality, quality_index);
                     std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.quality)});
                 },
                 .webcam_add_source => {
@@ -475,8 +475,8 @@ pub fn run() !void {
     const application_end = std.time.nanoTimestamp();
     if (screencapture_start) |start| {
         const screencapture_duration_ns = @intCast(u64, application_end - start);
-        const screencapture_duration_seconds: f64 = @intToFloat(f64, screencapture_duration_ns) / @as(f64, std.time.ns_per_s);
-        const screencapture_fps = @intToFloat(f64, frame_index) / screencapture_duration_seconds;
+        const screencapture_duration_seconds: f64 = @floatFromInt(f64, screencapture_duration_ns) / @as(f64, std.time.ns_per_s);
+        const screencapture_fps = @floatFromInt(f64, frame_index) / screencapture_duration_seconds;
         std.log.info("Display FPS: {d:.2}", .{screencapture_fps});
     }
 }
@@ -660,7 +660,7 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
         const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
         const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
         const ms_per_frame: f64 = 1000.0 / 60.0;
-        const current_frame_index = @floatToInt(i64, @floor(@intToFloat(f64, ms_from_record_start) / ms_per_frame));
+        const current_frame_index = @intFromFloat(i64, @floor(@floatFromInt(f64, ms_from_record_start) / ms_per_frame));
         last_video_frame_written_ns = current_time_ns;
 
         video_encoder.appendVideoFrame(pixels.ptr, current_frame_index) catch |err| {
@@ -676,7 +676,7 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
         const recording_ns = @intCast(u64, current_time_ns - recording_start_timestamp);
         const recording_ms = @divFloor(recording_ns, std.time.ns_per_ms);
         const channel_count: f64 = 2.0;
-        const audio_samples_ms = @floatToInt(u64, @floor(@intToFloat(f64, recording_sample_count) / (44.1 * channel_count)));
+        const audio_samples_ms = @intFromFloat(u64, @floor(@floatFromInt(f64, recording_sample_count) / (44.1 * channel_count)));
         const video_frames_ns = @intCast(u64, last_video_frame_written_ns - recording_start_timestamp);
         const video_frames_ms = @divFloor(video_frames_ns, std.time.ns_per_ms);
         std.log.info("{d} ms of video & {d} ms of audio written. {d} ms expected", .{

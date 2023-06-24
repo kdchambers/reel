@@ -20,7 +20,7 @@ const FilterMap = struct {
 
 // Takes a point and distributes it linearly-ish across 5 bins
 fn triangleFilter(point: f32, filter_map_buffer: *[5]FilterMap) []FilterMap {
-    const point_whole = @floatToInt(u32, @floor(point));
+    const point_whole = @intFromFloat(u32, @floor(point));
     const offset = (@rem(point, 1.0) - 0.5) / 10;
     std.debug.assert(offset >= -0.10);
     std.debug.assert(offset <= 0.10);
@@ -52,7 +52,7 @@ pub fn powerSpectrumToVolumeDb(power_spectrum: [fft_bin_count / 8]math.F32x4) f3
         accumulator += values;
     }
     const total_power = (accumulator[0] + accumulator[1] + accumulator[2] + accumulator[3]);
-    const average_power = total_power / (@intToFloat(f32, power_spectrum.len) * 4);
+    const average_power = total_power / (@floatFromInt(f32, power_spectrum.len) * 4);
     return std.math.log10(average_power / reference_max_audio);
 }
 
@@ -86,7 +86,7 @@ pub fn powerSpectrumToMelScale(power_spectrum: [fft_bin_count / 8]math.F32x4, ou
         while (x < audio_bin_compress_count) : (x += 1) {
             merged_bins[i] += mel_bins[mel_bin_index + x];
         }
-        merged_bins[i] /= @intToFloat(f32, audio_bin_compress_count);
+        merged_bins[i] /= @floatFromInt(f32, audio_bin_compress_count);
         merged_bins[i] = std.math.log10(merged_bins[i] / reference_max_audio);
         // decibel_accumulator += merged_bins[i];
         mel_bin_index += audio_bin_compress_count;
@@ -126,10 +126,10 @@ pub fn samplesToPowerSpectrum(pcm_buffer: []const i16) [fft_bin_count / 8]math.F
             for (&result) |*sample| {
                 // TODO: The indexing here is dependent on the channel count
                 sample.* = .{
-                    (@intToFloat(f32, pcm_window[j + 0]) / sample_max) * hamming_table[k + 0],
-                    (@intToFloat(f32, pcm_window[j + 2]) / sample_max) * hamming_table[k + 1],
-                    (@intToFloat(f32, pcm_window[j + 4]) / sample_max) * hamming_table[k + 2],
-                    (@intToFloat(f32, pcm_window[j + 6]) / sample_max) * hamming_table[k + 3],
+                    (@floatFromInt(f32, pcm_window[j + 0]) / sample_max) * hamming_table[k + 0],
+                    (@floatFromInt(f32, pcm_window[j + 2]) / sample_max) * hamming_table[k + 1],
+                    (@floatFromInt(f32, pcm_window[j + 4]) / sample_max) * hamming_table[k + 2],
+                    (@floatFromInt(f32, pcm_window[j + 6]) / sample_max) * hamming_table[k + 3],
                 };
                 j += 8;
                 k += 4;
@@ -152,7 +152,7 @@ pub fn samplesToPowerSpectrum(pcm_buffer: []const i16) [fft_bin_count / 8]math.F
         std.debug.assert(value.*[1] >= 0.0);
         std.debug.assert(value.*[2] >= 0.0);
         std.debug.assert(value.*[3] >= 0.0);
-        value.* /= math.f32x4s(@intToFloat(f32, fft_iteration_count));
+        value.* /= math.f32x4s(@floatFromInt(f32, fft_iteration_count));
         std.debug.assert(value.*[0] >= 0.0);
         std.debug.assert(value.*[1] >= 0.0);
         std.debug.assert(value.*[2] >= 0.0);
@@ -169,7 +169,7 @@ pub fn generateMelTable(
     var result: [bin_count]f32 = undefined;
     var i: usize = 0;
     while (i < bin_count) : (i += 1) {
-        result[i] = melScale(frequency_resolution * (@intToFloat(f32, i) + 1));
+        result[i] = melScale(frequency_resolution * (@floatFromInt(f32, i) + 1));
     }
     return result;
 }
@@ -213,7 +213,7 @@ pub fn calculateFreqToMelTable(
         const mel_increment = mel_upper / bin_count;
         var freq_i: usize = 0;
         outer: while (freq_i < bin_count) : (freq_i += 1) {
-            const freq = @intToFloat(f32, freq_i) * frequency_resolution;
+            const freq = @floatFromInt(f32, freq_i) * frequency_resolution;
             const freq_in_mel: f32 = melScale(freq);
             var lower_mel: f32 = 0;
             var upper_mel: f32 = mel_increment;
@@ -223,7 +223,7 @@ pub fn calculateFreqToMelTable(
                     const fraction: f32 = (freq_in_mel - lower_mel) / mel_increment;
                     std.debug.assert(fraction >= 0.0);
                     std.debug.assert(fraction <= 1.0);
-                    result[freq_i] = @intToFloat(f32, mel_bin_index) + fraction;
+                    result[freq_i] = @floatFromInt(f32, mel_bin_index) + fraction;
                     continue :outer;
                 }
                 lower_mel += mel_increment;

@@ -74,10 +74,10 @@ pub const Slider = struct {
         if (self.drag_active) {
             const x_diff: f32 = mouse_x - self.drag_start_mouse_x;
             const relative_x = x_diff - self.drag_start_x;
-            const index = self.drag_start_active_index + @floatToInt(i32, @floor((relative_x + (self.drag_interval / 2.0)) / self.drag_interval));
+            const index = self.drag_start_active_index + @intFromFloat(i32, @floor((relative_x + (self.drag_interval / 2.0)) / self.drag_interval));
             if (index >= 0 and index < self.label_buffer.len and index != self.active_index) {
                 const index_diff: i32 = index - self.active_index;
-                const x_shift = @intToFloat(f32, index_diff) * self.drag_interval;
+                const x_shift = @floatFromInt(f32, index_diff) * self.drag_interval;
                 self.active_index = @intCast(u16, index);
                 response.active_index = self.active_index;
                 renderer.updateVertexRangeHPosition(
@@ -95,7 +95,7 @@ pub const Slider = struct {
                     RGBA(u8).white,
                     .top_right,
                 );
-                const progress_percentage: f32 = @intToFloat(f32, self.active_index) / @intToFloat(f32, self.label_buffer.len - 1);
+                const progress_percentage: f32 = @floatFromInt(f32, self.active_index) / @floatFromInt(f32, self.label_buffer.len - 1);
                 assert(progress_percentage >= 0.0);
                 assert(progress_percentage <= 1.0);
                 const knob_inner_radius_width: f32 = knob_inner_radius_pixels * screen_scale.horizontal;
@@ -180,14 +180,14 @@ pub const Slider = struct {
             .height = bar_height,
         };
         _ = renderer.drawQuad(bar_extent, self.background_color, .bottom_left);
-        const value_interval: f32 = extent.width / @intToFloat(f32, step_count - 1);
+        const value_interval: f32 = extent.width / @floatFromInt(f32, step_count - 1);
         const point_size_pixels: f32 = 2.0;
         const point_width: f32 = point_size_pixels * screen_scale.horizontal;
         const point_height: f32 = point_size_pixels * screen_scale.vertical;
         const point_y_placement: f32 = extent.y - ((bar_height / 2.0) - (point_height / 2.0));
         for (0..step_count - 2) |i| {
             const point_extent = Extent3D(f32){
-                .x = extent.x + @intToFloat(f32, i + 1) * value_interval,
+                .x = extent.x + @floatFromInt(f32, i + 1) * value_interval,
                 .y = point_y_placement,
                 .z = extent.z,
                 .width = point_width,
@@ -197,10 +197,10 @@ pub const Slider = struct {
         }
 
         self.drag_interval = value_interval;
-        self.drag_count = @intToFloat(f32, step_count - 2);
+        self.drag_count = @floatFromInt(f32, step_count - 2);
 
         const knob_placement_center = Coordinates3D(f32){
-            .x = extent.x + @intToFloat(f32, self.active_index) * value_interval,
+            .x = extent.x + @floatFromInt(f32, self.active_index) * value_interval,
             .y = point_y_placement,
             .z = extent.z,
         };
@@ -228,7 +228,7 @@ pub const Slider = struct {
         };
         self.mouse_event_slot = event_system.writeMouseEventSlot(knob_hover_extent, .{});
 
-        const progress_percentage: f32 = @intToFloat(f32, self.active_index) / @intToFloat(f32, self.label_buffer.len - 1);
+        const progress_percentage: f32 = @floatFromInt(f32, self.active_index) / @floatFromInt(f32, self.label_buffer.len - 1);
         assert(progress_percentage >= 0.0);
         assert(progress_percentage <= 1.0);
         self.progress_bar_full_extent = Extent3D(f32){
@@ -403,7 +403,7 @@ pub const Selector = struct {
             for (index_start..index_end) |i| {
                 const background_color = if (self.active_index == i) self.active_background_color else self.background_color;
                 const middle_section_extent = Extent3D(f32){
-                    .x = placement.x + radius.h + ((box_width + seperator_width) * @intToFloat(f32, i)),
+                    .x = placement.x + radius.h + ((box_width + seperator_width) * @floatFromInt(f32, i)),
                     .y = placement.y,
                     .z = placement.z,
                     .width = box_width,
@@ -432,7 +432,7 @@ pub const Selector = struct {
         {
             const background_color = if (self.active_index == last_index) self.active_background_color else self.background_color;
             const middle_section_extent = Extent3D(f32){
-                .x = placement.x + radius.h + ((box_width + seperator_width) * @intToFloat(f32, last_index)),
+                .x = placement.x + radius.h + ((box_width + seperator_width) * @floatFromInt(f32, last_index)),
                 .y = placement.y,
                 .z = placement.z,
                 .width = box_width,
@@ -714,7 +714,7 @@ pub const ListSelectPopup = struct {
         screen_scale: ScaleFactor2D(f32),
     ) void {
         const title_height = 40.0 * screen_scale.vertical;
-        const height = title_height + @intToFloat(f32, self.label_count) * item_height;
+        const height = title_height + @floatFromInt(f32, self.label_count) * item_height;
         const border_extent = Extent3D(f32){
             .x = placement.x,
             .y = placement.y,
@@ -1170,7 +1170,7 @@ pub const Dropdown = struct {
             for (self.model.labels, self.mouse_event_slots.get(), 0..) |label, *slot, i| {
                 const item_extent = Extent3D(f32){
                     .x = extent.x,
-                    .y = extent.y + (vertical_stride * @intToFloat(f32, i + 1)),
+                    .y = extent.y + (vertical_stride * @floatFromInt(f32, i + 1)),
                     .z = extent.z,
                     .width = extent.width,
                     .height = item_height,
@@ -1312,7 +1312,7 @@ pub const Button = struct {
                 self.color,
                 .bottom_left,
                 radius,
-                @max(8, @floatToInt(u16, @floor(rounding_radius))),
+                @max(8, @intFromFloat(u16, @floor(rounding_radius))),
             );
             self.vertex_index = vertex_range.start;
             self.vertex_count = vertex_range.count;
