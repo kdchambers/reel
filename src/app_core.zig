@@ -308,12 +308,8 @@ pub fn run() !void {
                     });
 
                     switch (model.video_streams[stream_index].provider_ref.kind) {
-                        .webcam => {
-                            // TODO: Close / pause the stream
-                        },
-                        .screen_capture => {
-                            screencapture_interface.streamClose(screencapture_source_handle);
-                        },
+                        .webcam => video4linux.close(),
+                        .screen_capture => screencapture_interface.streamClose(screencapture_source_handle),
                     }
 
                     renderer.removeStream(renderer_stream_handle);

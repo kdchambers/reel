@@ -334,18 +334,8 @@ pub fn getFrame(
     return true;
 }
 
-pub fn deinit(allocator: std.mem.Allocator) void {
-    if (!initialized)
-        return;
-
-    for (device_buffer[0..device_count]) |*device| {
-        allocator.free(device.path);
-        allocator.free(device.name.ptr[0..device.allocated_name_size]);
-    }
-
-    if (opened_stream_count == 0)
-        return;
-
+pub fn close() void {
+    assert(initialized);
     libav.av_packet_unref(packet);
     libav.av_freep(@ptrCast(*anyopaque, &converted_frame.?.data[0]));
     libav.av_frame_free(&video_frame);
@@ -356,4 +346,13 @@ pub fn deinit(allocator: std.mem.Allocator) void {
     libav.avformat_close_input(
         @ptrCast([*c][*c]av.FormatContext, &format_context),
     );
+}
+
+pub fn deinit(allocator: std.mem.Allocator) void {
+    if (!initialized)
+        return;
+    for (device_buffer[0..device_count]) |*device| {
+        allocator.free(device.path);
+        allocator.free(device.name.ptr[0..device.allocated_name_size]);
+    }
 }
