@@ -450,8 +450,11 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         const response = ui_state.record_quality_selector.update();
         if (response.visual_change)
             is_render_requested = true;
-        if (response.active_index != null)
+        if (response.active_index) |active_index| {
             is_draw_required = true;
+            request_encoder.write(.record_quality_set) catch unreachable;
+            request_encoder.writeInt(u16, active_index) catch unreachable;
+        }
     }
 
     if (ui_state.sidebar_state == .open) {
