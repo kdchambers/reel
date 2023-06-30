@@ -14,3 +14,5 @@ sudo dnf install \
     mesa-vulkan-drivers \
     vulkan-validation-layers
 ```
+
+NOTE: You may also need to enable vaapi support (For hardware accelerated encoding). See [this](https://fedoraproject.org/wiki/Firefox_Hardware_acceleration) guide for instructions
