@@ -873,7 +873,9 @@ fn screenCaptureInitSuccess() void {
     assert(model.video_source_providers.len == 0);
     model.video_source_providers = video_source_provider_buffer[0..1];
     model.video_source_providers[0].name = screencapture_interface.info.name;
+    model.video_source_providers[0].query_support = false;
     if (screencapture_interface.info.query_streams) {
+        model.video_source_providers[0].query_support = true;
         std.log.info("Screencapture backend initialized. Streams..", .{});
         const streams = screencapture_interface.queryStreams(gpa);
         assert(streams.len <= 16);

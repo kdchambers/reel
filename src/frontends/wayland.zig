@@ -509,7 +509,8 @@ fn processWidgets(model: *const Model) !void {
                 assert(item_index < audio_source_range);
                 if (item_index < video_source_range) {
                     const selected_source_provider_ptr = &model.video_source_providers[item_index];
-                    if (selected_source_provider_ptr.sources) |sources| {
+                    if (selected_source_provider_ptr.query_support) {
+                        const sources = selected_source_provider_ptr.sources orelse unreachable;
                         for (sources, 0..) |source, source_index| {
                             ui_state.select_video_source_popup.label_buffer[source_index] = source.name;
                         }

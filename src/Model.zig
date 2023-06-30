@@ -88,6 +88,7 @@ pub const VideoSourceProvider = struct {
 
     name: []const u8,
     sources: ?[]Source,
+    query_support: bool,
 };
 
 pub const WebcamSourceProvider = struct {
