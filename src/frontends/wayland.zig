@@ -152,6 +152,10 @@ const decoration_height_pixels = 32.0;
 var is_draw_required: bool = true;
 var is_render_requested: bool = true;
 
+/// Is set to true when the first draw is complete. Some widgets require being drawn
+/// before they can be updated
+var have_drawn: bool = false;
+
 /// Set when command buffers need to be (re)recorded. The following will cause that to happen
 ///   1. First command buffer recording
 ///   2. Screen resized
@@ -370,40 +374,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     math.fftInitUnityTable(&audio_utils.unity_table);
 }
 
-pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
-    request_encoder.used = 0;
-
-    profiler.reset();
-    _ = profiler.push(.frontend_update);
-
-    while (core_updates.next()) |core_update| {
-        switch (core_update) {
-            .video_source_added => is_draw_required = true,
-            .source_provider_added => syncSourceProviders(model),
-        }
-    }
-
-    if (model.video_streams.len != 0)
-        is_render_requested = true;
-
-    if (model.recording_context.state != last_recording_state) {
-        last_recording_state = model.recording_context.state;
-        is_draw_required = true;
-    }
-
-    if (is_shutdown_requested) {
-        request_encoder.write(.core_shutdown) catch unreachable;
-        return request_encoder.decoder();
-    }
-
-    if (framebuffer_resized) {
-        framebuffer_resized = false;
-        renderer.resizeSwapchain(screen_dimensions) catch |err| {
-            std.log.err("Failed to recreate swapchain. Error: {}", .{err});
-        };
-        is_draw_required = true;
-    }
-
+fn processWidgets(model: *const Model) !void {
     for (ui_state.video_source_mouse_event_buffer[0..ui_state.video_source_mouse_event_count], 0..) |slot, i| {
         const state_copy = slot.get().state;
         slot.getPtr().state.clear();
@@ -427,8 +398,9 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             is_render_requested = true;
     }
 
-    if (model.audio_streams.len != 0)
+    if (model.audio_streams.len != 0) {
         ui_state.scene_volume_level.update(model.audio_streams[0].volume_db, screen_scale);
+    }
 
     {
         const response = ui_state.record_format_selector.update();
@@ -439,11 +411,6 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             request_encoder.write(.record_format_set) catch unreachable;
             request_encoder.writeInt(u16, active_index) catch unreachable;
         }
-    }
-
-    if (ui_state.close_app_button.update().clicked) {
-        request_encoder.write(.core_shutdown) catch unreachable;
-        return request_encoder.decoder();
     }
 
     {
@@ -667,6 +634,49 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         if (response.modified)
             is_render_requested = true;
     }
+}
+
+pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
+    request_encoder.used = 0;
+
+    profiler.reset();
+    _ = profiler.push(.frontend_update);
+
+    while (core_updates.next()) |core_update| {
+        switch (core_update) {
+            .video_source_added => is_draw_required = true,
+            .source_provider_added => syncSourceProviders(model),
+        }
+    }
+
+    if (ui_state.close_app_button.update().clicked) {
+        request_encoder.write(.core_shutdown) catch unreachable;
+        return request_encoder.decoder();
+    }
+
+    if (have_drawn)
+        try processWidgets(model);
+
+    if (model.video_streams.len != 0)
+        is_render_requested = true;
+
+    if (model.recording_context.state != last_recording_state) {
+        last_recording_state = model.recording_context.state;
+        is_draw_required = true;
+    }
+
+    if (is_shutdown_requested) {
+        request_encoder.write(.core_shutdown) catch unreachable;
+        return request_encoder.decoder();
+    }
+
+    if (framebuffer_resized) {
+        framebuffer_resized = false;
+        renderer.resizeSwapchain(screen_dimensions) catch |err| {
+            std.log.err("Failed to recreate swapchain. Error: {}", .{err});
+        };
+        is_draw_required = true;
+    }
 
     _ = profiler.push(.mouse_input);
 
@@ -729,6 +739,8 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
             std.log.info("Failed to draw ui. Error: {}", .{err});
             return error.UserInterfaceDrawFail;
         };
+
+        have_drawn = true;
 
         is_record_requested = true;
     } else {
