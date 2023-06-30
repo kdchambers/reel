@@ -457,7 +457,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         for (source_entries, 0..) |*entry, i| {
             const entry_response = entry.remove_icon.update();
             if (entry_response.clicked) {
-                request_encoder.write(.screencapture_remove_source) catch unreachable;
+                request_encoder.write(.remove_source) catch unreachable;
                 request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
             }
             if (entry_response.modified)

@@ -48,7 +48,7 @@ pub const Request = enum(u8) {
     stream_start,
 
     screencapture_add_source,
-    screencapture_remove_source,
+    remove_source,
     screencapture_request_source,
 
     webcam_add_source,
@@ -290,21 +290,40 @@ pub fn run() !void {
                         &.{},
                     );
                 },
-                .screencapture_remove_source => {
+                .remove_source => {
                     const stream_index = request_buffer.readInt(u16) catch unreachable;
+
+                    model_mutex.lock();
+
                     const screencapture_source_handle = model.video_streams[stream_index].source_index;
-                    const renderer_stream_handle = findRendererStreamHandle(screencapture_source_handle, .screencapture);
+
+                    const renderer_stream_handle = switch (model.video_streams[stream_index].provider_ref.kind) {
+                        .webcam => findRendererStreamHandle(screencapture_source_handle, .webcam),
+                        .screen_capture => findRendererStreamHandle(screencapture_source_handle, .screencapture),
+                    };
+
                     std.log.info("Removing video stream. Renderer handle: {d} Screencapture handle: {d}", .{
                         renderer_stream_handle,
                         screencapture_source_handle,
                     });
-                    screencapture_interface.streamClose(screencapture_source_handle);
+
+                    switch (model.video_streams[stream_index].provider_ref.kind) {
+                        .webcam => {
+                            // TODO: Close / pause the stream
+                        },
+                        .screen_capture => {
+                            screencapture_interface.streamClose(screencapture_source_handle);
+                        },
+                    }
+
                     renderer.removeStream(renderer_stream_handle);
                     const video_stream_count: usize = model.video_streams.len;
                     assert(video_stream_count > 0);
                     utils.leftShiftRemove(Model.VideoStream, video_stream_buffer[0..video_stream_count], stream_index);
                     model.video_streams = video_stream_buffer[0 .. video_stream_count - 1];
                     assert(model.video_streams.len == video_stream_count - 1);
+
+                    model_mutex.unlock();
 
                     update_encoder_mutex.lock();
                     update_encoder.write(.video_source_added) catch unreachable;
