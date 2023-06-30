@@ -67,11 +67,25 @@ pub const BackendInfo = struct {
     query_streams: bool,
 };
 
+pub const ScreenshotResponse = union(enum) {
+    file_path: []const u8,
+    file_path_c: [*:0]const u8,
+    pixel_buffer: struct {
+        width: u32,
+        height: u32,
+        pixels: [*]const PixelType,
+    },
+};
+
 //
 // TODO: This is to merge the error sets of all backends
 //
 
 pub const InitErrorSet = backend_wlroots.InitErrorSet;
+
+pub const ScreenshotError = error{
+    unknown,
+};
 
 pub const InitFn = fn (onSuccess: *const InitOnSuccessFn, onError: *const InitOnErrorFn) void;
 pub const OpenStreamFn = fn (
@@ -82,11 +96,13 @@ pub const OpenStreamFn = fn (
     user_data: *anyopaque,
 ) void;
 pub const DeinitFn = fn () void;
-pub const ScreenshotFn = fn (callback: *const OnScreenshotReadyFn) void;
+pub const ScreenshotFn = fn (onSuccess: *const OnScreenshotReadyFn, onFail: *const OnScreenshotFailFn) void;
 pub const QueryBackendInfoFn = fn () BackendInfo;
 pub const QueryStreamInfoFn = fn (allocator: std.mem.Allocator) []const StreamInfo;
 
-pub const OnScreenshotReadyFn = fn (width: u32, height: u32, pixels: [*]const PixelType) void;
+pub const OnScreenshotReadyFn = fn (response: ScreenshotResponse) void;
+pub const OnScreenshotFailFn = fn (reason: []const u8) void;
+
 pub const OnFrameReadyFn = fn (stream_handle: StreamHandle, width: u32, height: u32, pixels: [*]const PixelType) void;
 
 pub const InitOnSuccessFn = fn () void;

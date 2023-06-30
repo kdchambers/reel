@@ -230,9 +230,11 @@ pub fn state() screencapture.State {
     return backend_state;
 }
 
-pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn) void {
+pub fn screenshot(callback: *const screencapture.OnScreenshotReadyFn, onFail: *const screencapture.OnScreenshotFailFn) void {
     screenshot_callback = callback;
     screenshot_requested = true;
+    // TODO:
+    _ = onFail;
 }
 
 fn captureNextFrame() void {

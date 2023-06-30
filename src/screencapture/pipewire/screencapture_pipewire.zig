@@ -33,6 +33,7 @@ var session_handle_buffer: [session_handle_chars_max]u8 = undefined;
 const bus_name = "org.freedesktop.portal.Desktop";
 const object_path = "/org/freedesktop/portal/desktop";
 const interface_name = "org.freedesktop.portal.ScreenCast";
+const screenshot_interface_name = "org.freedesktop.portal.Screenshot";
 
 pub const InitErrorSet = error{
     OutOfMemory,
@@ -240,8 +241,356 @@ pub fn detectSupport() bool {
     return (@bitCast(SourceTypeFlags, source_mode_flags).monitor == true);
 }
 
-// TODO: Implement
-pub fn screenshot(_: *const screencapture.OnScreenshotReadyFn) void {}
+//
+// See: https://flatpak.github.io/xdg-desktop-portal/#gdbus-org.freedesktop.portal.Screenshot
+//
+pub fn screenshot(onSuccess: *const screencapture.OnScreenshotReadyFn, onFail: *const screencapture.OnScreenshotFailFn) void {
+    const file_path = takeScreenshotPipewire() catch |err| {
+        std.log.err("Failed to take screenshot. Error: {}", .{err});
+        onFail("Unknown");
+        return;
+    };
+
+    onSuccess(.{ .file_path_c = file_path });
+}
+
+fn takeScreenshotPipewire() ![*:0]const u8 {
+    std.log.info("pipewire: Taking screenshot", .{});
+
+    var err: dbus.Error = undefined;
+    dbus.errorInit(&err);
+
+    var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
+
+    const connection_name_max_size = 16;
+    const connection_name: []const u8 = blk: {
+        const raw_name = dbus.busGetUniqueName(connection);
+        const raw_name_len = std.mem.len(raw_name);
+        if (raw_name_len == 0) {
+            std.log.err("dbus_client: Connection name is empty", .{});
+            return error.InvalidConnectionName;
+        }
+        if (raw_name[0] != ':') {
+            std.log.err("dbus_client: Connection name not in expected format ':num.num'. Given: {s}", .{
+                raw_name,
+            });
+            return error.InvalidConnectionName;
+        }
+        break :blk raw_name[1..raw_name_len];
+    };
+    if (connection_name.len >= connection_name_max_size) {
+        std.log.err("dbus_client: Connection name '{s}' exceeds maximum size of {d}", .{
+            connection_name,
+            connection_name_max_size,
+        });
+        return error.ConnectionNameTooLarge;
+    }
+
+    var portal_connection_name_buffer: [connection_name_max_size]u8 = undefined;
+    const portal_connection_name: []const u8 = blk: {
+        var i: usize = 0;
+        while (i < connection_name.len) : (i += 1) {
+            if (connection_name[i] == '.') {
+                portal_connection_name_buffer[i] = '_';
+                continue;
+            }
+            portal_connection_name_buffer[i] = connection_name[i];
+        }
+        portal_connection_name_buffer[connection_name.len] = '0';
+        break :blk portal_connection_name_buffer[0..connection_name.len];
+    };
+
+    var request_suffix_buffer: [64]u8 = undefined;
+    const screenshot_request_suffix = try generateRequestToken(&request_suffix_buffer);
+
+    const handle_token_option_label: [*:0]const u8 = "handle_token";
+    var match_buffer: [128]u8 = undefined;
+
+    var screenshot_match_rule: [*:0]const u8 = undefined;
+    {
+        screenshot_match_rule = try std.fmt.bufPrintZ(
+            &match_buffer,
+            "type='signal',interface='org.freedesktop.portal.Request',path='/org/freedesktop/portal/desktop/request/{s}/{s}'",
+            .{
+                portal_connection_name,
+                screenshot_request_suffix,
+            },
+        );
+        dbus.busAddMatch(connection, screenshot_match_rule, null);
+        dbus.connectionFlush(connection);
+    }
+
+    var request: *dbus.Message = dbus.messageNewMethodCall(
+        bus_name,
+        object_path,
+        screenshot_interface_name,
+        "Screenshot",
+    ) orelse {
+        std.log.err("dbus_client: dbus_message_new_method_call failed. (DBus out of memory)", .{});
+        return error.DBusOutOfMemory;
+    };
+
+    //
+    // Since we're not a wayland or X11 window, pass an empty string and the parent
+    // window ID will be used.
+    // src: https://flatpak.github.io/xdg-desktop-portal/#parent_window
+    //
+    const parent_window: [*:0]const u8 = "";
+
+    if (dbus.messageAppendArgs(
+        request,
+        c.DBUS_TYPE_STRING,
+        &parent_window,
+        c.DBUS_TYPE_INVALID,
+    ) != 1)
+        return error.WriteRequestFail;
+
+    var root_iter: dbus.MessageIter = undefined;
+    dbus.messageIterInitAppend(request, &root_iter);
+
+    const signature = [4:0]u8{
+        c.DBUS_DICT_ENTRY_BEGIN_CHAR,
+        c.DBUS_TYPE_STRING,
+        c.DBUS_TYPE_VARIANT,
+        c.DBUS_DICT_ENTRY_END_CHAR,
+    };
+    var array_iter: dbus.MessageIter = undefined;
+    if (dbus.messageIterOpenContainer(&root_iter, c.DBUS_TYPE_ARRAY, &signature, &array_iter) != 1)
+        return error.WriteDictFail;
+
+    var request_buffer: [64]u8 = undefined;
+    const request_id = try generateRequestToken(request_buffer[0..]);
+
+    //
+    // Open Dict Entry [0] - handle_token s
+    //
+    {
+        var dict_entry_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
+            return error.WriteDictFail;
+
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &handle_token_option_label)) != 1)
+            return error.AppendBasicFail;
+
+        //
+        // Because entry in Dict is a variant, we can't use append_basic and instead have to open yet another
+        // container
+        //
+        var dict_variant_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "s", &dict_variant_iter) != 1)
+            return error.WriteDictFail;
+
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &request_id)) != 1)
+            return error.AppendBasicFail;
+
+        if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
+            return error.CloseContainerFail;
+
+        //
+        // Close Dict Entry
+        //
+        if (dbus.messageIterCloseContainer(&array_iter, &dict_entry_iter) != 1)
+            return error.CloseContainerFail;
+    }
+
+    //
+    // Open Dict Entry [1] - modal b
+    //
+    {
+        const option_types_label: [*:0]const u8 = "modal";
+
+        var dict_entry_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
+            return error.WriteDictFail;
+
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+            return error.AppendBasicFail;
+
+        //
+        // Because entry in Dict is a variant, we can't use append_basic and instead have to open yet another
+        // container
+        //
+        var dict_variant_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "b", &dict_variant_iter) != 1)
+            return error.WriteDictFail;
+
+        const display_model: u32 = 0;
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @ptrCast(*const void, &display_model)) != 1)
+            return error.AppendBasicFail;
+
+        if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
+            return error.CloseContainerFail;
+
+        //
+        // Close Dict Entry
+        //
+        if (dbus.messageIterCloseContainer(&array_iter, &dict_entry_iter) != 1)
+            return error.CloseContainerFail;
+    }
+
+    //
+    // Open Dict Entry [2] - interactive b
+    //
+    {
+        const option_types_label: [*:0]const u8 = "interactive";
+
+        var dict_entry_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
+            return error.WriteDictFail;
+
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+            return error.AppendBasicFail;
+
+        //
+        // Because entry in Dict is a variant, we can't use append_basic and instead have to open yet another
+        // container
+        //
+        var dict_variant_iter: dbus.MessageIter = undefined;
+        if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "b", &dict_variant_iter) != 1)
+            return error.WriteDictFail;
+
+        const display_interactive: u32 = 0;
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @ptrCast(*const void, &display_interactive)) != 1)
+            return error.AppendBasicFail;
+
+        if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
+            return error.CloseContainerFail;
+
+        //
+        // Close Dict Entry
+        //
+        if (dbus.messageIterCloseContainer(&array_iter, &dict_entry_iter) != 1)
+            return error.CloseContainerFail;
+    }
+
+    //
+    // Close Array
+    //
+    if (dbus.messageIterCloseContainer(&root_iter, &array_iter) != 1)
+        return error.CloseContainerFail;
+
+    //
+    // Send over the Bus and block on response
+    //
+    var response_handle: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+        connection,
+        request,
+        std.time.ms_per_s * 1,
+        &err,
+    ) orelse {
+        const error_message = if (dbus.errorIsSet(&err) != 0) err.message else "unknown";
+        std.log.err("dbus_client: dbus.connectionSendWithReplyAndBlock( failed. Error: {s}", .{
+            error_message,
+        });
+        return error.SendAndAwaitMessageFail;
+    };
+    defer dbus.messageUnref(response_handle);
+
+    var reply_iter: dbus.MessageIter = undefined;
+    _ = dbus.messageIterInit(response_handle, &reply_iter);
+
+    if (dbus.messageIterGetArgType(&reply_iter) != c.DBUS_TYPE_OBJECT_PATH) {
+        return error.ReplyInvalidType;
+    }
+
+    var response_uri: [*:0]const u8 = undefined;
+    dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &response_uri));
+
+    const screenshot_response: *dbus.Message = blk: {
+        const timeout_duration_seconds = 60;
+        const iterations_max: u32 = 1000 * timeout_duration_seconds;
+        const timeout_ms = 10;
+        var i: u32 = 0;
+        while (i < iterations_max) : (i += 1) {
+            if (dbus.connectionReadWrite(connection, timeout_ms) != 1)
+                continue;
+
+            const response = dbus.connectionPopMessage(connection) orelse continue;
+            const is_match = (1 == dbus.messageIsSignal(
+                response,
+                "org.freedesktop.portal.Request",
+                "Response",
+            ));
+
+            if (is_match)
+                break :blk response;
+
+            //
+            // Only unref if we haven't matched. If we do match we want to return from block
+            // and unref after we've processed the response payload
+            //
+            dbus.messageUnref(response);
+        }
+
+        std.log.err("dbus_client: Failed to poll response to Screenshot message", .{});
+        return error.PollResponseFail;
+    };
+
+    dbus.busRemoveMatch(connection, screenshot_match_rule, null);
+
+    var file_uri: [*:0]const u8 = "";
+    {
+        var screenshot_response_iter: dbus.MessageIter = undefined;
+        _ = dbus.messageIterInit(screenshot_response, &screenshot_response_iter);
+
+        if (dbus.messageIterGetArgType(&screenshot_response_iter) != c.DBUS_TYPE_UINT32) {
+            return error.ReplyInvalidType;
+        }
+        var success_code: u32 = std.math.maxInt(u32);
+        dbus.messageIterGetBasic(&screenshot_response_iter, @ptrCast(*void, &success_code));
+
+        if (success_code != 0) {
+            std.log.err("dbus_client: SelectSources response message returned error code {d}", .{
+                success_code,
+            });
+            return error.SelectSourcesFail;
+        }
+
+        if (dbus.messageIterNext(&screenshot_response_iter) != 1) {
+            return error.InvalidResponse;
+        }
+
+        var next_type: i32 = dbus.messageIterGetArgType(&screenshot_response_iter);
+        assert(next_type == c.DBUS_TYPE_ARRAY);
+
+        var root_array_iter: dbus.MessageIter = undefined;
+        dbus.messageIterRecurse(&screenshot_response_iter, &root_array_iter);
+
+        next_type = dbus.messageIterGetArgType(&root_array_iter);
+        assert(next_type == c.DBUS_TYPE_DICT_ENTRY);
+
+        var root_dict_iter: dbus.MessageIter = undefined;
+        dbus.messageIterRecurse(&root_array_iter, &root_dict_iter);
+
+        next_type = dbus.messageIterGetArgType(&root_dict_iter);
+        assert(next_type == c.DBUS_TYPE_STRING);
+
+        var arg_label: [*:0]const u8 = undefined;
+        dbus.messageIterGetBasic(&root_dict_iter, @ptrCast(*void, &arg_label));
+
+        const expected_label = "uri";
+        for (expected_label, 0..) |char, char_i| {
+            if (char != arg_label[char_i])
+                return error.InvalidResponse;
+        }
+
+        _ = dbus.messageIterNext(&root_dict_iter);
+        next_type = dbus.messageIterGetArgType(&root_dict_iter);
+        assert(next_type == c.DBUS_TYPE_VARIANT);
+
+        var variant_iter: dbus.MessageIter = undefined;
+        dbus.messageIterRecurse(&root_dict_iter, &variant_iter);
+        next_type = dbus.messageIterGetArgType(&variant_iter);
+
+        assert(next_type == c.DBUS_TYPE_STRING);
+
+        dbus.messageIterGetBasic(&variant_iter, @ptrCast(*void, &file_uri));
+    }
+
+    // TODO: Do I have to deinit the message?
+
+    return file_uri;
+}
 
 pub fn state() screencapture.State {
     return backend_stream;

@@ -343,7 +343,7 @@ pub fn run() !void {
                         &.{},
                     );
                 },
-                .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady),
+                .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady, &onScreenshotFail),
                 .screenshot_format_set => {
                     const format_index = request_buffer.readInt(u16) catch 0;
                     assert(format_index < @typeInfo(Model.ImageFormat).Enum.fields.len);
@@ -897,18 +897,32 @@ fn screenCaptureInitFail(errcode: screencapture.InitErrorSet) void {
     std.debug.assert(false);
 }
 
-fn onScreenshotReady(width: u32, height: u32, pixels: [*]const graphics.RGBA(u8)) void {
+fn onScreenshotFail(reason: []const u8) void {
+    std.log.info("Failed to take screenshot: {s}", .{reason});
+}
+
+fn onScreenshotReady(response: screencapture.ScreenshotResponse) void {
     model_mutex.lock();
     const format = model.screenshot_format;
     model_mutex.unlock();
 
-    const save_image_thread = std.Thread.spawn(.{}, saveImageToFile, .{ width, height, pixels, format }) catch |err| {
-        std.log.err("Failed to create thread to open pipewire screencast. Error: {}", .{
-            err,
-        });
-        return;
-    };
-    save_image_thread.detach();
+    switch (response) {
+        .file_path => |path| {
+            std.log.info("Screenshot saved to {s}", .{path});
+        },
+        .file_path_c => |path| {
+            std.log.info("Screenshot saved to {s}", .{path});
+        },
+        .pixel_buffer => |buffer| {
+            const save_image_thread = std.Thread.spawn(.{}, saveImageToFile, .{ buffer.width, buffer.height, buffer.pixels, format }) catch |err| {
+                std.log.err("Failed to create thread to open pipewire screencast. Error: {}", .{
+                    err,
+                });
+                return;
+            };
+            save_image_thread.detach();
+        },
+    }
 }
 
 fn saveImageToFile(
