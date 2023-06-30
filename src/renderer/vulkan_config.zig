@@ -96,6 +96,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdPushConstants = true,
     .cmdCopyBufferToImage = true,
     .cmdBlitImage = true,
+    .cmdClearColorImage = true,
 });
 
 /// The features that we request to be enabled on our selected physical device

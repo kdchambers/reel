@@ -553,8 +553,28 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
     const device_dispatch = vulkan_core.device_dispatch;
 
-    @memset(canvas_mapped_memory, RGBA(u8).black);
-    @memset(unscaled_canvas_mapped_memory, RGBA(u8).black);
+    const clear_color_value = vk.ClearColorValue{
+        .uint_32 = .{ 255, 0, 0, 255 },
+    };
+
+    const ranges = [_]vk.ImageSubresourceRange{
+        .{
+            .aspect_mask = .{ .color_bit = true },
+            .layer_count = 1,
+            .level_count = 1,
+            .base_mip_level = 0,
+            .base_array_layer = 0,
+        },
+    };
+
+    device_dispatch.cmdClearColorImage(
+        command_buffer,
+        canvas_image,
+        .general,
+        &clear_color_value,
+        ranges.len,
+        &ranges,
+    );
 
     for (0..source_count) |i| {
         const draw_context_ptr: *const DrawContext = &draw_context_buffer[i];
