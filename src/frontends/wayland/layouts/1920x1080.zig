@@ -384,6 +384,27 @@ pub fn draw(
             },
             .screenshot => {
                 _ = renderer.drawText("Screenshot", activity_region.toExtent(), screen_scale, .medium, .regular, RGBA.white, .center);
+
+                var start_button_region = Region{};
+                start_button_region.anchor.right = region.right();
+                start_button_region.anchor.bottom = region.bottom();
+                start_button_region.margin.bottom = 10.0 * screen_scale.vertical;
+                start_button_region.margin.right = 10.0 * screen_scale.horizontal;
+
+                start_button_region.height = 32.0 * screen_scale.vertical;
+                start_button_region.width = 120.0 * screen_scale.horizontal;
+
+                ui_state.activity_start_button.label = "Screenshot";
+
+                ui_state.activity_start_button.color = RGBA.fromInt(55, 55, 55, 255);
+                ui_state.activity_start_button.color_hovered = RGBA.fromInt(65, 65, 65, 255);
+                ui_state.activity_start_button.text_color = RGBA.white;
+
+                ui_state.activity_start_button.draw(
+                    start_button_region.toExtent(),
+                    screen_scale,
+                    .{ .rounding_radius = 4.0 },
+                );
             },
         }
     }
