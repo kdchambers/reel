@@ -55,7 +55,7 @@ pub fn Profiler(comptime profile_enabled: bool, comptime Action: type) type {
             });
             for (self.entry_buffer[0..self.entry_count], 0..) |entry, i| {
                 if (entry.parent == root_index)
-                    self.log(@intCast(u16, i), indent + 1, threshold_us);
+                    self.log(@as(u16, @intCast(i)), indent + 1, threshold_us);
             }
         }
 
@@ -63,11 +63,11 @@ pub fn Profiler(comptime profile_enabled: bool, comptime Action: type) type {
             if (comptime !profile_enabled)
                 return;
             const current = std.time.nanoTimestamp();
-            const start = @intCast(u64, current - self.base_timestamp);
+            const start = @as(u64, @intCast(current - self.base_timestamp));
             self.entry_buffer[self.entry_count] = .{
                 .start_ns = start,
                 .action = action,
-                .parent = @intCast(u16, self.entry_index),
+                .parent = @as(u16, @intCast(self.entry_index)),
             };
             const action_index = @intFromEnum(action);
             self.stats_buffer[action_index].times_called += 1;
@@ -80,7 +80,7 @@ pub fn Profiler(comptime profile_enabled: bool, comptime Action: type) type {
         pub fn pop(self: *@This(), comptime matched_action: Action) void {
             if (comptime !profile_enabled)
                 return;
-            const current = @intCast(u64, std.time.nanoTimestamp() - self.base_timestamp);
+            const current = @as(u64, @intCast(std.time.nanoTimestamp() - self.base_timestamp));
             const entry_index = self.entry_index;
             const duration: u64 = current - self.entry_buffer[entry_index].start_ns;
             const action = self.entry_buffer[entry_index].action;

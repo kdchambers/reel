@@ -160,7 +160,7 @@ pub fn draw(
                 for (model.video_streams, 0..) |stream, i| {
                     const extent = Extent3D(f32){
                         .x = right_sidebar_region.left() + margin_right,
-                        .y = header_bar_extent.y + (@floatFromInt(f32, i + 1) * item_height),
+                        .y = header_bar_extent.y + (@as(f32, @floatFromInt(i + 1)) * item_height),
                         .z = ui_layer.middle,
                         .width = item_width,
                         .height = item_height,
@@ -288,7 +288,7 @@ pub fn draw(
         region.anchor.bottom = activity_region.bottom();
         region.height = activity_region.height.? - topbar_region.height.?;
 
-        switch (@enumFromInt(UIState.Activity, ui_state.activity_section.active_index)) {
+        switch (@as(UIState.Activity, @enumFromInt(ui_state.activity_section.active_index))) {
             .record => {
                 var start_button_region = Region{};
                 start_button_region.anchor.right = region.right();
@@ -418,8 +418,8 @@ pub fn draw(
             };
         };
         const dimensions_pixels = geometry.Dimensions2D(f32){
-            .width = @floatFromInt(f32, frame_dimensions.width),
-            .height = @floatFromInt(f32, frame_dimensions.height),
+            .width = @floatFromInt(frame_dimensions.width),
+            .height = @floatFromInt(frame_dimensions.height),
         };
 
         const margin_pixels: f32 = 10.0;
@@ -482,7 +482,7 @@ pub fn draw(
         const background_color = if (model.recording_context.state == .recording)
             RGB.fromInt(150, 20, 20)
         else
-            RGB.fromInt(150, 150, 150);
+            RGB.fromInt(11, 11, 11);
 
         _ = renderer.drawQuad(preview_region.toExtent(), background_color.toRGBA(), .bottom_left);
 
@@ -497,8 +497,8 @@ pub fn draw(
 
         if (model.video_streams.len > 0) {
             const canvas_dimensions_pixels: Dimensions2D(u32) = .{
-                .width = @intFromFloat(u32, @floor(@floatFromInt(f32, frame_dimensions.width) * scale)),
-                .height = @intFromFloat(u32, @floor(@floatFromInt(f32, frame_dimensions.height) * scale)),
+                .width = @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.width)) * scale)),
+                .height = @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.height)) * scale)),
             };
             try renderer.resizeCanvas(canvas_dimensions_pixels);
             preview_extent.z = ui_layer.low;

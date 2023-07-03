@@ -265,8 +265,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     renderer.init(
         allocator,
-        @ptrCast(*renderer.Display, wayland_core.display),
-        @ptrCast(*renderer.Surface, surface),
+        @ptrCast(wayland_core.display),
+        @ptrCast(surface),
         screen_dimensions,
     ) catch |err| {
         std.log.err("Failed to initialize vulkan renderer. Error: {}", .{err});
@@ -380,19 +380,19 @@ fn processWidgets(model: *const Model) !void {
         slot.getPtr().state.clear();
         if (state_copy.left_click_press) {
             stream_drag_context = .{
-                .start_coordinates = renderer.sourceRelativePlacement(@intCast(u16, i)),
+                .start_coordinates = renderer.sourceRelativePlacement(@intCast(i)),
                 .start_mouse_coordinates = .{
-                    .x = @intFromFloat(u16, @floor(mouse_coordinates.x)),
-                    .y = @intFromFloat(u16, @floor(mouse_coordinates.y)),
+                    .x = @intFromFloat(@floor(mouse_coordinates.x)),
+                    .y = @intFromFloat(@floor(mouse_coordinates.y)),
                 },
                 .mouse_event_slot_index = slot,
-                .source_index = @intCast(u16, i),
+                .source_index = @intCast(i),
             };
         }
     }
 
     {
-        const mouse_x_coordinate = @floatCast(f32, mouse_coordinates.x) * screen_scale.horizontal;
+        const mouse_x_coordinate: f32 = @as(f32, @floatCast(mouse_coordinates.x)) * screen_scale.horizontal;
         const response = ui_state.record_bitrate_slider.update(mouse_x_coordinate, button_state == .pressed, screen_scale);
         if (response.visual_change or response.active_index != null)
             is_render_requested = true;
@@ -431,7 +431,7 @@ fn processWidgets(model: *const Model) !void {
             const entry_response = entry.remove_icon.update();
             if (entry_response.clicked) {
                 request_encoder.write(.remove_source) catch unreachable;
-                request_encoder.writeInt(u16, @intCast(u16, i)) catch unreachable;
+                request_encoder.writeInt(u16, @as(u16, @intCast(i))) catch unreachable;
             }
             if (entry_response.modified)
                 is_render_requested = true;
@@ -481,7 +481,7 @@ fn processWidgets(model: *const Model) !void {
     {
         const response = ui_state.activity_start_button.update();
         if (response.clicked) {
-            switch (@enumFromInt(UIState.Activity, ui_state.activity_section.active_index)) {
+            switch (@as(UIState.Activity, @enumFromInt(ui_state.activity_section.active_index))) {
                 .record => {
                     switch (model.recording_context.state) {
                         .idle => request_encoder.write(.record_start) catch unreachable,
@@ -514,7 +514,7 @@ fn processWidgets(model: *const Model) !void {
                         for (sources, 0..) |source, source_index| {
                             ui_state.select_video_source_popup.label_buffer[source_index] = source.name;
                         }
-                        ui_state.select_video_source_popup.label_count = @intCast(u16, sources.len);
+                        ui_state.select_video_source_popup.label_count = @intCast(sources.len);
                         ui_state.add_source_state = .select_source;
                     } else {
                         //
@@ -578,42 +578,42 @@ fn processWidgets(model: *const Model) !void {
     {
         for (ui_state.video_source_mouse_edge_buffer[0..ui_state.video_source_mouse_event_count], 0..) |edges, i| {
             if (edges.edgeClicked()) |edge| {
-                const relative_extent = renderer.sourceRelativeExtent(@intCast(u16, i));
+                const relative_extent = renderer.sourceRelativeExtent(@intCast(i));
                 switch (edge) {
                     .left => {
                         std.log.info("Left edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .left,
-                            .start_value = @floatFromInt(f32, relative_extent.x),
-                            .start_mouse_value = @floatCast(f32, mouse_coordinates.x),
-                            .source_index = @intCast(u16, i),
+                            .start_value = @floatFromInt(relative_extent.x),
+                            .start_mouse_value = @as(f32, @floatCast(mouse_coordinates.x)),
+                            .source_index = @intCast(i),
                         };
                     },
                     .right => {
                         std.log.info("Right edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .right,
-                            .start_value = @floatFromInt(f32, relative_extent.x + relative_extent.width),
-                            .start_mouse_value = @floatCast(f32, mouse_coordinates.x),
-                            .source_index = @intCast(u16, i),
+                            .start_value = @floatFromInt(relative_extent.x + relative_extent.width),
+                            .start_mouse_value = @as(f32, @floatCast(mouse_coordinates.x)),
+                            .source_index = @intCast(i),
                         };
                     },
                     .top => {
                         std.log.info("Top edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .top,
-                            .start_value = @fabs(@floatFromInt(f32, relative_extent.y) - @floatFromInt(f32, relative_extent.height)),
-                            .start_mouse_value = @floatCast(f32, mouse_coordinates.y),
-                            .source_index = @intCast(u16, i),
+                            .start_value = @fabs(@as(f32, @floatFromInt(relative_extent.y)) - @as(f32, @floatFromInt(relative_extent.height))),
+                            .start_mouse_value = @floatCast(mouse_coordinates.y),
+                            .source_index = @intCast(i),
                         };
                     },
                     .bottom => {
                         std.log.info("Bottom edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .bottom,
-                            .start_value = @floatFromInt(f32, relative_extent.y),
-                            .start_mouse_value = @floatCast(f32, mouse_coordinates.y),
-                            .source_index = @intCast(u16, i),
+                            .start_value = @floatFromInt(relative_extent.y),
+                            .start_mouse_value = @as(f32, @floatCast(mouse_coordinates.y)),
+                            .source_index = @intCast(i),
                         };
                     },
                     else => unreachable,
@@ -799,9 +799,9 @@ pub fn deinit() void {
     xdg_surface.destroy();
 
     const current_time_ns = std.time.nanoTimestamp();
-    const rendering_duration = @intCast(u64, current_time_ns - rendering_start);
-    const rendering_duration_seconds = @floatFromInt(f32, rendering_duration) / std.time.ns_per_s;
-    const frames_rendered_per_second = @floatFromInt(f32, rendered_frame_count) / rendering_duration_seconds;
+    const rendering_duration = @as(u64, @intCast(current_time_ns - rendering_start));
+    const rendering_duration_seconds = @as(f32, @floatFromInt(rendering_duration)) / std.time.ns_per_s;
+    const frames_rendered_per_second = @as(f32, @floatFromInt(rendered_frame_count)) / rendering_duration_seconds;
     std.log.info("wayland fps: {d}", .{frames_rendered_per_second});
 }
 
@@ -829,7 +829,7 @@ fn syncSourceProviders(model: *const Model) void {
     for (model.webcam_source_providers[0].sources, 0..) |source, source_index| {
         ui_state.select_webcam_source_popup.label_buffer[source_index] = source.name;
     }
-    ui_state.select_webcam_source_popup.label_count = @intCast(u16, model.webcam_source_providers[0].sources.len);
+    ui_state.select_webcam_source_popup.label_count = @intCast(model.webcam_source_providers[0].sources.len);
 }
 
 inline fn setCursorState(cursor_state: CursorState) void {
@@ -974,13 +974,13 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
         .configure => |configure| {
             if (configure.width > 0 and configure.width != screen_dimensions.width) {
                 framebuffer_resized = true;
-                screen_dimensions.width = @intCast(u16, configure.width);
-                screen_scale.horizontal = 2.0 / @floatFromInt(f32, screen_dimensions.width);
+                screen_dimensions.width = @intCast(configure.width);
+                screen_scale.horizontal = 2.0 / @as(f32, @floatFromInt(screen_dimensions.width));
             }
             if (configure.height > 0 and configure.height != screen_dimensions.height) {
                 framebuffer_resized = true;
-                screen_dimensions.height = @intCast(u16, configure.height);
-                screen_scale.vertical = 2.0 / @floatFromInt(f32, screen_dimensions.height);
+                screen_dimensions.height = @intCast(configure.height);
+                screen_scale.vertical = 2.0 / @as(f32, @floatFromInt(screen_dimensions.height));
             }
             std.log.info("xdg_toplevel configure. Dimensions {d} x {d}", .{
                 screen_dimensions.width,
@@ -1038,7 +1038,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
             const image = cursor.images[0];
             const image_buffer = image.getBuffer() catch return;
             cursor_surface.attach(image_buffer, 0, 0);
-            wayland_core.pointer.setCursor(enter.serial, cursor_surface, @intCast(i32, image.hotspot_x), @intCast(i32, image.hotspot_y));
+            wayland_core.pointer.setCursor(enter.serial, cursor_surface, @intCast(image.hotspot_x), @intCast(image.hotspot_y));
             cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
             cursor_surface.commit();
         },
@@ -1059,12 +1059,12 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
 
             if (stream_drag_context) |drag| {
                 const mouse_delta = Coordinates2D(i32){
-                    .x = @intFromFloat(i32, motion_mouse_x) - @intCast(i32, drag.start_mouse_coordinates.x),
-                    .y = @intCast(i32, drag.start_mouse_coordinates.y) - @intFromFloat(i32, motion_mouse_y),
+                    .x = @as(i32, @intFromFloat(motion_mouse_x)) - @as(i32, @intCast(drag.start_mouse_coordinates.x)),
+                    .y = @as(i32, @intCast(drag.start_mouse_coordinates.y)) - @as(i32, @intFromFloat(motion_mouse_y)),
                 };
                 const new_placement = Coordinates2D(u16){
-                    .x = @intCast(u16, @max(0, drag.start_coordinates.x + mouse_delta.x)),
-                    .y = @intCast(u16, @max(0, drag.start_coordinates.y + mouse_delta.y)),
+                    .x = @intCast(@max(0, drag.start_coordinates.x + mouse_delta.x)),
+                    .y = @intCast(@max(0, drag.start_coordinates.y + mouse_delta.y)),
                 };
                 renderer.moveSource(drag.source_index, new_placement);
                 is_record_requested = true;
@@ -1074,19 +1074,19 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 switch (resize_edge.edge) {
                     .left => {
                         // Needs to be a normalized value
-                        const mouse_delta_x = @floatCast(f32, motion_mouse_x - resize_edge.start_mouse_value);
+                        const mouse_delta_x: f32 = @floatCast(motion_mouse_x - resize_edge.start_mouse_value);
                         renderer.moveEdgeLeft(resize_edge.source_index, resize_edge.start_value + mouse_delta_x);
                     },
                     .right => {
-                        const mouse_delta_x = @floatCast(f32, motion_mouse_x - resize_edge.start_mouse_value);
+                        const mouse_delta_x: f32 = @floatCast(motion_mouse_x - resize_edge.start_mouse_value);
                         renderer.moveEdgeRight(resize_edge.source_index, resize_edge.start_value + mouse_delta_x);
                     },
                     .bottom => {
-                        const mouse_delta_y = @floatCast(f32, resize_edge.start_mouse_value - motion_mouse_y);
+                        const mouse_delta_y: f32 = @floatCast(resize_edge.start_mouse_value - motion_mouse_y);
                         renderer.moveEdgeBottom(resize_edge.source_index, resize_edge.start_value + mouse_delta_y);
                     },
                     .top => {
-                        const mouse_delta_y = @floatCast(f32, resize_edge.start_mouse_value - motion_mouse_y);
+                        const mouse_delta_y: f32 = @floatCast(resize_edge.start_mouse_value - motion_mouse_y);
                         renderer.moveEdgeTop(resize_edge.source_index, resize_edge.start_value + mouse_delta_y);
                     },
                     else => unreachable,
@@ -1109,7 +1109,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 .y = mouse_coordinates.y,
             };
 
-            const mouse_button = @enumFromInt(MouseButton, button.button);
+            const mouse_button: MouseButton = @enumFromInt(button.button);
             button_clicked = .none;
 
             if (mouse_button == .left)
@@ -1126,12 +1126,12 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
             if (mouse_button == .left and button_state == .released) {
                 if (stream_drag_context) |drag| {
                     const mouse_delta = Coordinates2D(i32){
-                        .x = @intFromFloat(i32, mouse_coordinates.x) - @intCast(i32, drag.start_mouse_coordinates.x),
-                        .y = @intCast(i32, drag.start_mouse_coordinates.y) - @intFromFloat(i32, mouse_coordinates.y),
+                        .x = @as(i32, @intFromFloat(mouse_coordinates.x)) - @as(i32, @intCast(drag.start_mouse_coordinates.x)),
+                        .y = @as(i32, @intCast(drag.start_mouse_coordinates.y)) - @as(i32, @intFromFloat(mouse_coordinates.y)),
                     };
                     const extent_ptr: *Extent2D(f32) = &drag.mouse_event_slot_index.getPtr().extent;
-                    extent_ptr.x += @floatFromInt(f32, mouse_delta.x) * screen_scale.horizontal;
-                    extent_ptr.y += -@floatFromInt(f32, mouse_delta.y) * screen_scale.vertical;
+                    extent_ptr.x += @as(f32, @floatFromInt(mouse_delta.x)) * screen_scale.horizontal;
+                    extent_ptr.y += -@as(f32, @floatFromInt(mouse_delta.y)) * screen_scale.vertical;
                     stream_drag_context = null;
                 }
 
@@ -1149,8 +1149,8 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
             });
 
             {
-                const mouse_x = @intFromFloat(u16, mouse_coordinates.x);
-                const mouse_y = @intFromFloat(u16, mouse_coordinates.y);
+                const mouse_x: u16 = @intFromFloat(mouse_coordinates.x);
+                const mouse_y: u16 = @intFromFloat(mouse_coordinates.y);
 
                 std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{
                     mouse_x,
@@ -1206,15 +1206,15 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, _: *const void) void
                 }
             }
 
-            if (@intFromFloat(u16, mouse_coordinates.y) > screen_dimensions.height)
+            if (@as(u16, @intFromFloat(mouse_coordinates.y)) > screen_dimensions.height)
                 return;
 
-            if (@intFromFloat(u16, mouse_coordinates.x) > screen_dimensions.width)
+            if (@as(u16, @intFromFloat(mouse_coordinates.x)) > screen_dimensions.width)
                 return;
 
             if (ui_state.window_decoration_requested and mouse_button == .left) {
                 // Start interactive window move if mouse coordinates are in window decorations bounds
-                if (@intFromFloat(u32, mouse_coordinates.y) <= decoration_height_pixels) {
+                if (@as(u32, @intFromFloat(mouse_coordinates.y)) <= decoration_height_pixels) {
                     xdg_toplevel.move(wayland_core.seat, button.serial);
                 }
             }

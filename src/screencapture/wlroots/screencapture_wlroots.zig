@@ -113,7 +113,7 @@ pub fn init(
             max_stream_count,
         });
     }
-    output_display_count = @intCast(u32, @min(max_stream_count, wayland_core.outputs.len));
+    output_display_count = @intCast(@min(max_stream_count, wayland_core.outputs.len));
 
     //
     // This perhaps isn't the most memory efficient, but we're going to capture a frame for each display
@@ -121,7 +121,7 @@ pub fn init(
     // we allocate all the required memory to store `frames_per_stream` frames for each display
     //
     for (0..output_display_count) |i| {
-        stream_buffer[i].output_index = @intCast(u32, i);
+        stream_buffer[i].output_index = @intCast(i);
         stream_buffer[i].stream_state = .uninitialized;
         inline for (&stream_buffer[i].frame_index_buffer) |*index| {
             index.* = invalid_frame;
@@ -157,8 +157,8 @@ fn queryStreamInfo(allocator: std.mem.Allocator) []screencapture.StreamInfo {
         streams[i] = .{
             .name = wayland_core.outputs.buffer[i].name,
             .dimensions = .{
-                .width = @intCast(u32, wayland_core.outputs.buffer[i].dimensions.width),
-                .height = @intCast(u32, wayland_core.outputs.buffer[i].dimensions.height),
+                .width = @intCast(wayland_core.outputs.buffer[i].dimensions.width),
+                .height = @intCast(wayland_core.outputs.buffer[i].dimensions.height),
             },
             .pixel_format = null,
         };
@@ -178,8 +178,8 @@ fn streamInfo(handle: StreamHandle) screencapture.StreamInfo {
     return .{
         .name = wayland_core.outputs.buffer[output_index].name,
         .dimensions = .{
-            .width = @intCast(u32, dimensions.width),
-            .height = @intCast(u32, dimensions.height),
+            .width = @intCast(dimensions.width),
+            .height = @intCast(dimensions.height),
         },
         .pixel_format = pixel_format,
     };
@@ -254,8 +254,8 @@ fn captureNextFrame() void {
                 };
                 const reference_index: usize = (i * frames_per_stream) + frame_index_index;
                 stream_frame_reference_buffer[reference_index] = .{
-                    .stream_index = @intCast(u16, i),
-                    .frame_index = @intCast(u16, frame_index_index),
+                    .stream_index = @intCast(i),
+                    .frame_index = @intCast(frame_index_index),
                 };
                 stream_buffer[i].captured_frames[frame_index_index].setListener(
                     *const StreamFrameReference,
@@ -277,7 +277,7 @@ fn streamFrameCaptureCallback(frame: *wlr.ScreencopyFrameV1, event: wlr.Screenco
         .buffer_done => frame.copy(stream_ptr.buffers[frame_reference.frame_index].buffer),
         .ready => {
             const buffer_memory = buffer_allocator.mappedMemoryForBuffer(&stream_ptr.buffers[frame_reference.frame_index]);
-            const unconverted_pixels = @ptrCast([*]PixelType, buffer_memory.ptr);
+            const unconverted_pixels: [*]PixelType = @ptrCast(buffer_memory.ptr);
             switch (stream_ptr.format) {
                 //
                 // Nothing to do

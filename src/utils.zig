@@ -38,12 +38,12 @@ pub const DateTime = struct {
         const time = c.time(null);
         const time_info = c.localtime(&time).*;
         return .{
-            .year = @intCast(u16, time_info.tm_year + 1900),
-            .month = @intCast(u8, time_info.tm_mon + 1),
-            .day = @intCast(u8, time_info.tm_mday),
-            .hour = @intCast(u8, time_info.tm_hour),
-            .minute = @intCast(u8, time_info.tm_min),
-            .second = @intCast(u8, time_info.tm_sec),
+            .year = @intCast(time_info.tm_year + 1900),
+            .month = @intCast(time_info.tm_mon + 1),
+            .day = @intCast(time_info.tm_mday),
+            .hour = @intCast(time_info.tm_hour),
+            .minute = @intCast(time_info.tm_min),
+            .second = @intCast(time_info.tm_sec),
         };
     }
 };
@@ -56,10 +56,10 @@ pub const Duration = struct {
 
     pub fn fromNanoseconds(ns: u64) @This() {
         return .{
-            .hours = @intCast(u8, @divFloor(ns, std.time.ns_per_hour) % 24),
-            .minutes = @intCast(u8, @divFloor(ns, std.time.ns_per_min) % 60),
-            .seconds = @intCast(u8, @divFloor(ns, std.time.ns_per_s) % 60),
-            .milliseconds = @intCast(u16, @divFloor(ns, std.time.ns_per_ms) % 1000),
+            .hours = @intCast(@divFloor(ns, std.time.ns_per_hour) % 24),
+            .minutes = @intCast(@divFloor(ns, std.time.ns_per_min) % 60),
+            .seconds = @intCast(@divFloor(ns, std.time.ns_per_s) % 60),
+            .milliseconds = @intCast(@divFloor(ns, std.time.ns_per_ms) % 1000),
         };
     }
 };
@@ -86,7 +86,7 @@ pub fn Encoder(comptime Encoding: type, comptime buffer_size: comptime_int) type
                     return null;
                 assert(self.index < self.buffer.len);
                 defer self.index += 1;
-                return @enumFromInt(Encoding, self.buffer[self.index]);
+                return @enumFromInt(self.buffer[self.index]);
             }
 
             pub fn readString(self: *@This()) []const u8 {
@@ -112,7 +112,7 @@ pub fn Encoder(comptime Encoding: type, comptime buffer_size: comptime_int) type
                 if (self.index + bytes_to_read > self.buffer.len)
                     return error.EndOfBuffer;
                 defer self.index += bytes_to_read;
-                return @ptrCast(*T, @alignCast(alignment, &self.buffer[self.index])).*;
+                return @as(*T, @ptrCast(@alignCast(&self.buffer[self.index]))).*;
             }
         };
 
@@ -134,7 +134,7 @@ pub fn Encoder(comptime Encoding: type, comptime buffer_size: comptime_int) type
         pub fn writeString(self: *@This(), bytes: []const u8) !void {
             if ((self.used + bytes.len + @sizeOf(u16)) >= self.buffer.len)
                 return error.EndOfBuffer;
-            self.writeInt(u16, @intCast(u16, bytes.len)) catch unreachable;
+            self.writeInt(u16, @intCast(bytes.len)) catch unreachable;
             var i: usize = self.used;
             for (bytes) |char| {
                 self.buffer[i] = char;
@@ -157,7 +157,7 @@ pub fn Encoder(comptime Encoding: type, comptime buffer_size: comptime_int) type
             const bytes_to_read = @sizeOf(T);
             if (self.used + bytes_to_read > self.buffer.len)
                 return error.EndOfBuffer;
-            @ptrCast(*T, @alignCast(alignment, &self.buffer[self.used])).* = value;
+            @as(*T, @ptrCast(@alignCast(&self.buffer[self.used]))).* = value;
             self.used += bytes_to_read;
         }
 

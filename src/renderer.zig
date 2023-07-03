@@ -137,7 +137,7 @@ pub inline fn init(
     swapchain_dimensions = dimensions;
     allocator = ally;
 
-    try vulkan_core.init(@ptrCast(*vk.wl_display, wayland_display), @ptrCast(*vk.wl_surface, wayland_surface));
+    try vulkan_core.init(@ptrCast(wayland_display), @ptrCast(wayland_surface));
 
     supported_gpu_memory_types = try render_pass.requiredMemoryTypeIndices();
 
@@ -150,7 +150,7 @@ pub inline fn init(
         try gpu_memory_allocator.init(gpu_memory_index, required_gpu_memory);
 
     try setupSwapchain(true);
-    const swapchain_image_count = @intCast(u32, swapchain_images.len);
+    const swapchain_image_count: u32 = @intCast(swapchain_images.len);
     command_buffers = try allocateCommandBuffers(swapchain_image_count);
     try render_pass.init(swapchain_dimensions, swapchain_surface_format.format, gpu_memory_index);
     try setupSynchronization();
@@ -304,7 +304,7 @@ pub fn resizeSwapchain(dimensions: Dimensions2D(u32)) !void {
     try setupFramebuffers();
 
     const end_timestamp = std.time.nanoTimestamp();
-    std.log.info("Swapchain resized in {}", .{std.fmt.fmtDuration(@intCast(u64, end_timestamp - start_timestamp))});
+    std.log.info("Swapchain resized in {}", .{std.fmt.fmtDuration(@as(u64, @intCast(end_timestamp - start_timestamp)))});
 }
 
 pub fn recordDrawCommands() !void {
@@ -318,9 +318,9 @@ pub fn recordDrawCommands() !void {
 
     const clear_color = graphics.RGBA(f32).fromInt(28, 30, 35, 255);
     const clear_colors = [3]vk.ClearValue{
-        .{ .color = .{ .float_32 = @bitCast([4]f32, clear_color) } },
+        .{ .color = .{ .float_32 = @as([4]f32, @bitCast(clear_color)) } },
         .{ .depth_stencil = .{ .depth = 1.0, .stencil = 0 } },
-        .{ .color = .{ .float_32 = @bitCast([4]f32, clear_color) } },
+        .{ .color = .{ .float_32 = @as([4]f32, @bitCast(clear_color)) } },
     };
 
     const swapchain_extent = vk.Extent2D{
@@ -409,9 +409,9 @@ pub fn renderFrame() !void {
     const command_submit_info = vk.SubmitInfo{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = &wait_semaphores,
-        .p_wait_dst_stage_mask = @ptrCast([*]align(4) const vk.PipelineStageFlags, &wait_stages),
+        .p_wait_dst_stage_mask = @ptrCast(&wait_stages),
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &command_buffers[swapchain_image_index]),
+        .p_command_buffers = @ptrCast(&command_buffers[swapchain_image_index]),
         .signal_semaphore_count = 1,
         .p_signal_semaphores = &signal_semaphores,
     };
@@ -419,13 +419,13 @@ pub fn renderFrame() !void {
     try device_dispatch.resetFences(
         logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &inflight_fences[current_frame]),
+        @ptrCast(&inflight_fences[current_frame]),
     );
 
     try device_dispatch.queueSubmit(
         vulkan_core.graphics_present_queue,
         1,
-        @ptrCast([*]const vk.SubmitInfo, &command_submit_info),
+        @ptrCast(&command_submit_info),
         inflight_fences[current_frame],
     );
 
@@ -435,7 +435,7 @@ pub fn renderFrame() !void {
         .p_wait_semaphores = &signal_semaphores,
         .swapchain_count = 1,
         .p_swapchains = &swapchains,
-        .p_image_indices = @ptrCast([*]const u32, &swapchain_image_index),
+        .p_image_indices = @ptrCast(&swapchain_image_index),
         .p_results = null,
     };
 
@@ -488,11 +488,11 @@ fn setupSwapchain(transparancy_enabled: bool) !void {
     }
 
     if (surface_capabilities.current_extent.width != 0xFFFFFFFF) {
-        swapchain_dimensions.width = @intCast(u16, surface_capabilities.current_extent.width);
+        swapchain_dimensions.width = @intCast(surface_capabilities.current_extent.width);
     }
 
     if (surface_capabilities.current_extent.height != 0xFFFFFFFF) {
-        swapchain_dimensions.height = @intCast(u16, surface_capabilities.current_extent.height);
+        swapchain_dimensions.height = @intCast(surface_capabilities.current_extent.height);
     }
 
     assert(swapchain_dimensions.width >= surface_capabilities.min_image_extent.width);
@@ -563,7 +563,7 @@ fn setupSwapchain(transparancy_enabled: bool) !void {
 
 fn getSwapchainImages(swapchain_image_buffer: []vk.Image) !void {
     const device_dispatch = vulkan_core.device_dispatch;
-    var image_count = @intCast(u32, swapchain_image_buffer.len);
+    var image_count: u32 = @intCast(swapchain_image_buffer.len);
     if (.success != (try device_dispatch.getSwapchainImagesKHR(
         vulkan_core.logical_device,
         swapchain,
@@ -629,7 +629,7 @@ fn findGpuLocalMemoryIndex(minimum_size_bytes: u32) ?u32 {
         }
 
         const memory_flags = memory_entry.property_flags;
-        const has_required_bits = (supported_gpu_memory_types & (@as(u64, 1) << @intCast(u6, memory_type_index))) != 0;
+        const has_required_bits = (supported_gpu_memory_types & (@as(u64, 1) << @as(u6, @intCast(memory_type_index)))) != 0;
         if (has_required_bits and memory_flags.device_local_bit) {
             if (selected_memory_type_index_opt) |*selected_memory_type_index| {
                 if (heap_size > selected_heap_size) {
@@ -693,7 +693,7 @@ inline fn waitForFences(fences: []vk.Fence) !void {
     assert(fences.len > 0);
     _ = try vulkan_core.device_dispatch.waitForFences(
         vulkan_core.logical_device,
-        @intCast(u32, fences.len),
+        @as(u32, @intCast(fences.len)),
         fences.ptr,
         vk.TRUE,
         std.math.maxInt(u64),

@@ -156,11 +156,11 @@ pub fn close() void {
     state = .closed;
     std.log.info("video_encoder: shutdown successful", .{});
 
-    const audio_written = @floatFromInt(f32, samples_written) / 44100.0;
+    const audio_written = @as(f32, @floatFromInt(samples_written)) / 44100.0;
     std.log.info("{d} seconds of audio written", .{audio_written});
 
     const ms_per_frame: f32 = 1000.0 / 60.0;
-    const video_written = @floatFromInt(f32, video_frames_written) * ms_per_frame;
+    const video_written = @as(f32, @floatFromInt(video_frames_written)) * ms_per_frame;
     std.log.info("{d} seconds of video written", .{video_written / 1000.0});
 }
 
@@ -186,12 +186,12 @@ fn setupSoftwareCodec(options: RecordOptions) !void {
         return;
     };
 
-    video_codec_context.width = @intCast(i32, options.dimensions.width);
-    video_codec_context.height = @intCast(i32, options.dimensions.height);
+    video_codec_context.width = @as(i32, @intCast(options.dimensions.width));
+    video_codec_context.height = @as(i32, @intCast(options.dimensions.height));
     video_codec_context.color_range = @intFromEnum(libav.ColorRange.jpeg);
     video_codec_context.bit_rate = 1024 * 1024 * 16;
-    video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
-    video_codec_context.framerate = .{ .num = @intCast(i32, options.fps), .den = 1 };
+    video_codec_context.time_base = .{ .num = 1, .den = @as(i32, @intCast(options.fps)) };
+    video_codec_context.framerate = .{ .num = @as(i32, @intCast(options.fps)), .den = 1 };
     video_codec_context.gop_size = 60;
     video_codec_context.max_b_frames = 4;
     video_codec_context.pix_fmt = video_frame_pixel_format;
@@ -248,12 +248,12 @@ fn setupHWAccelCodec(options: RecordOptions) !void {
         return;
     };
 
-    video_codec_context.width = @intCast(i32, options.dimensions.width);
-    video_codec_context.height = @intCast(i32, options.dimensions.height);
+    video_codec_context.width = @as(i32, @intCast(options.dimensions.width));
+    video_codec_context.height = @as(i32, @intCast(options.dimensions.height));
     video_codec_context.color_range = @intFromEnum(libav.ColorRange.jpeg);
     video_codec_context.bit_rate = 1024 * 1024 * 16;
-    video_codec_context.time_base = .{ .num = 1, .den = @intCast(i32, options.fps) };
-    video_codec_context.framerate = .{ .num = @intCast(i32, options.fps), .den = 1 };
+    video_codec_context.time_base = .{ .num = 1, .den = @as(i32, @intCast(options.fps)) };
+    video_codec_context.framerate = .{ .num = @as(i32, @intCast(options.fps)), .den = 1 };
     video_codec_context.gop_size = 60;
     video_codec_context.max_b_frames = 4;
     video_codec_context.pix_fmt = video_frame_pixel_format;
@@ -265,8 +265,7 @@ fn setupHWAccelCodec(options: RecordOptions) !void {
     }
 
     assert(hw_device_context.data != null);
-    const alignment = @alignOf(libav.HWDeviceContext);
-    assert(@ptrCast(*const libav.HWDeviceContext, @alignCast(alignment, hw_device_context.data)).type == libav.HWDeviceType.vaapi);
+    assert(@as(*const libav.HWDeviceContext, @ptrCast(@alignCast(hw_device_context.data))).type == libav.HWDeviceType.vaapi);
 
     //
     // Set HW frame context
@@ -277,7 +276,7 @@ fn setupHWAccelCodec(options: RecordOptions) !void {
         return error.SetupHwDecodingFail;
     };
 
-    var frames_context = @ptrCast(*libav.HWFramesContext, @alignCast(@alignOf(libav.HWFramesContext), hw_frames_ref.data));
+    var frames_context = @as(*libav.HWFramesContext, @ptrCast(@alignCast(hw_frames_ref.data)));
 
     frames_context.format = video_frame_pixel_format;
     frames_context.sw_format = video_frame_format;
@@ -401,7 +400,7 @@ pub fn open(options: RecordOptions) !void {
         std.log.info("Supported Audio sample formats", .{});
         var i: usize = 0;
         while (sample_formats[i] != -1) : (i += 1) {
-            std.log.info("{s}", .{@tagName(@enumFromInt(libav.SampleFormat, sample_formats[i]))});
+            std.log.info("{s}", .{@tagName(@as(libav.SampleFormat, @enumFromInt(sample_formats[i])))});
         }
     }
 
@@ -492,7 +491,7 @@ pub fn open(options: RecordOptions) !void {
         audio_codec_context.bit_rate,
         audio_codec_context.channels,
         audio_codec_context.channel_layout,
-        @enumFromInt(libav.SampleFormat, audio_codec_context.sample_fmt),
+        @as(libav.SampleFormat, @enumFromInt(audio_codec_context.sample_fmt)),
     });
 
     processing_thread = try std.Thread.spawn(.{}, eventLoop, .{});
@@ -568,7 +567,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
 
     const sample_multiple: usize = 2048;
     const samples_per_channel: usize = @divExact(sample_multiple, 2);
-    const bytes_per_frame = @intCast(i32, sample_multiple * @sizeOf(f32));
+    const bytes_per_frame = @as(i32, @intCast(sample_multiple * @sizeOf(f32)));
     const channel_count = 2;
 
     var sample_index: usize = 0;
@@ -587,7 +586,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
             audio_frame,
             @as(i32, channel_count),
             libav.SampleFormat.fltp,
-            @ptrCast([*]const u8, planar_buffer),
+            @as([*]const u8, @ptrCast(planar_buffer)),
             bytes_per_frame,
             @alignOf(f32),
         );
@@ -598,7 +597,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
             assert(false);
         }
 
-        audio_frame.pts = @intCast(i64, samples_written);
+        audio_frame.pts = @as(i64, @intCast(samples_written));
         samples_written += samples_per_channel;
 
         const send_frame_code = libav.codecSendFrame(audio_codec_context, audio_frame);
@@ -668,13 +667,13 @@ fn writeVideoFrame(pixels: [*]const PixelType, frame_index: i64) !void {
     video_frame.data[0] = &(yuv_output_buffer[y_channel_base]);
     video_frame.data[1] = &(yuv_output_buffer[uv_channel_base]);
 
-    video_frame.linesize[0] = @intCast(i32, context.dimensions.width);
-    video_frame.linesize[1] = @intCast(i32, context.dimensions.width);
+    video_frame.linesize[0] = @as(i32, @intCast(context.dimensions.width));
+    video_frame.linesize[1] = @as(i32, @intCast(context.dimensions.width));
 
     // video_frame.format = @intFromEnum(libav.PixelFormat.NV12);
     video_frame.format = if (have_vaapi) video_frame_format else video_frame_pixel_format;
-    video_frame.width = @intCast(i32, context.dimensions.width);
-    video_frame.height = @intCast(i32, context.dimensions.height);
+    video_frame.width = @as(i32, @intCast(context.dimensions.width));
+    video_frame.height = @as(i32, @intCast(context.dimensions.height));
     video_frame.pict_type = @intFromEnum(libav.PictureType.none);
 
     video_frames_written += 1;
@@ -762,26 +761,26 @@ fn rgbaToNV12(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimension
             const p01 = pixels[index_01];
             const p10 = pixels[index_10];
             const p11 = pixels[index_11];
-            const p00_r = @intCast(i32, p00.r);
-            const p00_g = @intCast(i32, p00.g);
-            const p00_b = @intCast(i32, p00.b);
-            const p01_r = @intCast(i32, p01.r);
-            const p01_g = @intCast(i32, p01.g);
-            const p01_b = @intCast(i32, p01.b);
-            const p10_r = @intCast(i32, p10.r);
-            const p10_g = @intCast(i32, p10.g);
-            const p10_b = @intCast(i32, p10.b);
-            const p11_r = @intCast(i32, p11.r);
-            const p11_g = @intCast(i32, p11.g);
-            const p11_b = @intCast(i32, p11.b);
+            const p00_r = @as(i32, @intCast(p00.r));
+            const p00_g = @as(i32, @intCast(p00.g));
+            const p00_b = @as(i32, @intCast(p00.b));
+            const p01_r = @as(i32, @intCast(p01.r));
+            const p01_g = @as(i32, @intCast(p01.g));
+            const p01_b = @as(i32, @intCast(p01.b));
+            const p10_r = @as(i32, @intCast(p10.r));
+            const p10_g = @as(i32, @intCast(p10.g));
+            const p10_b = @as(i32, @intCast(p10.b));
+            const p11_r = @as(i32, @intCast(p11.r));
+            const p11_g = @as(i32, @intCast(p11.g));
+            const p11_b = @as(i32, @intCast(p11.b));
             const y00: i32 = (((66 * p00_r) + (129 * p00_g) + (25 * p00_b) + 128) >> 8) + 16;
             const y01: i32 = (((66 * p01_r) + (129 * p01_g) + (25 * p01_b) + 128) >> 8) + 16;
             const y10: i32 = (((66 * p10_r) + (129 * p10_g) + (25 * p10_b) + 128) >> 8) + 16;
             const y11: i32 = (((66 * p11_r) + (129 * p11_g) + (25 * p11_b) + 128) >> 8) + 16;
-            out_buffer[index_00] = @intCast(u8, y00);
-            out_buffer[index_01] = @intCast(u8, y01);
-            out_buffer[index_10] = @intCast(u8, y10);
-            out_buffer[index_11] = @intCast(u8, y11);
+            out_buffer[index_00] = @as(u8, @intCast(y00));
+            out_buffer[index_01] = @as(u8, @intCast(y01));
+            out_buffer[index_10] = @as(u8, @intCast(y10));
+            out_buffer[index_11] = @as(u8, @intCast(y11));
             const u_00: i32 = (((-38 * p00_r) - (74 * p00_g) + (112 * p00_b) + 128) >> 8) + 128;
             const u_01: i32 = (((-38 * p01_r) - (74 * p01_g) + (112 * p00_b) + 128) >> 8) + 128;
             const u_10: i32 = (((-38 * p10_r) - (74 * p10_g) + (112 * p00_b) + 128) >> 8) + 128;
@@ -790,8 +789,8 @@ fn rgbaToNV12(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimension
             const v_01: i32 = (((112 * p01_r) - (94 * p01_g) - (18 * p01_b) + 128) >> 8) + 128;
             const v_10: i32 = (((112 * p10_r) - (94 * p10_g) - (18 * p10_b) + 128) >> 8) + 128;
             const v_11: i32 = (((112 * p11_r) - (94 * p11_g) - (18 * p11_b) + 128) >> 8) + 128;
-            out_buffer[uv_index + 0] = @intCast(u8, @divFloor(u_00 + u_01 + u_10 + u_11, 4));
-            out_buffer[uv_index + 1] = @intCast(u8, @divFloor(v_00 + v_01 + v_10 + v_11, 4));
+            out_buffer[uv_index + 0] = @as(u8, @intCast(@divFloor(u_00 + u_01 + u_10 + u_11, 4)));
+            out_buffer[uv_index + 1] = @as(u8, @intCast(@divFloor(v_00 + v_01 + v_10 + v_11, 4)));
             uv_index += 2;
         }
     }
@@ -878,7 +877,7 @@ fn rgbaToNV122(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensio
 
         const y_vector: @Vector(8, i32) = (((y_const_a * r) + (y_const_b * g) + (y_const_c * b) + y_const_d) >> divider) + y_const_e;
         inline for (0..8) |offset|
-            out_buffer[i + y_channel_base + offset] = @intCast(u8, y_vector[offset]);
+            out_buffer[i + y_channel_base + offset] = @as(u8, @intCast(y_vector[offset]));
 
         const u_vector: @Vector(8, i32) = (((u_const_a * r) - (u_const_b * g) + (u_const_c * b) + u_const_d) >> divider) + u_const_e;
         const v_vector: @Vector(8, i32) = (((v_const_a * r) - (v_const_b * g) - (v_const_c * b) + v_const_d) >> divider) + v_const_e;
@@ -917,10 +916,10 @@ fn rgbaToNV122(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensio
         inline for (0..4) |offset| {
             const offset_a: usize = comptime offset * 2;
             const offset_b: usize = comptime offset_a + 1;
-            out_buffer[dst_uv_base + offset_a] += @intCast(u8, @divFloor(u_vector[offset_a], 4));
-            out_buffer[dst_uv_base + offset_a] += @intCast(u8, @divFloor(u_vector[offset_b], 4));
-            out_buffer[dst_uv_base + offset_b] += @intCast(u8, @divFloor(v_vector[offset_a], 4));
-            out_buffer[dst_uv_base + offset_b] += @intCast(u8, @divFloor(v_vector[offset_b], 4));
+            out_buffer[dst_uv_base + offset_a] += @as(u8, @intCast(@divFloor(u_vector[offset_a], 4)));
+            out_buffer[dst_uv_base + offset_a] += @as(u8, @intCast(@divFloor(u_vector[offset_b], 4)));
+            out_buffer[dst_uv_base + offset_b] += @as(u8, @intCast(@divFloor(v_vector[offset_a], 4)));
+            out_buffer[dst_uv_base + offset_b] += @as(u8, @intCast(@divFloor(v_vector[offset_b], 4)));
         }
     }
 }
@@ -996,14 +995,14 @@ fn rgbaToPlanarYuv(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dime
 
         const y_vector: @Vector(8, i32) = (((y_const_a * r) + (y_const_b * g) + (y_const_c * b) + y_const_d) >> divider) + y_const_e;
         inline for (0..8) |offset|
-            out_buffer[i + y_channel_base + offset] = @intCast(u8, y_vector[offset]);
+            out_buffer[i + y_channel_base + offset] = @as(u8, @intCast(y_vector[offset]));
 
         const u_vector: @Vector(8, i32) = (((u_const_a * r) - (u_const_b * g) + (u_const_c * b) + u_const_d) >> divider) + u_const_e;
         inline for (0..8) |offset|
-            out_buffer[i + u_channel_base + offset] = @intCast(u8, u_vector[offset]);
+            out_buffer[i + u_channel_base + offset] = @as(u8, @intCast(u_vector[offset]));
 
         const v_vector: @Vector(8, i32) = (((v_const_a * r) - (v_const_b * g) - (v_const_c * b) + v_const_d) >> divider) + v_const_e;
         inline for (0..8) |offset|
-            out_buffer[i + v_channel_base + offset] = @intCast(u8, v_vector[offset]);
+            out_buffer[i + v_channel_base + offset] = @as(u8, @intCast(v_vector[offset]));
     }
 }

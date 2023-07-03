@@ -170,7 +170,7 @@ pub fn createBestInterface(onFrameReady: *const OnFrameReadyFn) ?Interface {
     for (backends) |backend| {
         best_match_index = @min(best_match_index, @intFromEnum(backend));
     }
-    const selected_backend = @enumFromInt(Backend, best_match_index);
+    const selected_backend: Backend = @enumFromInt(best_match_index);
     std.log.info("Screencast backend selected: {s}", .{
         @tagName(selected_backend),
     });

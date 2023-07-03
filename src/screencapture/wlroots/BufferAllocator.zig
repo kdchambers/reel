@@ -17,7 +17,7 @@ pub const Buffer = struct {
     offset: u32,
 };
 
-mapped_memory: []align(8) u8,
+mapped_memory: []align(4096) u8,
 memory_pool: *wl.ShmPool,
 used: u32,
 
@@ -44,7 +44,7 @@ pub fn init(initial_size: u64, shared_memory: *wl.Shm) !WaylandAllocator {
     try std.os.ftruncate(fd, allocation_size_bytes);
 
     const shared_memory_map = try std.os.mmap(null, allocation_size_bytes, linux.PROT.READ | linux.PROT.WRITE, linux.MAP.SHARED, fd, 0);
-    const shared_memory_pool = try wl.Shm.createPool(shared_memory, fd, @intCast(i32, allocation_size_bytes));
+    const shared_memory_pool = try wl.Shm.createPool(shared_memory, fd, @intCast(allocation_size_bytes));
 
     return WaylandAllocator{
         .mapped_memory = shared_memory_map[0..allocation_size_bytes],
@@ -56,7 +56,7 @@ pub fn init(initial_size: u64, shared_memory: *wl.Shm) !WaylandAllocator {
 pub fn deinit(self: *@This()) void {
     self.used = 0;
     self.memory_pool.destroy();
-    std.os.munmap(@alignCast(4096, self.mapped_memory));
+    std.os.munmap(self.mapped_memory);
 }
 
 pub fn create(self: *@This(), width: u32, height: u32, stride: u32, format: wl.Shm.Format) !Buffer {
@@ -64,10 +64,10 @@ pub fn create(self: *@This(), width: u32, height: u32, stride: u32, format: wl.S
     std.debug.assert(height <= std.math.maxInt(i32));
     std.debug.assert(stride <= std.math.maxInt(i32));
     const buffer = try self.memory_pool.createBuffer(
-        @intCast(i32, self.used),
-        @intCast(i32, width),
-        @intCast(i32, height),
-        @intCast(i32, stride),
+        @intCast(self.used),
+        @intCast(width),
+        @intCast(height),
+        @intCast(stride),
         format,
     );
     const allocation_size: u32 = height * stride;

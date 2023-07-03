@@ -24,7 +24,7 @@ pub fn init(self: *@This(), memory_index: u32, size_bytes: u32) !void {
         .allocation_size = size_bytes,
         .memory_type_index = memory_index,
     }, null);
-    self.mapped_memory = @ptrCast([*]u8, (try vulkan_core.device_dispatch.mapMemory(vulkan_core.logical_device, self.memory, 0, size_bytes, .{})).?);
+    self.mapped_memory = @ptrCast((try vulkan_core.device_dispatch.mapMemory(vulkan_core.logical_device, self.memory, 0, size_bytes, .{})).?);
 }
 
 pub inline fn allocate(self: *@This(), size_bytes: u64, alignment: u64) !u64 {
@@ -40,7 +40,7 @@ pub inline fn allocate(self: *@This(), size_bytes: u64, alignment: u64) !u64 {
 }
 
 pub inline fn toSlice(self: @This(), comptime Type: type, offset: u64, count: u64) []Type {
-    return @ptrCast([*]Type, @alignCast(@alignOf(Type), &self.mapped_memory[offset]))[0..count];
+    return @as([*]Type, @ptrCast(@alignCast(&self.mapped_memory[offset])))[0..count];
 }
 
 pub inline fn mappedBytes(self: @This(), offset: u64, size: u64) []u8 {

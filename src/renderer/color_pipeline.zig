@@ -60,11 +60,11 @@ pub inline fn nextVertexIndex() u16 {
 }
 
 pub inline fn quad(vertex_index: u32) *[4]Vertex {
-    return @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    return @ptrCast(&vertices_buffer[vertex_index]);
 }
 
 pub inline fn quadSlice(vertex_index: u32, count: u32) [][4]Vertex {
-    return @ptrCast([*][4]Vertex, &vertices_buffer[vertex_index])[0..count];
+    return @as([*][4]Vertex, @ptrCast(&vertices_buffer[vertex_index]))[0..count];
 }
 
 pub inline fn vertexSlice(vertex_index: u32, count: u32) []Vertex {
@@ -88,7 +88,7 @@ pub inline fn reserveQuads(quad_count: u16) VertexRange {
 }
 
 pub inline fn updateQuadColor(vertex_index: u32, color: RGBA(u8)) void {
-    const quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    const quad_ptr: *[4]Vertex = @ptrCast(&vertices_buffer[vertex_index]);
     quad_ptr[0].color = color;
     quad_ptr[1].color = color;
     quad_ptr[2].color = color;
@@ -96,7 +96,7 @@ pub inline fn updateQuadColor(vertex_index: u32, color: RGBA(u8)) void {
 }
 
 pub inline fn updateQuadRangeColor(vertex_index: u32, quad_count: u16, color: RGBA(u8)) void {
-    const quads = @ptrCast([*][4]Vertex, &vertices_buffer[vertex_index])[0..quad_count];
+    const quads = @as([*][4]Vertex, @ptrCast(&vertices_buffer[vertex_index]))[0..quad_count];
     for (quads) |*quad_ptr| {
         quad_ptr.*[0].color = color;
         quad_ptr.*[1].color = color;
@@ -119,7 +119,7 @@ pub inline fn updateVertexRangeHPosition(range: VertexRange, x_shift: f32) void 
 
 pub inline fn drawQuad(extent: Extent3D(f32), color: RGBA(u8), comptime anchor_point: graphics.AnchorPoint) u16 {
     const vertex_index = vertices_used;
-    var quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
+    var quad_ptr: *[4]Vertex = @ptrCast(&vertices_buffer[vertices_used]);
     graphics.writeQuad(Vertex, extent, anchor_point, quad_ptr);
     quad_ptr[0].color = color;
     quad_ptr[1].color = color;
@@ -132,7 +132,7 @@ pub inline fn drawQuad(extent: Extent3D(f32), color: RGBA(u8), comptime anchor_p
 
 pub inline fn drawQuadMultiColor(extent: Extent3D(f32), color: [4]RGBA(u8), comptime anchor_point: graphics.AnchorPoint) u16 {
     const vertex_index = vertices_used;
-    var quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
+    var quad_ptr: *[4]Vertex = @ptrCast(&vertices_buffer[vertices_used]);
     graphics.writeQuad(Vertex, extent, anchor_point, quad_ptr);
     quad_ptr[0].color = color[0];
     quad_ptr[1].color = color[1];
@@ -149,7 +149,7 @@ pub inline fn overwriteQuad(
     color: RGBA(u8),
     comptime anchor_point: graphics.AnchorPoint,
 ) void {
-    var quad_ptr = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    var quad_ptr: *[4]Vertex = @ptrCast(&vertices_buffer[vertex_index]);
     graphics.writeQuad(Vertex, extent, anchor_point, quad_ptr);
     quad_ptr[0].color = color;
     quad_ptr[1].color = color;
@@ -271,7 +271,7 @@ pub inline fn drawTriangle(
     color: RGBA(u8),
 ) u32 {
     const vertex_index = vertices_used;
-    var tri_ptr = @ptrCast(*[3]Vertex, &vertices_buffer[vertices_used]);
+    var tri_ptr: *[3]Vertex = @ptrCast(&vertices_buffer[vertices_used]);
     tri_ptr[0].x = p0.x;
     tri_ptr[0].y = p0.y;
     tri_ptr[0].z = depth;
@@ -320,7 +320,7 @@ pub fn drawArc(
     const degreesToRadians = std.math.degreesToRadians;
 
     const base_rotation = degreesToRadians(f32, rotation_begin);
-    const rotation_per_point = degreesToRadians(f32, rotation_length / @floatFromInt(f32, point_count - 1));
+    const rotation_per_point = degreesToRadians(f32, rotation_length / @as(f32, @floatFromInt(point_count - 1)));
 
     var vertices = vertices_buffer[vertices_used .. vertices_used + point_count + 1];
 
@@ -332,18 +332,18 @@ pub fn drawArc(
     };
 
     vertices[1] = Vertex{
-        .x = @floatCast(f32, center.x + (radius.h * @cos(base_rotation))),
-        .y = @floatCast(f32, center.y + (radius.v * @sin(base_rotation))),
+        .x = @floatCast(center.x + (radius.h * @cos(base_rotation))),
+        .y = @floatCast(center.y + (radius.v * @sin(base_rotation))),
         .z = center.z,
         .color = color,
     };
 
     var i: u16 = 1;
     while (i < point_count) : (i += 1) {
-        const angle_radians: f64 = base_rotation + (rotation_per_point * @floatFromInt(f32, i));
+        const angle_radians: f64 = base_rotation + (rotation_per_point * @as(f32, @floatFromInt(i)));
         vertices[i + 1] = Vertex{
-            .x = @floatCast(f32, center.x + (radius.h * @cos(angle_radians))),
-            .y = @floatCast(f32, center.y + (radius.v * @sin(angle_radians))),
+            .x = @floatCast(center.x + (radius.h * @cos(angle_radians))),
+            .y = @floatCast(center.y + (radius.v * @sin(angle_radians))),
             .z = center.z,
             .color = color,
         };
@@ -389,8 +389,8 @@ pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dim
             .{
                 .x = 0.0,
                 .y = 0.0,
-                .width = @floatFromInt(f32, screen_dimensions.width),
-                .height = @floatFromInt(f32, screen_dimensions.height),
+                .width = @floatFromInt(screen_dimensions.width),
+                .height = @floatFromInt(screen_dimensions.height),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
             },
@@ -541,10 +541,10 @@ fn createGraphicsPipeline(
     };
 
     const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
-        .vertex_binding_description_count = @intCast(u32, 1),
+        .vertex_binding_description_count = @intCast(1),
         .vertex_attribute_description_count = vertex_input_attribute_descriptions.len,
-        .p_vertex_binding_descriptions = @ptrCast([*]const vk.VertexInputBindingDescription, &vertex_input_binding_descriptions),
-        .p_vertex_attribute_descriptions = @ptrCast([*]const vk.VertexInputAttributeDescription, &vertex_input_attribute_descriptions),
+        .p_vertex_binding_descriptions = @ptrCast(&vertex_input_binding_descriptions),
+        .p_vertex_attribute_descriptions = @ptrCast(&vertex_input_attribute_descriptions),
         .flags = .{},
     };
 
@@ -558,8 +558,8 @@ fn createGraphicsPipeline(
         vk.Viewport{
             .x = 0.0,
             .y = 0.0,
-            .width = @floatFromInt(f32, screen_dimensions.width),
-            .height = @floatFromInt(f32, screen_dimensions.height),
+            .width = @floatFromInt(screen_dimensions.width),
+            .height = @floatFromInt(screen_dimensions.height),
             .min_depth = 0.0,
             .max_depth = 1.0,
         },
@@ -688,7 +688,7 @@ fn createGraphicsPipeline(
         1,
         &pipeline_create_infos,
         null,
-        @ptrCast([*]vk.Pipeline, &graphics_pipeline),
+        @ptrCast(&graphics_pipeline),
     );
 }
 
@@ -698,7 +698,7 @@ fn createFragmentShaderModule(
 ) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.color_fragment_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.color_fragment_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.color_fragment_spv)),
         .flags = .{},
     };
     return try device_dispatch.createShaderModule(logical_device, &create_info, null);
@@ -710,7 +710,7 @@ fn createVertexShaderModule(
 ) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.color_vertex_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.color_vertex_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.color_vertex_spv)),
         .flags = .{},
     };
     return try device_dispatch.createShaderModule(logical_device, &create_info, null);

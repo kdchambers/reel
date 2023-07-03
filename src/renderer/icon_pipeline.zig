@@ -227,8 +227,8 @@ fn loadTexture(allocator: std.mem.Allocator) !graphics.TextureGreyscale {
         icon_extent_list[i] = texture_atlas.reserve(
             Extent2D(u32),
             allocator,
-            @intCast(u32, image.width),
-            @intCast(u32, image.height),
+            @intCast(image.width),
+            @intCast(image.height),
         ) catch return error.LoadAssetFail;
 
         const dst_region = icon_extent_list[i];
@@ -267,7 +267,7 @@ pub inline fn reserveGreyscale(quad_count: u16) u16 {
 }
 
 pub inline fn updateIconColor(vertex_index: u16, color: RGBA(u8)) void {
-    var quad = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    var quad: *[4]Vertex = @ptrCast(&vertices_buffer[vertex_index]);
     quad[0].color = color;
     quad[1].color = color;
     quad[2].color = color;
@@ -281,7 +281,7 @@ pub inline fn overwriteGreyscale(
     color: RGBA(u8),
     comptime anchor_point: graphics.AnchorPoint,
 ) void {
-    var quad = @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]);
+    var quad: *[4]Vertex = @ptrCast(&vertices_buffer[vertex_index]);
     graphics.writeQuad(Vertex, extent, anchor_point, quad);
     quad[0].color = color;
     quad[1].color = color;
@@ -377,7 +377,7 @@ pub fn overwriteText(
         .z = extent.z,
         .color = color,
         .vertex_start = vertex_range.start,
-        .capacity = @intCast(u16, text.len),
+        .capacity = @intCast(text.len),
     };
     const pen_ptr = switch (pen_weight) {
         .light => unreachable,
@@ -412,7 +412,7 @@ pub fn overwriteText(
         .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
         .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
-    const y_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.height);
+    const y_increment: f32 = 2.0 / @as(f32, @floatFromInt(renderer.swapchain_dimensions.height));
     const y_threshold: f32 = y_increment / 2.0;
     const snapped_y = snap(text_placement.y, y_increment, y_threshold);
     const snapped_placement = Coordinates2D(f32){
@@ -444,10 +444,10 @@ pub fn drawIcon(
     };
     const texture_extent_pixels = icon_extent_list[@intFromEnum(icon)];
     const texture_extent = Extent2D(f32){
-        .x = @floatFromInt(f32, texture_extent_pixels.x),
-        .y = @floatFromInt(f32, texture_extent_pixels.y),
-        .width = @floatFromInt(f32, texture_extent_pixels.width),
-        .height = @floatFromInt(f32, texture_extent_pixels.height),
+        .x = @floatFromInt(texture_extent_pixels.x),
+        .y = @floatFromInt(texture_extent_pixels.y),
+        .width = @floatFromInt(texture_extent_pixels.width),
+        .height = @floatFromInt(texture_extent_pixels.height),
     };
     return drawGreyscale(extent, texture_extent, color, anchor_point);
 }
@@ -514,7 +514,7 @@ pub fn drawText(
         .bottom_middle => .{ .x = extent.x + (horizontal_free_space / 2.0), .y = extent.y },
         .bottom_left => .{ .x = extent.x, .y = extent.y },
     };
-    const y_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.height);
+    const y_increment: f32 = 2.0 / @as(f32, @floatFromInt(renderer.swapchain_dimensions.height));
     const y_threshold: f32 = y_increment / 2.0;
     const snapped_y = snap(text_placement.y, y_increment, y_threshold);
     const snapped_placement = Coordinates2D(f32){
@@ -546,7 +546,7 @@ const TextWriterInterface = struct {
         screen_extent: geometry.Extent2D(f32),
         texture_extent: geometry.Extent2D(f32),
     ) f32 {
-        const x_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.width);
+        const x_increment: f32 = 2.0 / @as(f32, @floatFromInt(renderer.swapchain_dimensions.width));
         const x_threshold: f32 = x_increment / 4.0;
         const snapped_x = snap(screen_extent.x, x_increment, x_threshold);
         const truncated_extent = geometry.Extent3D(f32){
@@ -595,7 +595,7 @@ const BufferTextWriterInterface = struct {
         //
         // See comments in TextWriterInterface for notes on pixel snapping / clamping
         //
-        const x_increment: f32 = 2.0 / @floatFromInt(f32, renderer.swapchain_dimensions.width);
+        const x_increment: f32 = 2.0 / @as(f32, @floatFromInt(renderer.swapchain_dimensions.width));
         const x_threshold: f32 = x_increment / 4.0;
         const snapped_x = snap(screen_extent.x, x_increment, x_threshold);
         const truncated_extent = Extent3D(f32){
@@ -643,7 +643,7 @@ pub fn drawGreyscale(
     comptime anchor_point: graphics.AnchorPoint,
 ) u16 {
     var vertex_index: u16 = vertices_used;
-    var quad = @ptrCast(*[4]Vertex, &vertices_buffer[vertices_used]);
+    var quad: *[4]Vertex = @ptrCast(&vertices_buffer[vertices_used]);
     graphics.writeQuad(Vertex, extent, anchor_point, quad);
     quad[0].color = color;
     quad[1].color = color;
@@ -688,8 +688,8 @@ pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dim
             .{
                 .x = 0.0,
                 .y = 0.0,
-                .width = @floatFromInt(f32, screen_dimensions.width),
-                .height = @floatFromInt(f32, screen_dimensions.height),
+                .width = @floatFromInt(screen_dimensions.width),
+                .height = @floatFromInt(screen_dimensions.height),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
             },
@@ -824,7 +824,7 @@ pub fn init(
         try device_dispatch.allocateCommandBuffers(
             logical_device,
             &command_buffer_allocate_info,
-            @ptrCast([*]vk.CommandBuffer, &command_buffer),
+            @ptrCast(&command_buffer),
         );
 
         try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -876,7 +876,7 @@ pub fn init(
             .p_wait_semaphores = undefined,
             .p_wait_dst_stage_mask = undefined,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .p_command_buffers = @ptrCast(&command_buffer),
             .signal_semaphore_count = 0,
             .p_signal_semaphores = undefined,
         }};
@@ -897,7 +897,7 @@ pub fn init(
             _ = try device_dispatch.waitForFences(
                 logical_device,
                 1,
-                @ptrCast([*]const vk.Fence, &fence),
+                @ptrCast(&fence),
                 vk.TRUE,
                 std.time.ns_per_s * 3,
             );
@@ -906,7 +906,7 @@ pub fn init(
                 logical_device,
                 command_pool,
                 1,
-                @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+                @ptrCast(&command_buffer),
             );
         }
     }
@@ -925,7 +925,7 @@ pub fn init(
         try device_dispatch.allocateCommandBuffers(
             logical_device,
             &command_buffer_allocate_info,
-            @ptrCast([*]vk.CommandBuffer, &command_buffer),
+            @ptrCast(&command_buffer),
         );
 
         try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -959,7 +959,7 @@ pub fn init(
             .p_wait_semaphores = undefined,
             .p_wait_dst_stage_mask = undefined,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .p_command_buffers = @ptrCast(&command_buffer),
             .signal_semaphore_count = 0,
             .p_signal_semaphores = undefined,
         }};
@@ -978,7 +978,7 @@ pub fn init(
             _ = try device_dispatch.waitForFences(
                 logical_device,
                 1,
-                @ptrCast([*]const vk.Fence, &fence),
+                @ptrCast(&fence),
                 vk.TRUE,
                 std.time.ns_per_s * 3,
             );
@@ -987,7 +987,7 @@ pub fn init(
                 logical_device,
                 command_pool,
                 1,
-                @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+                @ptrCast(&command_buffer),
             );
         }
     }
@@ -1006,7 +1006,7 @@ pub fn init(
         try device_dispatch.allocateCommandBuffers(
             logical_device,
             &command_buffer_allocate_info,
-            @ptrCast([*]vk.CommandBuffer, &command_buffer),
+            @ptrCast(&command_buffer),
         );
 
         try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -1058,7 +1058,7 @@ pub fn init(
             .p_wait_semaphores = undefined,
             .p_wait_dst_stage_mask = undefined,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .p_command_buffers = @ptrCast(&command_buffer),
             .signal_semaphore_count = 0,
             .p_signal_semaphores = undefined,
         }};
@@ -1077,7 +1077,7 @@ pub fn init(
             _ = try device_dispatch.waitForFences(
                 logical_device,
                 1,
-                @ptrCast([*]const vk.Fence, &fence),
+                @ptrCast(&fence),
                 vk.TRUE,
                 std.time.ns_per_s * 3,
             );
@@ -1086,7 +1086,7 @@ pub fn init(
                 logical_device,
                 command_pool,
                 1,
-                @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+                @ptrCast(&command_buffer),
             );
         }
     }
@@ -1305,10 +1305,10 @@ fn createGraphicsPipeline(
     };
 
     const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
-        .vertex_binding_description_count = @intCast(u32, 1),
-        .vertex_attribute_description_count = @intCast(u32, 3),
-        .p_vertex_binding_descriptions = @ptrCast([*]const vk.VertexInputBindingDescription, &vertex_input_binding_descriptions),
-        .p_vertex_attribute_descriptions = @ptrCast([*]const vk.VertexInputAttributeDescription, &vertex_input_attribute_descriptions),
+        .vertex_binding_description_count = @intCast(1),
+        .vertex_attribute_description_count = @intCast(3),
+        .p_vertex_binding_descriptions = @ptrCast(&vertex_input_binding_descriptions),
+        .p_vertex_attribute_descriptions = @ptrCast(&vertex_input_attribute_descriptions),
         .flags = .{},
     };
 
@@ -1322,8 +1322,8 @@ fn createGraphicsPipeline(
         vk.Viewport{
             .x = 0.0,
             .y = 0.0,
-            .width = @floatFromInt(f32, screen_dimensions.width),
-            .height = @floatFromInt(f32, screen_dimensions.height),
+            .width = @floatFromInt(screen_dimensions.width),
+            .height = @floatFromInt(screen_dimensions.height),
             .min_depth = 0.0,
             .max_depth = 1.0,
         },
@@ -1390,7 +1390,7 @@ fn createGraphicsPipeline(
         .logic_op_enable = vk.FALSE,
         .logic_op = .copy,
         .attachment_count = 1,
-        .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachment),
+        .p_attachments = @ptrCast(&color_blend_attachment),
         .blend_constants = blend_constants,
         .flags = .{},
     };
@@ -1398,7 +1398,7 @@ fn createGraphicsPipeline(
     const dynamic_states = [_]vk.DynamicState{ .viewport, .scissor };
     const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo{
         .dynamic_state_count = 2,
-        .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
+        .p_dynamic_states = @ptrCast(&dynamic_states),
         .flags = .{},
     };
 
@@ -1443,7 +1443,7 @@ fn createGraphicsPipeline(
         1,
         &pipeline_create_infos,
         null,
-        @ptrCast([*]vk.Pipeline, &graphics_pipeline),
+        @ptrCast(&graphics_pipeline),
     );
 }
 
@@ -1489,7 +1489,7 @@ fn createFragmentShaderModule(
 ) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.icon_fragment_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.icon_fragment_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.icon_fragment_spv)),
         .flags = .{},
     };
     return try device_dispatch.createShaderModule(logical_device, &create_info, null);
@@ -1501,7 +1501,7 @@ fn createVertexShaderModule(
 ) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.icon_vertex_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.icon_vertex_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.icon_vertex_spv)),
         .flags = .{},
     };
     return try device_dispatch.createShaderModule(logical_device, &create_info, null);

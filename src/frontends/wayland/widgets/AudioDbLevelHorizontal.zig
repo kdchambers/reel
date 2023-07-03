@@ -41,10 +41,10 @@ inline fn decibelToPercent(decibels: f64) f64 {
 pub fn update(self: *@This(), decibels: f64, screen_scale: ScaleFactor2D(f32)) void {
     const percentage = decibelToPercent(decibels);
     const overlay_extent = geometry.Extent3D(f32){
-        .x = self.extent.x + @floatCast(f32, self.extent.width * percentage),
+        .x = self.extent.x + @as(f32, @floatCast(self.extent.width * percentage)),
         .y = self.extent.y,
         .z = self.extent.z,
-        .width = self.extent.width * @floatCast(f32, 1.0 - percentage),
+        .width = self.extent.width * @as(f32, @floatCast(1.0 - percentage)),
         .height = self.bar_height,
     };
     renderer.overwriteQuad(self.vertex_index, overlay_extent, overlay_color, .bottom_left);
@@ -113,10 +113,10 @@ pub fn draw(self: *@This(), extent: geometry.Extent3D(f32), screen_scale: ScaleF
     _ = renderer.drawQuadMultiColor(background_extent, colors, .bottom_left);
 
     const overlay_extent = geometry.Extent3D(f32){
-        .x = self.extent.x + @floatCast(f32, self.extent.width * percentage),
+        .x = self.extent.x + @as(f32, @floatCast(self.extent.width * percentage)),
         .y = self.extent.y,
         .z = extent.z,
-        .width = self.extent.width * @floatCast(f32, 1.0 - percentage),
+        .width = self.extent.width * @as(f32, @floatCast(1.0 - percentage)),
         .height = self.bar_height,
     };
     self.vertex_index = renderer.drawQuad(overlay_extent, overlay_color, .bottom_left);

@@ -34,11 +34,11 @@ pub fn draw(
     extent: geometry.Extent3D(f32),
     screen_scale: ScaleFactor2D(f32),
 ) !void {
-    self.bin_count = @intCast(u16, freq_bins.len);
+    self.bin_count = @intCast(freq_bins.len);
     self.height_pixels = extent.height / screen_scale.vertical;
 
-    const bar_width: f32 = extent.width / (@floatFromInt(f32, self.bin_count) * 2.0);
-    const bar_spacing = (extent.width - (bar_width * @floatFromInt(f32, self.bin_count))) / @floatFromInt(f32, self.bin_count + 1);
+    const bar_width: f32 = extent.width / (@as(f32, @floatFromInt(self.bin_count)) * 2.0);
+    const bar_spacing = (extent.width - (bar_width * @as(f32, @floatFromInt(self.bin_count)))) / @as(f32, @floatFromInt(self.bin_count + 1));
     const bar_increment: f32 = bar_width + bar_spacing;
 
     const volume_range_db: f32 = self.max_cutoff_db - self.min_cutoff_db;
@@ -53,7 +53,7 @@ pub fn draw(
 
         const bar_height = percentage * extent.height;
         const bar_extent = Extent3D(f32){
-            .x = extent.x + (@floatFromInt(f32, i) * bar_increment),
+            .x = extent.x + (@as(f32, @floatFromInt(i)) * bar_increment),
             .y = extent.y,
             .width = bar_width,
             .height = bar_height,
@@ -102,5 +102,5 @@ pub fn update(self: *@This(), freq_bins: []f32, screen_scale: ScaleFactor2D(f32)
 }
 
 fn lerp(from: i32, to: i32, value: f32) u8 {
-    return @intCast(u8, from + @intFromFloat(i32, @floor(value * @floatFromInt(f32, to - from))));
+    return @intCast(from + @as(i32, @intFromFloat(@floor(value * @as(f32, @floatFromInt(to - from))))));
 }

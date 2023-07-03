@@ -153,7 +153,7 @@ pub inline fn writeStreamFrame(stream_handle: u32, pixels: []const u8) !void {
 pub inline fn drawVideoFrame(extent: Extent3D(f32)) void {
     const full_texture_extent: Extent2D(f32) = .{ .x = 0.0, .y = 0.0, .width = 1.0, .height = 1.0 };
     const vertex_index: usize = draw_quad_count * 4;
-    graphics.writeQuadTextured(Vertex, extent, full_texture_extent, .bottom_left, @ptrCast(*[4]Vertex, &vertices_buffer[vertex_index]));
+    graphics.writeQuadTextured(Vertex, extent, full_texture_extent, .bottom_left, @as(*[4]Vertex, @ptrCast(&vertices_buffer[vertex_index])));
     draw_quad_count += 1;
 }
 
@@ -200,17 +200,17 @@ pub fn videoSourceExtents(screen_scale: ScaleFactor2D(f32)) []Extent3D(f32) {
 
 pub fn sourceRelativePlacement(source_index: u16) Coordinates2D(u16) {
     return .{
-        .x = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
-        .y = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
+        .x = @intFromFloat(draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
+        .y = @intFromFloat(draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
     };
 }
 
 pub fn sourceRelativeExtent(source_index: u16) Extent2D(u16) {
     return .{
-        .x = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
-        .y = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
-        .width = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.width * canvas_dimensions.width),
-        .height = @intFromFloat(u16, draw_context_buffer[source_index].relative_extent.height * canvas_dimensions.height),
+        .x = @intFromFloat(draw_context_buffer[source_index].relative_extent.x * canvas_dimensions.width),
+        .y = @intFromFloat(draw_context_buffer[source_index].relative_extent.y * canvas_dimensions.height),
+        .width = @intFromFloat(draw_context_buffer[source_index].relative_extent.width * canvas_dimensions.width),
+        .height = @intFromFloat(draw_context_buffer[source_index].relative_extent.height * canvas_dimensions.height),
     };
 }
 
@@ -218,8 +218,8 @@ pub fn moveSource(source_index: u16, placement: Coordinates2D(u16)) void {
     const relative_extent_ptr: *Extent2D(f32) = &draw_context_buffer[source_index].relative_extent;
     const max_x: f32 = 1.0 - relative_extent_ptr.width;
     const max_y: f32 = 1.0 - relative_extent_ptr.height;
-    relative_extent_ptr.x = @max(0.0, @min(max_x, @floatFromInt(f32, placement.x) / canvas_dimensions.width));
-    relative_extent_ptr.y = @max(0.0, @min(max_y, @floatFromInt(f32, placement.y) / canvas_dimensions.height));
+    relative_extent_ptr.x = @max(0.0, @min(max_x, @as(f32, @floatFromInt(placement.x)) / canvas_dimensions.width));
+    relative_extent_ptr.y = @max(0.0, @min(max_y, @as(f32, @floatFromInt(placement.y)) / canvas_dimensions.height));
     assert(relative_extent_ptr.x >= 0.0);
     assert(relative_extent_ptr.x <= 1.0);
     assert(relative_extent_ptr.y >= 0.0);
@@ -379,9 +379,9 @@ fn destroyStream(stream_handle: u32) void {
     //
     // Remove all draw commands for this stream
     //
-    var draw_index_signed: i32 = @intCast(i32, source_count) - 1;
+    var draw_index_signed: i32 = @as(i32, @intCast(source_count)) - 1;
     while (draw_index_signed >= 0) : (draw_index_signed -= 1) {
-        const draw_index = @intCast(usize, draw_index_signed);
+        const draw_index = @as(usize, @intCast(draw_index_signed));
         //
         // This draw command references the stream_handle we are deleting.
         //
@@ -426,8 +426,8 @@ pub fn createStream(
     assert(stream_ptr.isNull());
 
     stream_ptr.dimensions = .{
-        .width = @floatFromInt(f32, source_dimensions.width),
-        .height = @floatFromInt(f32, source_dimensions.height),
+        .width = @floatFromInt(source_dimensions.width),
+        .height = @floatFromInt(source_dimensions.height),
     };
 
     std.log.info("renderer: Adding stream #{d} with dimensions: {d} x {d}", .{
@@ -470,7 +470,7 @@ pub fn createStream(
         .memory_type_index = cpu_memory_index,
     }, null);
 
-    stream_ptr.mapped_memory = @ptrCast([*]u8, (try device_dispatch.mapMemory(logical_device, stream_ptr.memory, 0, image_size_bytes, .{})).?)[0 .. pixel_count * 4];
+    stream_ptr.mapped_memory = @as([*]u8, @ptrCast((try device_dispatch.mapMemory(logical_device, stream_ptr.memory, 0, image_size_bytes, .{})).?))[0 .. pixel_count * 4];
 
     try device_dispatch.bindImageMemory(logical_device, stream_ptr.image, stream_ptr.memory, 0);
 
@@ -487,7 +487,7 @@ pub fn createStream(
     try device_dispatch.allocateCommandBuffers(
         logical_device,
         &command_buffer_allocate_info,
-        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        @ptrCast(&command_buffer),
     );
 
     try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -542,7 +542,7 @@ pub fn createStream(
         .p_wait_semaphores = undefined,
         .p_wait_dst_stage_mask = undefined,
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+        .p_command_buffers = @ptrCast(&command_buffer),
         .signal_semaphore_count = 0,
         .p_signal_semaphores = undefined,
     }};
@@ -568,7 +568,7 @@ pub fn createStream(
         logical_device,
         vulkan_core.command_pool,
         1,
-        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        @as([*]vk.CommandBuffer, @ptrCast(&command_buffer)),
     );
     return stream_handle;
 }
@@ -629,8 +629,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         assert(relative_extent.y + relative_extent.height <= 1.0);
 
         const scale_factor = ScaleFactor2D(f32){
-            .horizontal = stream_ptr.dimensions.width / @floatFromInt(f32, unscaled_canvas_dimensions.width),
-            .vertical = stream_ptr.dimensions.height / @floatFromInt(f32, unscaled_canvas_dimensions.height),
+            .horizontal = stream_ptr.dimensions.width / @as(f32, @floatFromInt(unscaled_canvas_dimensions.width)),
+            .vertical = stream_ptr.dimensions.height / @as(f32, @floatFromInt(unscaled_canvas_dimensions.height)),
         };
         //
         // Assert we're not upscaling the image as that isn't supported currently
@@ -648,8 +648,8 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         var src_region_offsets = [2]vk.Offset3D{
             .{ .x = 0, .y = 0, .z = 0 },
             .{
-                .x = @intFromFloat(i32, stream_ptr.dimensions.width),
-                .y = @intFromFloat(i32, stream_ptr.dimensions.height),
+                .x = @intFromFloat(stream_ptr.dimensions.width),
+                .y = @intFromFloat(stream_ptr.dimensions.height),
                 .z = 1,
             },
         };
@@ -670,13 +670,13 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
         const dst_region_offsets = [2]vk.Offset3D{
             .{
-                .x = @intFromFloat(i32, @floor(top_left.x)),
-                .y = @intFromFloat(i32, @floor(top_left.y)),
+                .x = @intFromFloat(@floor(top_left.x)),
+                .y = @intFromFloat(@floor(top_left.y)),
                 .z = 0,
             },
             .{
-                .x = @intFromFloat(i32, @floor(bottom_right.x)),
-                .y = @intFromFloat(i32, @floor(bottom_right.y)),
+                .x = @intFromFloat(@floor(bottom_right.x)),
+                .y = @intFromFloat(@floor(bottom_right.y)),
                 .z = 1,
             },
         };
@@ -721,20 +721,20 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
         var src_region_offsets = [2]vk.Offset3D{
             .{ .x = 0, .y = 0, .z = 0 },
             .{
-                .x = @intFromFloat(i32, stream_ptr.dimensions.width),
-                .y = @intFromFloat(i32, stream_ptr.dimensions.height),
+                .x = @intFromFloat(stream_ptr.dimensions.width),
+                .y = @intFromFloat(stream_ptr.dimensions.height),
                 .z = 1,
             },
         };
 
         const scale_factor = ScaleFactor2D(f32){
-            .horizontal = stream_ptr.dimensions.width / @floatFromInt(f32, unscaled_canvas_dimensions.width),
-            .vertical = stream_ptr.dimensions.height / @floatFromInt(f32, unscaled_canvas_dimensions.height),
+            .horizontal = stream_ptr.dimensions.width / @as(f32, @floatFromInt(unscaled_canvas_dimensions.width)),
+            .vertical = stream_ptr.dimensions.height / @as(f32, @floatFromInt(unscaled_canvas_dimensions.height)),
         };
 
         const dst_dimensions = Dimensions2D(f32){
-            .width = @floatFromInt(f32, unscaled_canvas_dimensions.width),
-            .height = @floatFromInt(f32, unscaled_canvas_dimensions.height),
+            .width = @floatFromInt(unscaled_canvas_dimensions.width),
+            .height = @floatFromInt(unscaled_canvas_dimensions.height),
         };
 
         const top_left = Coordinates2D(f32){
@@ -748,13 +748,13 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
 
         const dst_region_offsets = [2]vk.Offset3D{
             .{
-                .x = @intFromFloat(i32, @floor(top_left.x)),
-                .y = @intFromFloat(i32, @floor(top_left.y)),
+                .x = @intFromFloat(@floor(top_left.x)),
+                .y = @intFromFloat(@floor(top_left.y)),
                 .z = 0,
             },
             .{
-                .x = @intFromFloat(i32, @floor(bottom_right.x)),
-                .y = @intFromFloat(i32, @floor(bottom_right.y)),
+                .x = @intFromFloat(@floor(bottom_right.x)),
+                .y = @intFromFloat(@floor(bottom_right.y)),
                 .z = 1,
             },
         };
@@ -849,8 +849,8 @@ pub fn recordDrawCommands(command_buffer: vk.CommandBuffer, i: usize, screen_dim
             .{
                 .x = 0.0,
                 .y = 0.0,
-                .width = @floatFromInt(f32, screen_dimensions.width),
-                .height = @floatFromInt(f32, screen_dimensions.height),
+                .width = @floatFromInt(screen_dimensions.width),
+                .height = @floatFromInt(screen_dimensions.height),
                 .min_depth = 0.0,
                 .max_depth = 1.0,
             },
@@ -901,8 +901,8 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
     assert(dimensions.width > 0);
     assert(dimensions.height > 0);
 
-    const width_equal = (dimensions.width == @intFromFloat(u32, canvas_dimensions.width));
-    const height_equal = (dimensions.height == @intFromFloat(u32, canvas_dimensions.height));
+    const width_equal = (dimensions.width == @as(u32, @intFromFloat(canvas_dimensions.width)));
+    const height_equal = (dimensions.height == @as(u32, @intFromFloat(canvas_dimensions.height)));
 
     if (width_equal and height_equal)
         return;
@@ -921,7 +921,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
         //
         std.time.sleep(std.time.ns_per_ms * 1);
 
-        const current_pixel_count = @intFromFloat(usize, canvas_dimensions.width) * @intFromFloat(usize, canvas_dimensions.height);
+        const current_pixel_count = @as(usize, @intFromFloat(canvas_dimensions.width)) * @as(usize, @intFromFloat(canvas_dimensions.height));
         device_dispatch.destroyImageView(logical_device, canvas_image_view, null);
         device_dispatch.destroyImage(logical_device, canvas_image, null);
         if (current_pixel_count < pixel_count) {
@@ -934,12 +934,12 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
         }
     }
     canvas_dimensions = .{
-        .width = @floatFromInt(f32, dimensions.width),
-        .height = @floatFromInt(f32, dimensions.height),
+        .width = @floatFromInt(dimensions.width),
+        .height = @floatFromInt(dimensions.height),
     };
 
-    assert(@intFromFloat(u32, canvas_dimensions.width) == dimensions.width);
-    assert(@intFromFloat(u32, canvas_dimensions.height) == dimensions.height);
+    assert(@as(u32, @intFromFloat(canvas_dimensions.width)) == dimensions.width);
+    assert(@as(u32, @intFromFloat(canvas_dimensions.height)) == dimensions.height);
 
     const bytes_per_pixel = 4;
     const image_size_bytes: usize = pixel_count * bytes_per_pixel;
@@ -970,7 +970,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
             .allocation_size = memory_requirements.size,
             .memory_type_index = cpu_memory_index,
         }, null);
-        canvas_mapped_memory = @ptrCast([*]RGBA(u8), (try device_dispatch.mapMemory(logical_device, canvas_memory, 0, image_size_bytes, .{})).?)[0..pixel_count];
+        canvas_mapped_memory = @as([*]RGBA(u8), @ptrCast((try device_dispatch.mapMemory(logical_device, canvas_memory, 0, image_size_bytes, .{})).?))[0..pixel_count];
         @memset(canvas_mapped_memory, RGBA(u8).black);
     }
     try device_dispatch.bindImageMemory(logical_device, canvas_image, canvas_memory, 0);
@@ -1004,7 +1004,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
     try device_dispatch.allocateCommandBuffers(
         vulkan_core.logical_device,
         &command_buffer_allocate_info,
-        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        @ptrCast(&command_buffer),
     );
 
     try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -1059,7 +1059,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
         .p_wait_semaphores = undefined,
         .p_wait_dst_stage_mask = undefined,
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+        .p_command_buffers = @ptrCast(&command_buffer),
         .signal_semaphore_count = 0,
         .p_signal_semaphores = undefined,
     }};
@@ -1085,7 +1085,7 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
         logical_device,
         vulkan_core.command_pool,
         1,
-        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        @ptrCast(&command_buffer),
     );
 
     try createDescriptorSets(device_dispatch, logical_device, descriptor_count);
@@ -1238,7 +1238,7 @@ pub fn init(
         .allocation_size = memory_requirements.size,
         .memory_type_index = cpu_memory_index,
     }, null);
-    unscaled_canvas_mapped_memory = @ptrCast([*]RGBA(u8), (try device_dispatch.mapMemory(logical_device, unscaled_canvas_memory, 0, image_size_bytes, .{})).?)[0..pixel_count];
+    unscaled_canvas_mapped_memory = @as([*]RGBA(u8), @ptrCast((try device_dispatch.mapMemory(logical_device, unscaled_canvas_memory, 0, image_size_bytes, .{})).?))[0..pixel_count];
     @memset(unscaled_canvas_mapped_memory, RGBA(u8).black);
 
     try device_dispatch.bindImageMemory(logical_device, unscaled_canvas_image, unscaled_canvas_memory, 0);
@@ -1257,7 +1257,7 @@ pub fn init(
     try device_dispatch.allocateCommandBuffers(
         vulkan_core.logical_device,
         &command_buffer_allocate_info,
-        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        @ptrCast(&command_buffer),
     );
 
     try device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -1312,7 +1312,7 @@ pub fn init(
         .p_wait_semaphores = undefined,
         .p_wait_dst_stage_mask = undefined,
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+        .p_command_buffers = @ptrCast(&command_buffer),
         .signal_semaphore_count = 0,
         .p_signal_semaphores = undefined,
     }};
@@ -1338,7 +1338,7 @@ pub fn init(
         logical_device,
         vulkan_core.command_pool,
         1,
-        @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        @ptrCast(&command_buffer),
     );
 }
 
@@ -1512,8 +1512,8 @@ fn createGraphicsPipeline(
     };
 
     const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
-        .vertex_binding_description_count = @intCast(u32, vertex_input_binding_descriptions.len),
-        .vertex_attribute_description_count = @intCast(u32, vertex_input_attribute_descriptions.len),
+        .vertex_binding_description_count = @intCast(vertex_input_binding_descriptions.len),
+        .vertex_attribute_description_count = @intCast(vertex_input_attribute_descriptions.len),
         .p_vertex_binding_descriptions = &vertex_input_binding_descriptions,
         .p_vertex_attribute_descriptions = &vertex_input_attribute_descriptions,
         .flags = .{},
@@ -1529,8 +1529,8 @@ fn createGraphicsPipeline(
         vk.Viewport{
             .x = 0.0,
             .y = 0.0,
-            .width = @floatFromInt(f32, initial_viewport_dimensions.width),
-            .height = @floatFromInt(f32, initial_viewport_dimensions.height),
+            .width = @floatFromInt(initial_viewport_dimensions.width),
+            .height = @floatFromInt(initial_viewport_dimensions.height),
             .min_depth = 0.0,
             .max_depth = 1.0,
         },
@@ -1597,14 +1597,14 @@ fn createGraphicsPipeline(
         .logic_op_enable = vk.FALSE,
         .logic_op = .copy,
         .attachment_count = 1,
-        .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachment),
+        .p_attachments = @ptrCast(&color_blend_attachment),
         .blend_constants = blend_constants,
         .flags = .{},
     };
 
     const dynamic_states = [_]vk.DynamicState{ .viewport, .scissor };
     const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo{
-        .dynamic_state_count = @intCast(u32, dynamic_states.len),
+        .dynamic_state_count = @intCast(dynamic_states.len),
         .p_dynamic_states = &dynamic_states,
         .flags = .{},
     };
@@ -1650,7 +1650,7 @@ fn createGraphicsPipeline(
         1,
         &pipeline_create_infos,
         null,
-        @ptrCast([*]vk.Pipeline, &graphics_pipeline),
+        @ptrCast(&graphics_pipeline),
     );
 }
 
@@ -1660,7 +1660,7 @@ fn createFragmentShaderModule(
 ) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.texture_fragment_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.texture_fragment_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.texture_fragment_spv)),
         .flags = .{},
     };
     return try device_dispatch.createShaderModule(logical_device, &create_info, null);
@@ -1672,7 +1672,7 @@ fn createVertexShaderModule(
 ) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.texture_vertex_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.texture_vertex_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.texture_vertex_spv)),
         .flags = .{},
     };
     return try device_dispatch.createShaderModule(logical_device, &create_info, null);

@@ -50,14 +50,14 @@ pub fn appendOverwrite(self: *@This(), samples: []const i16) void {
 
     var src_index: usize = 0;
     while (src_index < samples_to_write) {
-        self.sample_buffer[dst_index] = @max(-1.0, @floatFromInt(f32, samples[src_index]) / max);
+        self.sample_buffer[dst_index] = @max(-1.0, @as(f32, @floatFromInt(samples[src_index])) / max);
         dst_index += 1;
         src_index += 1;
     }
 
     dst_index = 0;
     while (src_index < samples.len) {
-        self.sample_buffer[dst_index] = @max(-1.0, @floatFromInt(f32, samples[src_index]) / max);
+        self.sample_buffer[dst_index] = @max(-1.0, @as(f32, @floatFromInt(samples[src_index])) / max);
         dst_index += 1;
         src_index += 1;
     }

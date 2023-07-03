@@ -134,7 +134,7 @@ pub fn update(
 ) !void {
     _ = ui_state;
     if (model.recording_context.state == .recording) {
-        const record_duration = @intCast(u64, std.time.nanoTimestamp() - model.recording_context.start);
+        const record_duration = @as(u64, @intCast(std.time.nanoTimestamp() - model.recording_context.start));
         const duration = Duration.fromNanoseconds(record_duration);
         var string_buffer: [64]u8 = undefined;
         const duration_string = std.fmt.bufPrint(&string_buffer, record_duration_label_format, .{
@@ -180,7 +180,7 @@ pub fn draw(
             const radius = Radius2D(f32){ .h = radius_pixels * screen_scale.horizontal, .v = radius_pixels * screen_scale.vertical };
             _ = renderer.drawCircle(record_icon_center, radius, record_icon_color, @as(u16, radius_pixels * 20.0));
 
-            const record_duration = @intCast(u64, std.time.nanoTimestamp() - model.recording_context.start);
+            const record_duration = @as(u64, @intCast(std.time.nanoTimestamp() - model.recording_context.start));
             const duration = Duration.fromNanoseconds(record_duration);
             var string_buffer: [32]u8 = undefined;
             const duration_string = std.fmt.bufPrint(&string_buffer, record_duration_label_format, .{
@@ -252,8 +252,8 @@ pub fn draw(
             };
         };
         const dimensions_pixels = geometry.Dimensions2D(f32){
-            .width = @floatFromInt(f32, frame_dimensions.width),
-            .height = @floatFromInt(f32, frame_dimensions.height),
+            .width = @as(f32, @floatFromInt(frame_dimensions.width)),
+            .height = @as(f32, @floatFromInt(frame_dimensions.height)),
         };
 
         const margin_pixels: f32 = 10.0;
@@ -307,8 +307,8 @@ pub fn draw(
 
         if (model.desktop_capture_frame != null) {
             const canvas_dimensions_pixels: Dimensions2D(u32) = .{
-                .width = @intFromFloat(u32, @floor(@floatFromInt(f32, frame_dimensions.width) * scale)),
-                .height = @intFromFloat(u32, @floor(@floatFromInt(f32, frame_dimensions.height) * scale)),
+                .width = @as(u32, @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.width)) * scale))),
+                .height = @as(u32, @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.height)) * scale))),
             };
             try renderer.resizeCanvas(canvas_dimensions_pixels);
             std.log.info("Drawing preview at {d} x {d}", .{ canvas_dimensions_pixels.width, canvas_dimensions_pixels.height });
@@ -411,7 +411,7 @@ pub fn draw(
 
                 const audio_buffer = model.audio_streams[0].sample_buffer;
                 const sample_range = audio_buffer.sampleRange();
-                const samples_per_frame = @intFromFloat(usize, @divTrunc(44100.0, 1000.0 / 64.0));
+                const samples_per_frame = @as(usize, @intFromFloat(@divTrunc(44100.0, 1000.0 / 64.0)));
 
                 if (sample_range.count < samples_per_frame)
                     break :blk default_freq_bins[0..];
@@ -492,7 +492,7 @@ fn drawSectionScreenshot(
             .height = 40,
         };
         // const dropdown_label_dimensions = pen.calculateRenderDimensions(dropdown_label);
-        format_region.width = @floatFromInt(f32, dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
+        format_region.width = @as(f32, @floatFromInt(dropdown_label_dimensions.width + 10)) * screen_scale.horizontal;
         format_region.height = 30 * screen_scale.vertical;
 
         const label_extent = format_region.toExtent();
@@ -562,7 +562,7 @@ fn drawSectionRecord(
             .height = 40,
         };
 
-        record_quality_region.width = @floatFromInt(f32, dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
+        record_quality_region.width = @as(f32, @floatFromInt(dropdown_label_dimensions.width + 10)) * screen_scale.horizontal;
         record_quality_region.height = 30 * screen_scale.vertical;
 
         const label_extent = record_quality_region.toExtent();
@@ -597,7 +597,7 @@ fn drawSectionRecord(
             .height = 40,
         };
 
-        record_format_region.width = @floatFromInt(f32, dropdown_label_dimensions.width + 10) * screen_scale.horizontal;
+        record_format_region.width = @as(f32, @floatFromInt(dropdown_label_dimensions.width + 10)) * screen_scale.horizontal;
         record_format_region.height = 30 * screen_scale.vertical;
 
         const label_extent = record_format_region.toExtent();

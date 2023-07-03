@@ -80,7 +80,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
             // If we've already enumerated a device with this name, just skip
             // TODO: Obviously this should use a proper ID instead of name
             //
-            if (std.mem.eql(u8, device_buffer[@intCast(usize, index)].name, device_name)) {
+            if (std.mem.eql(u8, device_buffer[@as(usize, @intCast(index))].name, device_name)) {
                 std.log.warn("Skipping \"{s}\". Device already registered", .{device_name});
                 allocator.free(device_name_untrimmed);
                 continue :register_devices;
@@ -88,7 +88,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         }
         device_buffer[device_index].name = device_name;
         device_buffer[device_index].path = try allocator.dupeZ(u8, device_path);
-        device_buffer[device_index].allocated_name_size = @intCast(u16, device_name_untrimmed.len);
+        device_buffer[device_index].allocated_name_size = @as(u16, @intCast(device_name_untrimmed.len));
         device_count += 1;
     }
 }
@@ -157,9 +157,9 @@ pub fn open(
         return error.FindBestStreamFail;
 
     video_stream_index = ret_code;
-    stream = format_context.streams[@intCast(usize, video_stream_index)];
+    stream = format_context.streams[@as(usize, @intCast(video_stream_index))];
 
-    const codec_id = @enumFromInt(av.CodecID, stream.codecpar[0].codec_id);
+    const codec_id = @as(av.CodecID, @enumFromInt(stream.codecpar[0].codec_id));
     decoder = av.codecFindDecoder(codec_id);
     if (decoder == null)
         return error.FindDecoderFail;
@@ -187,7 +187,7 @@ pub fn open(
     if (ret_code < 0)
         return error.CopyContextParametersFail;
 
-    video_stream = format_context.streams[@intCast(usize, video_stream_index)];
+    video_stream = format_context.streams[@as(usize, @intCast(video_stream_index))];
     codec_params = video_stream.?.codecpar[0];
     ret_code = av.imageAlloc(
         &video_dst_data,
@@ -216,7 +216,7 @@ pub fn open(
     packet = libav.av_packet_alloc();
     converted_frame = av.frameAlloc();
     ret_code = libav.av_image_alloc(
-        @ptrCast([*c][*c]u8, &converted_frame.?.data[0]),
+        @as([*c][*c]u8, @ptrCast(&converted_frame.?.data[0])),
         &converted_frame.?.linesize,
         decoder_context.width,
         decoder_context.height,
@@ -227,8 +227,8 @@ pub fn open(
 
 pub fn dimensions() geometry.Dimensions2D(u32) {
     return .{
-        .width = @intCast(u32, decoder_context.width),
-        .height = @intCast(u32, decoder_context.height),
+        .width = @as(u32, @intCast(decoder_context.width)),
+        .height = @as(u32, @intCast(decoder_context.height)),
     };
 }
 
@@ -284,8 +284,8 @@ pub fn getFrame(
     // pixel format before returning
     //
 
-    const width = @intCast(usize, decoder_context.width);
-    const height = @intCast(usize, decoder_context.height);
+    const width = @as(usize, @intCast(decoder_context.width));
+    const height = @as(usize, @intCast(decoder_context.height));
 
     var conversion = libav.sws_getContext(
         decoder_context.width,
@@ -313,9 +313,9 @@ pub fn getFrame(
 
     const pixel_count = width * height;
 
-    const src_stride = @intCast(usize, @divExact(converted_frame.?.linesize[0], @sizeOf(graphics.RGBA(u8))));
+    const src_stride = @as(usize, @intCast(@divExact(converted_frame.?.linesize[0], @sizeOf(graphics.RGBA(u8)))));
 
-    const frame_pixels = @ptrCast([*]graphics.RGBA(u8), &converted_frame.?.data[0][0])[0..pixel_count];
+    const frame_pixels = @as([*]graphics.RGBA(u8), @ptrCast(&converted_frame.?.data[0][0]))[0..pixel_count];
 
     var dst_x = dst_offset_x;
     var dst_y = dst_offset_y;
@@ -337,14 +337,14 @@ pub fn getFrame(
 pub fn close() void {
     assert(initialized);
     libav.av_packet_unref(packet);
-    libav.av_freep(@ptrCast(*anyopaque, &converted_frame.?.data[0]));
+    libav.av_freep(@as(*anyopaque, @ptrCast(&converted_frame.?.data[0])));
     libav.av_frame_free(&video_frame);
     libav.av_frame_free(&converted_frame);
     libav.av_free(video_dst_data[0]);
 
     _ = libav.avcodec_close(decoder_context);
     libav.avformat_close_input(
-        @ptrCast([*c][*c]av.FormatContext, &format_context),
+        @as([*c][*c]av.FormatContext, @ptrCast(&format_context)),
     );
 }
 

@@ -65,7 +65,7 @@ fn inputLoop() void {
             .events = linux.POLL.IN,
             .revents = 0,
         };
-        const poll_code = linux.poll(@ptrCast([*]linux.pollfd, &pollfd), 1, timeout_milliseconds);
+        const poll_code = linux.poll(@ptrCast(&pollfd), 1, timeout_milliseconds);
         if (poll_code == 0) {
             // Poll timed-out, jump back to top of loop and see if we should terminate
             continue;
@@ -134,7 +134,7 @@ pub fn update(_: *const Model, _: *CoreUpdateDecoder) UpdateError!CoreRequestDec
                 const display_list = app_core.displayList();
                 _ = stdout.write("Display List:\n") catch {};
                 for (display_list, 0..) |display, display_i| {
-                    const index_char = [1]u8{@intCast(u8, display_i) + '0'};
+                    const index_char = [1]u8{@as(u8, @intCast(display_i)) + '0'};
                     _ = stdout.write("  ") catch {};
                     _ = stdout.write(&index_char) catch {};
                     _ = stdout.write(". ") catch {};

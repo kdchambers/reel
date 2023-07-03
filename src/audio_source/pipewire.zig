@@ -285,7 +285,7 @@ pub fn createStream(
             .map_buffers = true,
             .rt_process = true,
         },
-        @ptrCast(*[*]spa.Pod, &param_ptr),
+        @ptrCast(&param_ptr),
         1,
     );
     if (ret_code != 0) {
@@ -325,7 +325,7 @@ pub fn init(
 
     var argc: i32 = 1;
     var argv = [_][*:0]const u8{"reel"};
-    symbols.init(@ptrCast(*i32, &argc), @ptrCast(*[*][*:0]const u8, &argv));
+    symbols.init(@ptrCast(&argc), @ptrCast(&argv));
 
     backend_state = .initialized;
     onInitSuccess();
@@ -353,14 +353,14 @@ fn onStateChangedCallback(_: ?*anyopaque, old: pw.StreamState, new: pw.StreamSta
 
 fn onProcessCallback(userdata_opt: ?*anyopaque) callconv(.C) void {
     if (userdata_opt) |userdata| {
-        const stream_ptr = @ptrCast(*const Stream, @alignCast(@alignOf(Stream), userdata));
+        const stream_ptr: *const Stream = @ptrCast(@alignCast(userdata));
         assert(stream_ptr.handle != Stream.null_handle);
         const buffer = symbols.streamDequeueBuffer(stream_ptr.stream);
         const buffer_bytes = buffer.*.buffer.*.datas[0].data orelse return;
         const buffer_size_bytes = buffer.*.buffer.*.datas[0].chunk.*.size;
         const sample_count = @divExact(buffer_size_bytes, @sizeOf(i16));
         const stream_handle = StreamHandle{ .index = 0 };
-        onSamplesReady(stream_handle, @ptrCast([*]i16, @alignCast(2, buffer_bytes))[0..sample_count]);
+        onSamplesReady(stream_handle, @as([*]i16, @ptrCast(@alignCast(buffer_bytes)))[0..sample_count]);
         _ = symbols.streamQueueBuffer(stream_ptr.stream, buffer);
     } else {
         std.log.err("audio_source(pipewire): onProcessCallback userdata is null", .{});
@@ -377,7 +377,7 @@ fn onParamChangedCallback(_: ?*anyopaque, id: u32, params_opt: ?*const spa.Pod) 
         if (spa.formatParse(params, &media_type, &media_subtype) < 0) {
             return;
         }
-        if (@enumFromInt(spa.MediaType, media_type) != .audio or @enumFromInt(spa.MediaSubtype, media_subtype) != .raw) {
+        if (@as(spa.MediaType, @enumFromInt(media_type)) != .audio or @as(spa.MediaSubtype, @enumFromInt(media_subtype)) != .raw) {
             std.log.info("Rejecting non-raw audio format", .{});
             return;
         }

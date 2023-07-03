@@ -315,7 +315,7 @@ fn streamState(stream: StreamHandle) StreamState {
 }
 
 fn onStreamStateCallback(pulse_stream: *pa.Stream, userdata: ?*anyopaque) callconv(.C) void {
-    const stream = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
+    const stream: *Stream = @ptrCast(@alignCast(userdata));
     switch (handles.stream_get_state(pulse_stream)) {
         .creating => assert(stream.state == .initializating),
         .ready => {
@@ -334,7 +334,7 @@ fn onStreamStateCallback(pulse_stream: *pa.Stream, userdata: ?*anyopaque) callco
                 //
                 // Calculate the index based on where the pointer is positioned in `stream_buffer`
                 //
-                .index = @intCast(u32, @divExact(@intFromPtr(stream) - @intFromPtr(&stream_buffer[0]), @sizeOf(Stream))),
+                .index = @intCast(@divExact(@intFromPtr(stream) - @intFromPtr(&stream_buffer[0]), @sizeOf(Stream))),
             });
         },
         .failed => {
@@ -378,7 +378,7 @@ fn onContextStateChangedCallback(context: *pa.Context, success: i32, userdata: ?
 }
 
 fn streamReadCallback(pulse_stream: *pa.Stream, bytes_available_count: u64, userdata: ?*anyopaque) callconv(.C) void {
-    const stream = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
+    const stream: *Stream = @ptrCast(@alignCast(userdata));
     assert(stream.state == .paused or stream.state == .running);
 
     assert(backend_state == .initialized);
@@ -388,7 +388,7 @@ fn streamReadCallback(pulse_stream: *pa.Stream, bytes_available_count: u64, user
 
     var pcm_buffer_opt: ?[*]i16 = undefined;
     var bytes_read_count: u64 = bytes_available_count;
-    const ret_code = handles.stream_peek(pulse_stream, @ptrCast(*?*void, &pcm_buffer_opt), &bytes_read_count);
+    const ret_code = handles.stream_peek(pulse_stream, @ptrCast(&pcm_buffer_opt.?), &bytes_read_count);
     if (ret_code < 0) {
         std.log.err("Failed to read stream", .{});
         // TODO:
@@ -400,7 +400,7 @@ fn streamReadCallback(pulse_stream: *pa.Stream, bytes_available_count: u64, user
             //
             // Calculate the index based on where the pointer is positioned in `stream_buffer`
             //
-            StreamHandle{ .index = @intCast(u32, @divExact(@intFromPtr(stream) - @intFromPtr(&stream_buffer[0]), @sizeOf(Stream))) },
+            StreamHandle{ .index = @intCast(@divExact(@intFromPtr(stream) - @intFromPtr(&stream_buffer[0]), @sizeOf(Stream))) },
             pcm_buffer[0..@divExact(bytes_read_count, @sizeOf(i16))],
         );
     } else {

@@ -15,7 +15,8 @@ const vulkan_engine_name = "No engine";
 const vulkan_application_version = vk.makeApiVersion(0, 0, 1, 0);
 const application_name = "reel";
 
-var vkGetInstanceProcAddr: *const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = undefined;
+const GetInstanceProcAddressFn = *const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction;
+var vkGetInstanceProcAddr: GetInstanceProcAddressFn = undefined;
 
 /// Enable Vulkan validation layers
 const enable_validation_layers = if (builtin.mode == .Debug) true else false;
@@ -63,7 +64,7 @@ pub var surface: vk.SurfaceKHR = undefined;
 
 pub fn init(wayland_display: *vk.wl_display, wayland_surface: *vk.wl_surface) !void {
     if (clib.dlopen("libvulkan.so.1", clib.RTLD_NOW)) |vulkan_loader| {
-        const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
+        const vk_get_instance_proc_addr_fn_opt: ?GetInstanceProcAddressFn = @ptrCast(clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
         if (vk_get_instance_proc_addr_fn_opt) |vk_get_instance_proc_addr_fn| {
             vkGetInstanceProcAddr = vk_get_instance_proc_addr_fn;
             base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
@@ -87,7 +88,7 @@ pub fn init(wayland_display: *vk.wl_display, wayland_surface: *vk.wl_surface) !v
             .api_version = vulkan_api_version,
         },
         .enabled_extension_count = surface_extensions.len,
-        .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &surface_extensions),
+        .pp_enabled_extension_names = @ptrCast(&surface_extensions),
         .enabled_layer_count = if (enable_validation_layers) validation_layers.len else 0,
         .pp_enabled_layer_names = if (enable_validation_layers) &validation_layers else undefined,
         .flags = .{},
@@ -116,7 +117,7 @@ pub fn init(wayland_display: *vk.wl_display, wayland_surface: *vk.wl_surface) !v
     {
         const device_create_info = vk.DeviceCreateInfo{
             .queue_create_info_count = 1,
-            .p_queue_create_infos = @ptrCast([*]const vk.DeviceQueueCreateInfo, &vk.DeviceQueueCreateInfo{
+            .p_queue_create_infos = @ptrCast(&vk.DeviceQueueCreateInfo{
                 .queue_family_index = graphics_present_queue_index,
                 .queue_count = 1,
                 .p_queue_priorities = &[1]f32{1.0},
@@ -229,7 +230,7 @@ fn selectPhysicalDevice() !?vk.PhysicalDevice {
                     // NOTE: We are relying on device_extensions to only contain c strings up to 255 charactors
                     //       available_extension.extension_name will always be a null terminated string in a 256 char buffer
                     // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VK_MAX_EXTENSION_NAME_SIZE.html
-                    if (std.cstr.cmp(requested_extension, @ptrCast([*:0]const u8, &available_extension.extension_name)) == 0) {
+                    if (std.mem.orderZ(u8, requested_extension, @as([*:0]const u8, @ptrCast(&available_extension.extension_name))) == .eq) {
                         continue :dev_extensions;
                     }
                 }
@@ -266,11 +267,11 @@ fn selectPhysicalDevice() !?vk.PhysicalDevice {
             if (queue_family.queue_flags.graphics_bit) {
                 const present_support = try instance_dispatch.getPhysicalDeviceSurfaceSupportKHR(
                     device,
-                    @intCast(u32, queue_family_i),
+                    @intCast(queue_family_i),
                     surface,
                 );
                 if (present_support != 0) {
-                    graphics_present_queue_index = @intCast(u32, queue_family_i);
+                    graphics_present_queue_index = @intCast(queue_family_i);
                     return device;
                 }
             }

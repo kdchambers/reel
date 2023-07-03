@@ -210,29 +210,30 @@ fn outputListener(output: *wl.Output, event: wl.Output.Event, index: *const u16)
 fn registryListener(registry_ref: *wl.Registry, event: wl.Registry.Event, _: *const void) void {
     switch (event) {
         .global => |global| {
+            const orderZ = std.mem.orderZ;
             // std.log.info("Wayland interface: {s}", .{global.interface});
-            if (std.cstr.cmp(global.interface, wl.Compositor.getInterface().name) == 0) {
+            if (orderZ(u8, global.interface, wl.Compositor.getInterface().name) == .eq) {
                 compositor = registry_ref.bind(global.name, wl.Compositor, 4) catch return;
-            } else if (std.cstr.cmp(global.interface, xdg.WmBase.getInterface().name) == 0) {
+            } else if (orderZ(u8, global.interface, xdg.WmBase.getInterface().name) == .eq) {
                 xdg_wm_base = registry_ref.bind(global.name, xdg.WmBase, 3) catch return;
-            } else if (std.cstr.cmp(global.interface, wl.Seat.getInterface().name) == 0) {
+            } else if (orderZ(u8, global.interface, wl.Seat.getInterface().name) == .eq) {
                 seat = registry_ref.bind(global.name, wl.Seat, 5) catch return;
                 pointer = seat.getPointer() catch return;
-            } else if (std.cstr.cmp(global.interface, wl.Shm.getInterface().name) == 0) {
+            } else if (orderZ(u8, global.interface, wl.Shm.getInterface().name) == .eq) {
                 shared_memory = registry_ref.bind(global.name, wl.Shm, 1) catch return;
-            } else if (std.cstr.cmp(global.interface, wlr.ScreencopyManagerV1.getInterface().name) == 0) {
+            } else if (orderZ(u8, global.interface, wlr.ScreencopyManagerV1.getInterface().name) == .eq) {
                 screencopy_manager_opt = registry_ref.bind(global.name, wlr.ScreencopyManagerV1, 3) catch return;
-            } else if (std.cstr.cmp(global.interface, wl.Output.getInterface().name) == 0) {
+            } else if (orderZ(u8, global.interface, wl.Output.getInterface().name) == .eq) {
                 if (outputs.len < outputs.buffer.len) {
                     const output_ptr = registry_ref.bind(global.name, wl.Output, 2) catch return;
-                    const output_index = @intCast(u16, outputs.len);
+                    const output_index = @as(u16, @intCast(outputs.len));
                     outputs.append(.{
                         .handle = output_ptr,
                         .index = output_index,
                     }) catch unreachable;
                     output_ptr.setListener(*const u16, outputListener, &(outputs.buffer[outputs.len - 1].index));
                 }
-            } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
+            } else if (orderZ(u8, global.interface, zxdg.DecorationManagerV1.getInterface().name) == .eq) {
                 window_decorations_opt = registry_ref.bind(global.name, zxdg.DecorationManagerV1, 2) catch blk: {
                     std.log.warn("Failed to bind to zxdg.DecorationManagerV1", .{});
                     break :blk null;

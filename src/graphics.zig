@@ -126,9 +126,9 @@ pub fn RGB(comptime BaseType: type) type {
         pub fn fromInt(r: u8, g: u8, b: u8) @This() {
             if (comptime trait.isFloat(BaseType)) {
                 return .{
-                    .r = @floatFromInt(BaseType, r) / 255.0,
-                    .g = @floatFromInt(BaseType, g) / 255.0,
-                    .b = @floatFromInt(BaseType, b) / 255.0,
+                    .r = @as(BaseType, @floatFromInt(r)) / 255.0,
+                    .g = @as(BaseType, @floatFromInt(g)) / 255.0,
+                    .b = @as(BaseType, @floatFromInt(b)) / 255.0,
                 };
             } else {
                 return .{
@@ -177,10 +177,10 @@ pub fn RGBA(comptime BaseType: type) type {
         pub fn fromInt(r: u8, g: u8, b: u8, a: u8) @This() {
             if (comptime trait.isFloat(BaseType)) {
                 return .{
-                    .r = @floatFromInt(BaseType, r) / 255.0,
-                    .g = @floatFromInt(BaseType, g) / 255.0,
-                    .b = @floatFromInt(BaseType, b) / 255.0,
-                    .a = @floatFromInt(BaseType, a) / 255.0,
+                    .r = @as(BaseType, @floatFromInt(r)) / 255.0,
+                    .g = @as(BaseType, @floatFromInt(g)) / 255.0,
+                    .b = @as(BaseType, @floatFromInt(b)) / 255.0,
+                    .a = @as(BaseType, @floatFromInt(a)) / 255.0,
                 };
             } else {
                 return .{

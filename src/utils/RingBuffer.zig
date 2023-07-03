@@ -35,7 +35,7 @@ pub fn RingBuffer(comptime T: type, comptime capacity: usize) type {
                 return error.Full;
             }
 
-            const dst_index: usize = @intCast(u16, @mod(self.head + self.len, capacity));
+            const dst_index: usize = @intCast(@mod(self.head + self.len, capacity));
             self.buffer[dst_index] = value;
             self.len += 1;
         }
@@ -48,7 +48,7 @@ pub fn RingBuffer(comptime T: type, comptime capacity: usize) type {
                 return null;
 
             const index = self.head;
-            self.head = @intCast(u16, @mod(self.head + 1, capacity));
+            self.head = @intCast(@mod(self.head + 1, capacity));
             self.len -= 1;
             return self.buffer[index];
         }

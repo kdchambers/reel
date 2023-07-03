@@ -44,11 +44,11 @@ pub const PictureType = enum(u32) {
 };
 
 fn makeErrorTag(comptime a: u8, comptime b: u8, comptime c: u8, comptime d: u8) i32 {
-    return (-@intCast(i32, makeTag(a, b, c, d)));
+    return (-@as(i32, @intCast(makeTag(a, b, c, d))));
 }
 
 fn makeTag(comptime a: u8, comptime b: u8, comptime c: u8, comptime d: u8) u32 {
-    return (a | (@intCast(u32, b) << 8) | (@intCast(u32, c) << 16) | (@intCast(u32, d) << 24));
+    return (a | (@as(u32, @intCast(b)) << 8) | (@as(u32, @intCast(c)) << 16) | (@as(u32, @intCast(d)) << 24));
 }
 
 pub const error_eof: i32 = makeErrorTag('E', 'O', 'F', ' ');

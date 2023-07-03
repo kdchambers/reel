@@ -124,7 +124,7 @@ pub const texture_layer_dimensions = geometry.Dimensions2D(TexturePixelBaseType)
 };
 
 /// Size in bytes of each texture layer (Not including padding, etc)
-pub const texture_layer_size = @sizeOf(graphics.RGBA(f32)) * @intCast(u64, texture_layer_dimensions.width) * texture_layer_dimensions.height;
+pub const texture_layer_size = @sizeOf(graphics.RGBA(f32)) * @as(u64, @intCast(texture_layer_dimensions.width)) * texture_layer_dimensions.height;
 pub const texture_size_bytes = texture_layer_dimensions.width * texture_layer_dimensions.height * @sizeOf(graphics.RGBA(f32));
 
 pub const background_color = graphics.RGBA(f32).fromInt(u8, 35, 35, 35, 255);

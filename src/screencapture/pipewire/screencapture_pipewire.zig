@@ -238,7 +238,7 @@ pub fn detectSupport() bool {
         return false;
     }
     const source_mode_flags = getProperty(u32, connection, "AvailableSourceTypes") catch return false;
-    return (@bitCast(SourceTypeFlags, source_mode_flags).monitor == true);
+    return (@as(SourceTypeFlags, @bitCast(source_mode_flags)).monitor == true);
 }
 
 //
@@ -369,7 +369,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &handle_token_option_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&handle_token_option_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -380,7 +380,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "s", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &request_id)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&request_id))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -403,7 +403,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_types_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -415,7 +415,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
             return error.WriteDictFail;
 
         const display_model: u32 = 0;
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @ptrCast(*const void, &display_model)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @as(*const void, @ptrCast(&display_model))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -438,7 +438,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_types_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -450,7 +450,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
             return error.WriteDictFail;
 
         const display_interactive: u32 = 0;
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @ptrCast(*const void, &display_interactive)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @as(*const void, @ptrCast(&display_interactive))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -494,7 +494,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
     }
 
     var response_uri: [*:0]const u8 = undefined;
-    dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &response_uri));
+    dbus.messageIterGetBasic(&reply_iter, @as(*void, @ptrCast(&response_uri)));
 
     const screenshot_response: *dbus.Message = blk: {
         const timeout_duration_seconds = 60;
@@ -537,7 +537,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
             return error.ReplyInvalidType;
         }
         var success_code: u32 = std.math.maxInt(u32);
-        dbus.messageIterGetBasic(&screenshot_response_iter, @ptrCast(*void, &success_code));
+        dbus.messageIterGetBasic(&screenshot_response_iter, @as(*void, @ptrCast(&success_code)));
 
         if (success_code != 0) {
             std.log.err("dbus_client: SelectSources response message returned error code {d}", .{
@@ -566,7 +566,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
         assert(next_type == c.DBUS_TYPE_STRING);
 
         var arg_label: [*:0]const u8 = undefined;
-        dbus.messageIterGetBasic(&root_dict_iter, @ptrCast(*void, &arg_label));
+        dbus.messageIterGetBasic(&root_dict_iter, @as(*void, @ptrCast(&arg_label)));
 
         const expected_label = "uri";
         for (expected_label, 0..) |char, char_i| {
@@ -584,7 +584,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
 
         assert(next_type == c.DBUS_TYPE_STRING);
 
-        dbus.messageIterGetBasic(&variant_iter, @ptrCast(*void, &file_uri));
+        dbus.messageIterGetBasic(&variant_iter, @as(*void, @ptrCast(&file_uri)));
     }
 
     // TODO: Do I have to deinit the message?
@@ -669,7 +669,7 @@ pub fn getProperty(
     }
 
     var result: T = undefined;
-    dbus.messageIterGetBasic(&sub, @ptrCast(*void, &result));
+    dbus.messageIterGetBasic(&sub, @as(*void, @ptrCast(&result)));
     dbus.messageUnref(reply_message);
 
     return result;
@@ -722,7 +722,7 @@ fn pollForResponse(
         }
 
         var response: u32 = std.math.maxInt(u32);
-        dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &response));
+        dbus.messageIterGetBasic(&reply_iter, @as(*void, @ptrCast(&response)));
 
         if (dbus.messageIterNext(&reply_iter) != 1)
             return error.InvalidResponse;
@@ -743,7 +743,7 @@ fn pollForResponse(
         }
 
         var session_handle_label: [*:0]const u8 = undefined;
-        dbus.messageIterGetBasic(&dict_entry_iter, @ptrCast(*void, &session_handle_label));
+        dbus.messageIterGetBasic(&dict_entry_iter, @as(*void, @ptrCast(&session_handle_label)));
 
         const equal = blk: {
             var k: usize = 0;
@@ -771,7 +771,7 @@ fn pollForResponse(
         }
 
         var session_handle: [*:0]const u8 = undefined;
-        dbus.messageIterGetBasic(&variant_iter, @ptrCast(*void, &session_handle));
+        dbus.messageIterGetBasic(&variant_iter, @as(*void, @ptrCast(&session_handle)));
 
         //
         // TODO: You probably need to dupe the strings
@@ -829,7 +829,7 @@ fn createSession(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &handle_token_option_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&handle_token_option_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -840,7 +840,7 @@ fn createSession(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "s", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &request_id)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&request_id))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -861,7 +861,7 @@ fn createSession(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.OpenContainerFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &session_handle_token_option_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&session_handle_token_option_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -872,7 +872,7 @@ fn createSession(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "s", &dict_variant_iter) != 1)
             return error.OpenContainerFail;
 
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &session_id)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&session_id))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -919,7 +919,7 @@ fn createSession(
         return error.ReplyInvalidType;
     }
     var create_session_request_path: [*:0]const u8 = undefined;
-    dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &create_session_request_path));
+    dbus.messageIterGetBasic(&reply_iter, @as(*void, @ptrCast(&create_session_request_path)));
 
     return create_session_request_path;
 }
@@ -1013,7 +1013,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_handle_token_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_handle_token_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -1024,7 +1024,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "s", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &request_suffix)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&request_suffix))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -1047,7 +1047,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_types_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -1058,8 +1058,8 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "u", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        const content_types = @bitCast(u32, SourceTypeFlags{ .monitor = true });
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @ptrCast(*const void, &content_types)) != 1)
+        const content_types = @as(u32, @bitCast(SourceTypeFlags{ .monitor = true }));
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @as(*const void, @ptrCast(&content_types))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -1082,7 +1082,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_types_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -1094,7 +1094,7 @@ fn setSource(
             return error.WriteDictFail;
 
         const persist_mode: u32 = @intFromEnum(PersistMode.until_revoked);
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @ptrCast(*const void, &persist_mode)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @as(*const void, @ptrCast(&persist_mode))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -1117,7 +1117,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_types_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -1128,8 +1128,8 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "u", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        const cursor_flags: u32 = @bitCast(u32, CursorModeFlags{ .embedded = true });
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @ptrCast(*const void, &cursor_flags)) != 1)
+        const cursor_flags: u32 = @as(u32, @bitCast(CursorModeFlags{ .embedded = true }));
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_UINT32, @as(*const void, @ptrCast(&cursor_flags))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -1152,7 +1152,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_types_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_types_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -1164,7 +1164,7 @@ fn setSource(
             return error.WriteDictFail;
 
         const allow_multiple: bool = false;
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @ptrCast(*const void, &allow_multiple)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @as(*const void, @ptrCast(&allow_multiple))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -1207,7 +1207,7 @@ fn setSource(
         return error.ReplyInvalidType;
     }
     var request_handle: [*:0]const u8 = undefined;
-    dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &request_handle));
+    dbus.messageIterGetBasic(&reply_iter, @as(*void, @ptrCast(&request_handle)));
 
     return request_handle;
 }
@@ -1274,7 +1274,7 @@ fn startStream(
         if (dbus.messageIterOpenContainer(&array_iter, c.DBUS_TYPE_DICT_ENTRY, null, &dict_entry_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &option_handle_token_label)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_entry_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&option_handle_token_label))) != 1)
             return error.AppendBasicFail;
 
         //
@@ -1285,7 +1285,7 @@ fn startStream(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "s", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @ptrCast(*const void, &request_suffix)) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&request_suffix))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -1329,7 +1329,7 @@ fn startStream(
     }
 
     var request_handle: [*:0]const u8 = undefined;
-    dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &request_handle));
+    dbus.messageIterGetBasic(&reply_iter, @as(*void, @ptrCast(&request_handle)));
 
     return request_handle;
 }
@@ -1402,7 +1402,7 @@ fn openPipewireRemote(
     }
 
     var pipewire_fd: i32 = undefined;
-    dbus.messageIterGetBasic(&reply_iter, @ptrCast(*void, &pipewire_fd));
+    dbus.messageIterGetBasic(&reply_iter, @as(*void, @ptrCast(&pipewire_fd)));
 
     return pipewire_fd;
 }
@@ -1596,7 +1596,7 @@ pub fn init() !void {
             return error.ReplyInvalidType;
         }
         var success_code: u32 = std.math.maxInt(u32);
-        dbus.messageIterGetBasic(&select_sources_response_iter, @ptrCast(*void, &success_code));
+        dbus.messageIterGetBasic(&select_sources_response_iter, @as(*void, @ptrCast(&success_code)));
 
         if (success_code != 0) {
             std.log.err("dbus_client: SelectSources response message returned error code {d}", .{
@@ -1691,7 +1691,7 @@ pub fn init() !void {
 
     var stream_ptr: *Stream = newStream();
 
-    pw.pw_init(@ptrCast([*]i32, &argc), @ptrCast([*c][*c][*c]u8, &argv));
+    pw.pw_init(@ptrCast(&argc), @ptrCast(&argv));
 
     stream_ptr.thread_loop = pw.pw_thread_loop_new("Pipewire screencast thread loop", null) orelse return error.CreateThreadLoopFail;
     var context = pw.pw_context_new(
@@ -1740,7 +1740,7 @@ pub fn init() !void {
     var params: [1]*pw.spa_pod = undefined;
     var params_buffer: [2048]u8 = undefined;
     var pod_builder = pw.spa_pod_builder{
-        .data = @ptrCast(*void, &params_buffer),
+        .data = @as(*void, @ptrCast(&params_buffer)),
         .size = 2048,
         ._padding = 0,
         .state = .{
@@ -1761,7 +1761,7 @@ pub fn init() !void {
         pw.PW_DIRECTION_INPUT,
         start_responses.pipewire_node_id,
         pw.PW_STREAM_FLAG_AUTOCONNECT | pw.PW_STREAM_FLAG_MAP_BUFFERS,
-        @ptrCast([*c][*c]pw.spa_pod, &params),
+        @ptrCast(&params),
         1,
     );
 
@@ -1770,11 +1770,10 @@ pub fn init() !void {
 
 fn onProcessCallback(userdata_opt: ?*anyopaque) callconv(.C) void {
     if (userdata_opt) |userdata| {
-        const stream_ptr = @ptrCast(*const Stream, @alignCast(@alignOf(Stream), userdata));
+        const stream_ptr: *const Stream = @ptrCast(@alignCast(userdata));
         const buffer = pw.pw_stream_dequeue_buffer(stream_ptr.stream);
         const buffer_bytes = buffer.*.buffer.*.datas[0].data.?;
-        const alignment = @alignOf(screencapture.PixelType);
-        const buffer_pixels = @ptrCast([*]const screencapture.PixelType, @alignCast(alignment, buffer_bytes));
+        const buffer_pixels: [*]const screencapture.PixelType = @ptrCast(@alignCast(buffer_bytes));
 
         frameReadyCallback(
             stream_ptr.handle,
@@ -1794,7 +1793,7 @@ fn onParamChangedCallback(userdata_opt: ?*anyopaque, id: u32, params: ?*const pw
         return;
     if (userdata_opt) |userdata| {
         if (id == pw.SPA_PARAM_Format) {
-            var stream_ptr = @ptrCast(*Stream, @alignCast(@alignOf(Stream), userdata));
+            var stream_ptr: *Stream = @ptrCast(@alignCast(userdata));
             stream_ptr.format = parseStreamFormat(params);
             std.log.info("Pipewire stream opened. {d} x {d} {s}", .{
                 stream_ptr.format.width,
@@ -1859,7 +1858,7 @@ fn extractMessageStart(
         return error.InvalidResponse;
     }
 
-    dbus.messageIterGetBasic(&start_stream_response_iter, @ptrCast(*void, &result.pipewire_node_id));
+    dbus.messageIterGetBasic(&start_stream_response_iter, @as(*void, @ptrCast(&result.pipewire_node_id)));
     _ = dbus.messageIterNext(&start_stream_response_iter);
 
     var next_type: i32 = dbus.messageIterGetArgType(&start_stream_response_iter);
@@ -1878,7 +1877,7 @@ fn extractMessageStart(
     assert(next_type == c.DBUS_TYPE_STRING);
 
     var option_label: [*:0]const u8 = undefined;
-    dbus.messageIterGetBasic(&root_dict_iter, @ptrCast(*void, &option_label));
+    dbus.messageIterGetBasic(&root_dict_iter, @as(*void, @ptrCast(&option_label)));
 
     _ = dbus.messageIterNext(&root_dict_iter);
     next_type = dbus.messageIterGetArgType(&root_dict_iter);
@@ -1902,7 +1901,7 @@ fn extractMessageStart(
 
     assert(next_type == c.DBUS_TYPE_UINT32);
 
-    dbus.messageIterGetBasic(&struct_iter, @ptrCast(*void, &result.pipewire_node_id));
+    dbus.messageIterGetBasic(&struct_iter, @as(*void, @ptrCast(&result.pipewire_node_id)));
     _ = dbus.messageIterNext(&struct_iter);
     next_type = dbus.messageIterGetArgType(&struct_iter);
 
@@ -1922,7 +1921,7 @@ fn extractMessageStart(
             while (true) {
                 next_type = dbus.messageIterGetArgType(&array_dict_entry_iter);
                 if (next_type == c.DBUS_TYPE_STRING) {
-                    dbus.messageIterGetBasic(&array_dict_entry_iter, @ptrCast(*void, &option_label));
+                    dbus.messageIterGetBasic(&array_dict_entry_iter, @as(*void, @ptrCast(&option_label)));
                     std.log.info("Ret label: {s}", .{option_label});
                     if (c.strncmp("size", option_label, 4) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
@@ -1939,13 +1938,13 @@ fn extractMessageStart(
                         next_type = dbus.messageIterGetArgType(&size_struct_iter);
                         assert(next_type == c.DBUS_TYPE_INT32);
 
-                        dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &result.dimensions[0]));
+                        dbus.messageIterGetBasic(&size_struct_iter, @as(*void, @ptrCast(&result.dimensions[0])));
                         _ = dbus.messageIterNext(&size_struct_iter);
 
                         next_type = dbus.messageIterGetArgType(&size_struct_iter);
                         assert(next_type == c.DBUS_TYPE_INT32);
 
-                        dbus.messageIterGetBasic(&size_struct_iter, @ptrCast(*void, &result.dimensions[1]));
+                        dbus.messageIterGetBasic(&size_struct_iter, @as(*void, @ptrCast(&result.dimensions[1])));
                     }
                     if (c.strncmp("id", option_label, 2) == 0) {
                         _ = dbus.messageIterNext(&array_dict_entry_iter);
@@ -1957,7 +1956,7 @@ fn extractMessageStart(
                         next_type = dbus.messageIterGetArgType(&id_variant_iter);
                         assert(next_type == c.DBUS_TYPE_STRING);
 
-                        dbus.messageIterGetBasic(&id_variant_iter, @ptrCast(*void, &result.id));
+                        dbus.messageIterGetBasic(&id_variant_iter, @as(*void, @ptrCast(&result.id)));
                     }
                 }
 

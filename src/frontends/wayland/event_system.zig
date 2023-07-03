@@ -157,7 +157,7 @@ pub fn writeMouseEventSlot(
     assert(!(options.invert and options.enable_hover));
     event_slot_buffer.get()[mouse_event_slot_count] = .{
         .extent = extent.to2D(),
-        .z_layer = @intFromFloat(u8, @floor(extent.z * 100.0)),
+        .z_layer = @intFromFloat(@floor(extent.z * 100.0)),
         .state = .{},
         .flags = .{
             .hover_enabled = options.enable_hover,
@@ -182,7 +182,7 @@ pub inline fn overwriteMouseEventSlot(
     assert(!(options.invert and options.enable_hover));
     slot.* = .{
         .extent = extent.to2D(),
-        .z_layer = @intFromFloat(u8, @floor(extent.z * 100.0)),
+        .z_layer = @intFromFloat(@floor(extent.z * 100.0)),
         .state = .{},
         .flags = .{
             .hover_enabled = options.enable_hover,

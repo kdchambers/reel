@@ -344,7 +344,7 @@ pub fn run() !void {
                 .screenshot_format_set => {
                     const format_index = request_buffer.readInt(u16) catch 0;
                     assert(format_index < @typeInfo(Model.ImageFormat).Enum.fields.len);
-                    model.screenshot_format = @enumFromInt(Model.ImageFormat, format_index);
+                    model.screenshot_format = @enumFromInt(format_index);
                     std.log.info("Screenshot output format set to: {s}", .{@tagName(model.screenshot_format)});
                 },
                 .screenshot_display_set => {
@@ -403,12 +403,12 @@ pub fn run() !void {
                 .record_stop => model.recording_context.state = .closing,
                 .record_format_set => {
                     const format_index = request_buffer.readInt(u16) catch 0;
-                    model.recording_context.format = @enumFromInt(Model.VideoFormat, format_index);
+                    model.recording_context.format = @enumFromInt(format_index);
                     std.log.info("Video format set to {s}", .{@tagName(model.recording_context.format)});
                 },
                 .record_quality_set => {
                     const quality_index = request_buffer.readInt(u16) catch 0;
-                    model.recording_context.quality = @enumFromInt(Model.VideoQuality, quality_index);
+                    model.recording_context.quality = @enumFromInt(quality_index);
                     std.log.info("Video quality set to {s}", .{@tagName(model.recording_context.quality)});
                 },
                 .webcam_add_source => {
@@ -447,7 +447,7 @@ pub fn run() !void {
                     };
                     _ = renderer.addVideoSource(renderer_handle, relative_extent);
                     const byte_count: usize = pixel_count * @sizeOf(RGBA(u8));
-                    const pixel_byte_buffer = @ptrCast([*]u8, webcam_pixel_buffer[0].ptr)[0..byte_count];
+                    const pixel_byte_buffer = @as([*]u8, @ptrCast(webcam_pixel_buffer[0].ptr))[0..byte_count];
                     renderer.writeStreamFrame(renderer_handle, pixel_byte_buffer) catch unreachable;
 
                     update_encoder_mutex.lock();
@@ -470,7 +470,7 @@ pub fn run() !void {
                     stream.pixels = pixel_buffer_ref;
                     const pixel_count: usize = stream.dimensions.width * stream.dimensions.height;
                     const byte_count: usize = pixel_count * @sizeOf(RGBA(u8));
-                    const pixel_byte_buffer = @ptrCast([*]u8, webcam_pixel_buffer[stream.source_handle].ptr)[0..byte_count];
+                    const pixel_byte_buffer = @as([*]u8, @ptrCast(webcam_pixel_buffer[stream.source_handle].ptr))[0..byte_count];
                     const renderer_stream_handle = stream.renderer_handle;
                     renderer.writeStreamFrame(renderer_stream_handle, pixel_byte_buffer) catch unreachable;
                     stream.frame_index += 1;
@@ -490,9 +490,9 @@ pub fn run() !void {
 
     const application_end = std.time.nanoTimestamp();
     if (screencapture_start) |start| {
-        const screencapture_duration_ns = @intCast(u64, application_end - start);
-        const screencapture_duration_seconds: f64 = @floatFromInt(f64, screencapture_duration_ns) / @as(f64, std.time.ns_per_s);
-        const screencapture_fps = @floatFromInt(f64, frame_index) / screencapture_duration_seconds;
+        const screencapture_duration_ns: u64 = @intCast(application_end - start);
+        const screencapture_duration_seconds: f64 = @as(f64, @floatFromInt(screencapture_duration_ns)) / @as(f64, std.time.ns_per_s);
+        const screencapture_fps = @as(f64, @floatFromInt(frame_index)) / screencapture_duration_seconds;
         std.log.info("Display FPS: {d:.2}", .{screencapture_fps});
     }
 }
@@ -548,7 +548,7 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
         unreachable;
     };
 
-    renderer.writeStreamFrame(renderer_stream_handle, @ptrCast([*]const u8, pixels)[0 .. pixel_count * 4]) catch assert(false);
+    renderer.writeStreamFrame(renderer_stream_handle, @as([*]const u8, @ptrCast(pixels))[0 .. pixel_count * 4]) catch assert(false);
 
     frame_index += 1;
 }
@@ -607,7 +607,7 @@ fn handleSourceListReady(audio_sources: []const audio_source.SourceInfo) void {
         std.log.info("  {d}: name: {s} desc: {s} type {s}", .{ source_i, source.name, source.description, @tagName(source.source_type) });
         if (!have_microphone and source.source_type == .microphone) {
             audio_source_interface.createStream(
-                @intCast(u32, source_i),
+                @intCast(source_i),
                 &onAudioSamplesReady,
                 &handleAudioSourceCreateStreamSuccess,
                 &handleAudioSourceCreateStreamFail,
@@ -616,7 +616,7 @@ fn handleSourceListReady(audio_sources: []const audio_source.SourceInfo) void {
                 continue;
             };
             std.log.info("Microphone connected: {d}", .{source_i});
-            microphone_audio_stream = .{ .index = @intCast(u32, source_i) };
+            microphone_audio_stream = .{ .index = @intCast(source_i) };
             have_microphone = true;
             assert(active_audio_stream.index == microphone_audio_stream.index);
             continue;
@@ -684,10 +684,10 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
         };
 
         const current_time_ns = std.time.nanoTimestamp();
-        const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
-        const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
+        const ns_from_record_start: i64 = @intCast(current_time_ns - recording_start_timestamp);
+        const ms_from_record_start: i64 = @divFloor(ns_from_record_start, std.time.ns_per_ms);
         const ms_per_frame: f64 = 1000.0 / 60.0;
-        const current_frame_index = @intFromFloat(i64, @floor(@floatFromInt(f64, ms_from_record_start) / ms_per_frame));
+        const current_frame_index = @as(i64, @intFromFloat(@floor(@as(f64, @floatFromInt(ms_from_record_start)) / ms_per_frame)));
         last_video_frame_written_ns = current_time_ns;
 
         video_encoder.appendVideoFrame(pixels.ptr, current_frame_index) catch |err| {
@@ -700,12 +700,12 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
         }
     } else if (model.recording_context.state == .closing) {
         const current_time_ns = std.time.nanoTimestamp();
-        const recording_ns = @intCast(u64, current_time_ns - recording_start_timestamp);
-        const recording_ms = @divFloor(recording_ns, std.time.ns_per_ms);
+        const recording_ns: u64 = @intCast(current_time_ns - recording_start_timestamp);
+        const recording_ms: u64 = @divFloor(recording_ns, std.time.ns_per_ms);
         const channel_count: f64 = 2.0;
-        const audio_samples_ms = @intFromFloat(u64, @floor(@floatFromInt(f64, recording_sample_count) / (44.1 * channel_count)));
-        const video_frames_ns = @intCast(u64, last_video_frame_written_ns - recording_start_timestamp);
-        const video_frames_ms = @divFloor(video_frames_ns, std.time.ns_per_ms);
+        const audio_samples_ms: u64 = @intFromFloat(@floor(@as(f64, @floatFromInt(recording_sample_count)) / (44.1 * channel_count)));
+        const video_frames_ns: u64 = @intCast(last_video_frame_written_ns - recording_start_timestamp);
+        const video_frames_ms: u64 = @divFloor(video_frames_ns, std.time.ns_per_ms);
         std.log.info("{d} ms of video & {d} ms of audio written. {d} ms expected", .{
             video_frames_ms,
             audio_samples_ms,
@@ -731,9 +731,9 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
                 std.log.warn("Failed to write video frame. Error: {}", .{err});
             };
         } else if ((audio_samples_ms + 8) > video_frames_ms) {
-            const ns_from_record_start = @intCast(i64, current_time_ns - recording_start_timestamp);
-            const ms_from_record_start = @divFloor(ns_from_record_start, std.time.ns_per_ms);
-            const current_frame_index = @divFloor(ms_from_record_start, 16);
+            const ns_from_record_start: i64 = @intCast(current_time_ns - recording_start_timestamp);
+            const ms_from_record_start: i64 = @divFloor(ns_from_record_start, std.time.ns_per_ms);
+            const current_frame_index: i64 = @divFloor(ms_from_record_start, 16);
             video_encoder.appendVideoFrame(pixels.ptr, current_frame_index) catch |err| {
                 std.log.warn("Failed to write video frame. Error: {}", .{err});
             };
@@ -923,13 +923,13 @@ fn saveImageToFile(
         break :blk "reel_screenshot.png";
     };
 
-    const pixel_count: usize = @intCast(usize, width) * height;
+    const pixel_count: usize = @as(usize, @intCast(width)) * height;
     var pixels_copy = gpa.dupe(graphics.RGBA(u8), pixels[0..pixel_count]) catch unreachable;
     var image = zigimg.Image.create(gpa, width, height, .rgba32) catch {
         std.log.err("Failed to create screenshot image", .{});
         return;
     };
-    const converted_pixels = @ptrCast([*]zigimg.color.Rgba32, pixels_copy.ptr)[0..pixel_count];
+    const converted_pixels = @as([*]zigimg.color.Rgba32, @ptrCast(pixels_copy.ptr))[0..pixel_count];
     image.pixels = .{ .rgba32 = converted_pixels };
 
     const write_options: zigimg.Image.EncoderOptions = switch (file_format) {
