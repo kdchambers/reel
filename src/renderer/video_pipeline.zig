@@ -67,7 +67,7 @@ const max_draw_count = 16;
 var draw_quad_count: u32 = 0;
 var source_count: u32 = 0;
 var stream_count: u32 = 0;
-var stream_buffer: [max_stream_count]Stream = undefined;
+var stream_buffer = [1]Stream{Stream.null_value} ** max_stream_count;
 
 var cpu_memory_index: u32 = std.math.maxInt(u32);
 
@@ -93,10 +93,11 @@ var unscaled_canvas_mapped_memory: []RGBA(u8) = undefined;
 var scale_method: vk.Filter = .nearest;
 
 const DrawHandle = u32;
+const StreamHandle = u32;
 
 // Binds stream handles to `stream_buffer` entries
 // E.G: stream_handle_buffer[0] = 55 (handle 55 corresponds to `stream_buffer[0]`)
-var stream_handle_buffer = [1]u32{std.math.maxInt(u32)} ** max_stream_count;
+var stream_handle_buffer = [1]u32{std.math.maxInt(StreamHandle)} ** max_stream_count;
 
 var draw_handle_buffer = [1]DrawHandle{std.math.maxInt(DrawHandle)} ** max_draw_count;
 
@@ -106,6 +107,23 @@ const Stream = struct {
     memory: vk.DeviceMemory,
     image: vk.Image,
     format: vk.Format,
+
+    pub inline fn isNull(self: @This()) bool {
+        return (self.dimensions.width == -1.0 and self.dimensions.height == -1.0);
+    }
+
+    pub inline fn setNull(self: *@This()) void {
+        self.dimensions.width = -1.0;
+        self.dimensions.height = -1.0;
+    }
+
+    pub const null_value = @This(){
+        .dimensions = .{ .width = -1.0, .height = -1.0 },
+        .mapped_memory = undefined,
+        .memory = undefined,
+        .image = undefined,
+        .format = undefined,
+    };
 };
 
 pub const SupportedImageFormat = enum {
@@ -126,7 +144,6 @@ pub inline fn unscaledFrame() []RGBA(u8) {
 
 pub inline fn writeStreamFrame(stream_handle: u32, pixels: []const u8) !void {
     const stream_index = streamIndexFromHandle(stream_handle);
-    assert(stream_count > stream_index);
     const stream_ptr: *Stream = &stream_buffer[stream_index];
     assert(stream_ptr.mapped_memory.len > 0);
     assert(stream_ptr.mapped_memory.len == pixels.len);
@@ -141,10 +158,7 @@ pub inline fn drawVideoFrame(extent: Extent3D(f32)) void {
 }
 
 pub inline fn addVideoSource(stream_handle: u32, relative_extent: Extent2D(f32)) DrawHandle {
-    const stream_index = streamIndexFromHandle(stream_handle);
-    assert(stream_count > stream_index);
     assert(source_count < max_draw_count);
-
     assert(relative_extent.x >= 0.0);
     assert(relative_extent.x <= 1.0);
     assert(relative_extent.y >= 0.0);
@@ -302,10 +316,10 @@ pub inline fn drawContextIndexFromHandle(draw_handle: DrawHandle) usize {
     unreachable;
 }
 
-pub inline fn assignNewStreamHandle() u32 {
-    const next_free_handle: u32 = stream_count;
+pub inline fn assignNewStreamHandle() StreamHandle {
+    const next_free_handle: StreamHandle = stream_count;
     for (&stream_handle_buffer) |*mapped_buffer_index| {
-        if (mapped_buffer_index.* == std.math.maxInt(u32)) {
+        if (mapped_buffer_index.* == std.math.maxInt(StreamHandle)) {
             mapped_buffer_index.* = next_free_handle;
             stream_count += 1;
             return next_free_handle;
@@ -314,19 +328,21 @@ pub inline fn assignNewStreamHandle() u32 {
     unreachable;
 }
 
-pub inline fn streamFromHandle(stream_handle: u32) *Stream {
+pub inline fn streamFromHandle(stream_handle: StreamHandle) *Stream {
     for (stream_handle_buffer, 0..) |mapped_buffer_index, i| {
         if (mapped_buffer_index == stream_handle)
             return &stream_buffer[i];
     }
+    std.log.err("Failed to find stream index for handle: {d}", .{stream_handle});
     unreachable;
 }
 
-pub inline fn streamIndexFromHandle(stream_handle: u32) usize {
+pub inline fn streamIndexFromHandle(stream_handle: StreamHandle) usize {
     for (stream_handle_buffer, 0..) |mapped_buffer_index, i| {
         if (mapped_buffer_index == stream_handle)
             return i;
     }
+    std.log.err("Failed to find stream index for handle: {d}", .{stream_handle});
     unreachable;
 }
 
@@ -335,13 +351,24 @@ pub fn removeStream(stream_handle: u32) void {
     pending_remove_stream_handle = stream_handle;
 }
 
+fn printDraws() void {
+    const print = std.debug.print;
+    print("***** Draws ******\n", .{});
+    for (0..source_count) |i| {
+        print("  stream_index: {d}\n", .{draw_context_buffer[i].stream_handle});
+    }
+}
+
 fn destroyStream(stream_handle: u32) void {
+    std.log.info("Deleting stream: {d}", .{stream_handle});
+
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
     const stream_ptr = streamFromHandle(stream_handle);
-    for (&stream_handle_buffer) |*mapped_buffer_index| {
+    for (&stream_handle_buffer, 0..) |*mapped_buffer_index, stream_index| {
         if (mapped_buffer_index.* == stream_handle) {
             mapped_buffer_index.* = std.math.maxInt(u32);
+            stream_buffer[stream_index].setNull();
             break;
         }
     }
@@ -352,7 +379,7 @@ fn destroyStream(stream_handle: u32) void {
     //
     // Remove all draw commands for this stream
     //
-    var draw_index_signed: i32 = @intCast(i32, source_count);
+    var draw_index_signed: i32 = @intCast(i32, source_count) - 1;
     while (draw_index_signed >= 0) : (draw_index_signed -= 1) {
         const draw_index = @intCast(usize, draw_index_signed);
         //
@@ -363,7 +390,10 @@ fn destroyStream(stream_handle: u32) void {
             //
             // Remove the buffer entry
             //
-            utils.leftShiftRemove(DrawContext, &draw_context_buffer, draw_index);
+            if (draw_index < source_count) {
+                utils.leftShiftRemove(DrawContext, &draw_context_buffer, draw_index);
+            }
+
             source_count -= 1;
             // Since we're left shifting, we have to decrement the index again or else
             // we'll just be seeing the same buffer value next iteration
@@ -391,6 +421,10 @@ pub fn createStream(
 
     const stream_handle = assignNewStreamHandle();
     const stream_ptr: *Stream = streamFromHandle(stream_handle);
+
+    // Make sure we aren't getting a pointer to a stream that is already in use
+    assert(stream_ptr.isNull());
+
     stream_ptr.dimensions = .{
         .width = @floatFromInt(f32, source_dimensions.width),
         .height = @floatFromInt(f32, source_dimensions.height),

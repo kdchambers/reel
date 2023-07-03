@@ -93,6 +93,14 @@ var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
 const max_video_streams = 4;
 var video_stream_buffer: [max_video_streams]Model.VideoStream = undefined;
 
+fn printVideoStreamBuffer() void {
+    const print = std.debug.print;
+    print("***** Video stream buffer ******\n", .{});
+    for (model.video_streams, 0..) |stream, stream_i| {
+        print("  {d} :: source index {d} type {}", .{ stream_i, stream.source_handle, stream.provider_ref.kind });
+    }
+}
+
 var webcam_pixel_buffer: [max_video_streams][]RGBA(u8) = undefined;
 
 const max_video4linux_streams = 2;
@@ -240,9 +248,6 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     }
 }
 
-// TODO: Hack
-var webcam_stream_handle: u32 = 0;
-
 pub fn run() !void {
     const input_fps = 60;
     const ns_per_frame: u64 = @divFloor(std.time.ns_per_s, input_fps);
@@ -295,12 +300,8 @@ pub fn run() !void {
 
                     model_mutex.lock();
 
-                    const screencapture_source_handle = model.video_streams[stream_index].source_index;
-
-                    const renderer_stream_handle = switch (model.video_streams[stream_index].provider_ref.kind) {
-                        .webcam => findRendererStreamHandle(screencapture_source_handle, .webcam),
-                        .screen_capture => findRendererStreamHandle(screencapture_source_handle, .screencapture),
-                    };
+                    const screencapture_source_handle = model.video_streams[stream_index].source_handle;
+                    const renderer_stream_handle = model.video_streams[stream_index].renderer_handle;
 
                     std.log.info("Removing video stream. Renderer handle: {d} Screencapture handle: {d}", .{
                         renderer_stream_handle,
@@ -420,8 +421,8 @@ pub fn run() !void {
                         std.log.err("Failed to open video4linux device {d}. Error: {}", .{ webcam_source_index, err });
                         continue :request_loop;
                     };
-                    const renderer_stream_handle = renderer.createStream(.rgba, wanted_dimensions) catch unreachable;
-                    mapRendererStreamHandle(renderer_stream_handle, webcam_source_index, .webcam);
+
+                    const renderer_handle = renderer.createStream(.rgba, wanted_dimensions) catch unreachable;
 
                     const pixel_count: usize = wanted_dimensions.width * wanted_dimensions.height;
                     webcam_pixel_buffer[webcam_source_index] = try gpa.alloc(RGBA(u8), pixel_count);
@@ -431,8 +432,8 @@ pub fn run() !void {
                         .dimensions = wanted_dimensions,
                         .pixels = webcam_pixel_buffer[webcam_source_index],
                         .frame_index = 0,
-                        .source_index = webcam_source_index,
-                        // TODO: Don't assume webcam provider
+                        .source_handle = webcam_source_index,
+                        .renderer_handle = renderer_handle,
                         .provider_ref = .{ .index = 0, .kind = .webcam },
                     };
                     model.video_streams = video_stream_buffer[0 .. current_video_stream_index + 1];
@@ -444,10 +445,10 @@ pub fn run() !void {
                         .width = 1.0,
                         .height = 1.0,
                     };
-                    _ = renderer.addVideoSource(webcam_stream_handle, relative_extent);
+                    _ = renderer.addVideoSource(renderer_handle, relative_extent);
                     const byte_count: usize = pixel_count * @sizeOf(RGBA(u8));
                     const pixel_byte_buffer = @ptrCast([*]u8, webcam_pixel_buffer[0].ptr)[0..byte_count];
-                    renderer.writeStreamFrame(webcam_stream_handle, pixel_byte_buffer) catch unreachable;
+                    renderer.writeStreamFrame(renderer_handle, pixel_byte_buffer) catch unreachable;
 
                     update_encoder_mutex.lock();
                     update_encoder.write(.video_source_added) catch unreachable;
@@ -459,8 +460,8 @@ pub fn run() !void {
 
         for (model.video_streams) |*stream| {
             if (stream.provider_ref.kind == .webcam) {
-                assert(stream.source_index == 0);
-                var pixel_buffer_ref = webcam_pixel_buffer[stream.source_index];
+                assert(stream.source_handle == 0);
+                var pixel_buffer_ref = webcam_pixel_buffer[stream.source_handle];
                 const pixels_updated = video4linux.getFrame(pixel_buffer_ref.ptr, 0, 0, stream.dimensions.width) catch |err| blk: {
                     std.log.err("Failed to get webcam frame. Error: {}", .{err});
                     break :blk false;
@@ -469,8 +470,8 @@ pub fn run() !void {
                     stream.pixels = pixel_buffer_ref;
                     const pixel_count: usize = stream.dimensions.width * stream.dimensions.height;
                     const byte_count: usize = pixel_count * @sizeOf(RGBA(u8));
-                    const pixel_byte_buffer = @ptrCast([*]u8, webcam_pixel_buffer[stream.source_index].ptr)[0..byte_count];
-                    const renderer_stream_handle = findRendererStreamHandle(stream.source_index, .webcam);
+                    const pixel_byte_buffer = @ptrCast([*]u8, webcam_pixel_buffer[stream.source_handle].ptr)[0..byte_count];
+                    const renderer_stream_handle = stream.renderer_handle;
                     renderer.writeStreamFrame(renderer_stream_handle, pixel_byte_buffer) catch unreachable;
                     stream.frame_index += 1;
                 }
@@ -524,7 +525,7 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
         screencapture_start = std.time.nanoTimestamp();
 
     for (model.video_streams) |*stream| {
-        if (stream.provider_ref.kind == .screen_capture and stream.source_index == stream_handle) {
+        if (stream.provider_ref.kind == .screen_capture and stream.source_handle == stream_handle) {
             const pixel_count: usize = width * height;
             stream.pixels = pixels[0..pixel_count];
             assert(stream.provider_ref.index == 0);
@@ -535,7 +536,18 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
     }
 
     const pixel_count: usize = width * height;
-    const renderer_stream_handle = findRendererStreamHandle(stream_handle, .screencapture);
+
+    // We're given the source source handle generated by the provider, but we need to find the renderer handle that
+    // has been assigned by the renderer so that we can upload the new framebuffer
+    const renderer_stream_handle = blk: {
+        for (model.video_streams) |stream| {
+            if (stream.source_handle == stream_handle)
+                break :blk stream.renderer_handle;
+        }
+        std.log.err("Failed to find video stream with source handle: {d}", .{stream_handle});
+        unreachable;
+    };
+
     renderer.writeStreamFrame(renderer_stream_handle, @ptrCast([*]const u8, pixels)[0 .. pixel_count * 4]) catch assert(false);
 
     frame_index += 1;
@@ -764,38 +776,6 @@ fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
 // Screen capture callbacks
 //
 
-//
-// Map source_index given by provider to renderer stream_handle
-// stream_binding_buffer[source_index] = renderer_stream_index
-//
-var stream_binding_buffer = [1]u32{std.math.maxInt(u32)} ** 8;
-
-const ProviderType = enum { screencapture, webcam };
-
-const screencapture_id_offset = 1000;
-const webcam_id_offset = 2000;
-
-inline fn mapRendererStreamHandle(renderer_stream_handle: u32, provider_source_index: u32, comptime provider_type: ProviderType) void {
-    const id_offset = switch (provider_type) {
-        .webcam => webcam_id_offset,
-        .screencapture => screencapture_id_offset,
-    };
-    stream_binding_buffer[renderer_stream_handle] = provider_source_index + id_offset;
-}
-
-inline fn findRendererStreamHandle(provider_source_index: u32, comptime provider_type: ProviderType) u32 {
-    const id_offset = switch (provider_type) {
-        .webcam => webcam_id_offset,
-        .screencapture => screencapture_id_offset,
-    };
-    inline for (&stream_binding_buffer, 0..) |binding, i| {
-        if (binding != std.math.maxInt(u32) and binding == provider_source_index + id_offset)
-            return @intCast(u32, i);
-    }
-    std.log.err("core: No entry found for {d} of {s}", .{ provider_source_index, @tagName(provider_type) });
-    unreachable;
-}
-
 const default_screen_names = [_][]const u8{
     "Screen 1",
     "Screen 2",
@@ -826,7 +806,6 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     // handles so that we can lookup the renderer_stream_handle later on and update it.
     //
     const renderer_stream_handle = renderer.createStream(supported_image_format, stream_info.dimensions) catch unreachable;
-    mapRendererStreamHandle(renderer_stream_handle, stream_handle, .screencapture);
 
     const relative_extent = Extent2D(f32){
         .x = 0.0,
@@ -853,7 +832,8 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
         .frame_index = 0,
         .pixels = undefined,
         .provider_ref = .{ .index = 0, .kind = .screen_capture },
-        .source_index = stream_handle,
+        .renderer_handle = renderer_stream_handle,
+        .source_handle = stream_handle,
         .dimensions = stream_info.dimensions,
     };
     model.video_streams = video_stream_buffer[0 .. stream_count + 1];

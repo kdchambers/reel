@@ -73,8 +73,11 @@ pub const VideoProviderRef = packed struct(u16) {
 
 pub const VideoStream = struct {
     frame_index: u64,
-    source_index: u16,
+    /// Reference to the provider that provides the source.
     provider_ref: VideoProviderRef,
+    /// The handle given by the provider that identifies the source
+    source_handle: u16,
+    renderer_handle: u32,
     pixels: []const RGBA(u8),
     dimensions: Dimensions2D(u32),
 };
