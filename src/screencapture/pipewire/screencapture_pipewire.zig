@@ -35,6 +35,8 @@ const object_path = "/org/freedesktop/portal/desktop";
 const interface_name = "org.freedesktop.portal.ScreenCast";
 const screenshot_interface_name = "org.freedesktop.portal.Screenshot";
 
+const connection_name_max_size = 16;
+
 pub const InitErrorSet = error{
     OutOfMemory,
     DBusOutOfMemory,
@@ -110,6 +112,9 @@ const Stream = struct {
         pw.pw_thread_loop_unlock(self.thread_loop);
         pw.pw_thread_loop_stop(self.thread_loop);
         pw.pw_thread_loop_destroy(self.thread_loop);
+
+        closeSession();
+
         self.state = .uninitialized;
         self.handle = Stream.null_handle;
     }
@@ -125,6 +130,12 @@ const null_stream = Stream{
 
 const max_stream_count = 16;
 var stream_buffer = [1]Stream{null_stream} ** max_stream_count;
+
+var screencast_session_id_buffer: [64]u8 = undefined;
+var screencast_session_id: [*:0]const u8 = undefined;
+
+var screencast_portal_connection_buffer: [connection_name_max_size]u8 = undefined;
+var screencast_portal_connection: []const u8 = undefined;
 
 var backend_stream: screencapture.State = .uninitialized;
 
@@ -261,8 +272,6 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
     dbus.errorInit(&err);
 
     var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
-
-    const connection_name_max_size = 16;
     const connection_name: []const u8 = blk: {
         const raw_name = dbus.busGetUniqueName(connection);
         const raw_name_len = std.mem.len(raw_name);
@@ -600,6 +609,47 @@ pub fn state() screencapture.State {
 // Private Interface
 //
 
+fn closeSession() void {
+    var dbus_err: dbus.Error = undefined;
+    dbus.errorInit(&dbus_err);
+
+    var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &dbus_err);
+
+    var object_path_buffer: [64]u8 = undefined;
+    const session_object_path = std.fmt.bufPrintZ(&object_path_buffer, "/org/freedesktop/portal/desktop/session/{s}/{s}", .{
+        screencast_portal_connection,
+        screencast_session_id,
+    }) catch |err| {
+        std.log.err("{}", .{err});
+        return;
+    };
+
+    var query_message: *dbus.Message = dbus.messageNewMethodCall(
+        bus_name,
+        session_object_path,
+        "org.freedesktop.portal.Session",
+        "Close",
+    ) orelse {
+        std.log.err("dbus_client: dbus_message_new_method_call failed. (DBus out of memory)", .{});
+        return;
+    };
+    defer dbus.messageUnref(query_message);
+
+    var reply_message: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+        connection,
+        query_message,
+        std.time.ms_per_s * 1,
+        &dbus_err,
+    ) orelse {
+        const error_message = if (dbus.errorIsSet(&dbus_err) != 0) dbus_err.message else "unknown";
+        std.log.err("dbus_client: dbus.connectionSendWithReplyAndBlock failed. Error: {s}", .{
+            error_message,
+        });
+        return;
+    };
+    dbus.messageUnref(reply_message);
+}
+
 fn generateRequestToken(buffer: []u8) ![*:0]const u8 {
     defer request_count += 1;
     return try std.fmt.bufPrintZ(buffer, "reel{d}", .{request_count});
@@ -800,9 +850,8 @@ fn createSession(
     defer dbus.messageUnref(query_message);
 
     var request_buffer: [64]u8 = undefined;
-    var session_buffer: [64]u8 = undefined;
     const request_id = try generateRequestToken(request_buffer[0..]);
-    const session_id = try generateSessionToken(session_buffer[0..]);
+    screencast_session_id = try generateSessionToken(&screencast_session_id_buffer);
 
     var root_iter: dbus.MessageIter = undefined;
     dbus.messageIterInitAppend(query_message, &root_iter);
@@ -872,7 +921,7 @@ fn createSession(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "s", &dict_variant_iter) != 1)
             return error.OpenContainerFail;
 
-        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&session_id))) != 1)
+        if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_STRING, @as(*const void, @ptrCast(&screencast_session_id))) != 1)
             return error.AppendBasicFail;
 
         if (dbus.messageIterCloseContainer(&dict_entry_iter, &dict_variant_iter) != 1)
@@ -922,41 +971,6 @@ fn createSession(
     dbus.messageIterGetBasic(&reply_iter, @as(*void, @ptrCast(&create_session_request_path)));
 
     return create_session_request_path;
-}
-
-fn closeSession(
-    connection: *dbus.Connection,
-    session: [*:0]const u8,
-) !void {
-    var err: dbus.Error = undefined;
-    dbus.errorInit(&err);
-
-    var query_message: *dbus.Message = dbus.messageNewMethodCall(
-        bus_name,
-        session,
-        "org.freedesktop.portal.Request",
-        "Close",
-    ) orelse {
-        std.log.err("dbus_client: dbus_message_new_method_call failed. (DBus out of memory)", .{});
-        return error.DBusOutOfMemory;
-    };
-
-    defer dbus.messageUnref(query_message);
-
-    //
-    // Return is null
-    //
-    _ = dbus.connectionSendWithReplyAndBlock(
-        connection,
-        query_message,
-        std.time.ms_per_s * 1,
-        &err,
-    );
-
-    if (dbus.errorIsSet(&err) != 0) {
-        std.log.err("CloseSession failed. Error: {s}", .{err.message});
-        return error.CloseSessionFail;
-    }
 }
 
 fn setSource(
@@ -1422,7 +1436,6 @@ pub fn init() !void {
 
     var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
 
-    const connection_name_max_size = 16;
     const connection_name: []const u8 = blk: {
         const raw_name = dbus.busGetUniqueName(connection);
         const raw_name_len = std.mem.len(raw_name);
@@ -1446,18 +1459,17 @@ pub fn init() !void {
         return error.ConnectionNameTooLarge;
     }
 
-    var portal_connection_name_buffer: [connection_name_max_size]u8 = undefined;
-    const portal_connection_name: []const u8 = blk: {
+    screencast_portal_connection = blk: {
         var i: usize = 0;
         while (i < connection_name.len) : (i += 1) {
             if (connection_name[i] == '.') {
-                portal_connection_name_buffer[i] = '_';
+                screencast_portal_connection_buffer[i] = '_';
                 continue;
             }
-            portal_connection_name_buffer[i] = connection_name[i];
+            screencast_portal_connection_buffer[i] = connection_name[i];
         }
-        portal_connection_name_buffer[connection_name.len] = '0';
-        break :blk portal_connection_name_buffer[0..connection_name.len];
+        screencast_portal_connection_buffer[connection_name.len] = '0';
+        break :blk screencast_portal_connection_buffer[0..connection_name.len];
     };
 
     //
@@ -1508,7 +1520,7 @@ pub fn init() !void {
             &match_buffer,
             "type='signal',interface='org.freedesktop.portal.Request',path='/org/freedesktop/portal/desktop/request/{s}/{s}'",
             .{
-                portal_connection_name,
+                screencast_portal_connection,
                 select_source_request_suffix,
             },
         );
@@ -1534,7 +1546,7 @@ pub fn init() !void {
             &expected_buffer,
             "/org/freedesktop/portal/desktop/request/{s}/{s}",
             .{
-                portal_connection_name,
+                screencast_portal_connection,
                 select_source_request_suffix,
             },
         );
@@ -1616,7 +1628,7 @@ pub fn init() !void {
             &match_buffer,
             "type='signal',interface='org.freedesktop.portal.Request',path='/org/freedesktop/portal/desktop/request/{s}/{s}'",
             .{
-                portal_connection_name,
+                screencast_portal_connection,
                 start_stream_request_suffix,
             },
         );

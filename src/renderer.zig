@@ -693,7 +693,7 @@ inline fn waitForFences(fences: []vk.Fence) !void {
     assert(fences.len > 0);
     _ = try vulkan_core.device_dispatch.waitForFences(
         vulkan_core.logical_device,
-        @as(u32, @intCast(fences.len)),
+        @intCast(fences.len),
         fences.ptr,
         vk.TRUE,
         std.math.maxInt(u64),
