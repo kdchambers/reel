@@ -44,7 +44,8 @@ pub var onPreviewFrameReady: ?*const PreviewFrameReadyCallbackFn = null;
 // Draw API
 //
 
-pub const VertexRange = color_pipeline.VertexRange; // TODO: move
+const common = @import("renderer/common.zig");
+pub const VertexRange = common.VertexRange;
 
 pub const quadSlice = color_pipeline.quadSlice;
 pub const quad = color_pipeline.quad;

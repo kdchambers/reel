@@ -21,6 +21,7 @@ const Dimensions2D = geometry.Dimensions2D;
 const Extent2D = geometry.Extent2D;
 const video4linux = @import("video4linux.zig");
 const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
+const ThreadUtilMonitor = utils.ThreadUtilMonitor;
 
 // TODO: Audit, doesn't renderer belong here?
 const renderer = @import("renderer.zig");
@@ -135,6 +136,7 @@ var model: Model = .{
     },
     .screenshot_format = .png,
     .canvas_dimensions = .{ .width = 1920, .height = 1080 },
+    .thread_util = undefined,
 };
 
 var model_mutex: std.Thread.Mutex = .{};
@@ -170,6 +172,8 @@ const sample_multiple = 2048; // ~50ms
 var sample_buffer: [sample_multiple * 3]f32 = undefined;
 
 var screencapture_start: ?i128 = null;
+
+var second_counter: usize = 0;
 
 pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     if (app_state != .uninitialized)
@@ -246,11 +250,20 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         std.log.err("Failed to connect to audio source backend", .{});
         return error.AudioInputInitFail;
     }
+
+    model.thread_util = ThreadUtilMonitor.init(gpa) catch {
+        return error.OutOfMemory;
+    };
 }
 
 pub fn run() !void {
     const input_fps = 60;
     const ns_per_frame: u64 = @divFloor(std.time.ns_per_s, input_fps);
+
+    _ = model.thread_util.update() catch {
+        std.log.warn("core: Failed to get thread utilization", .{});
+        @memset(model.thread_util.perc_buffer, 0);
+    };
 
     app_loop: while (true) {
         const frame_timer = Timer.now();
@@ -259,6 +272,18 @@ pub fn run() !void {
 
         const frontend_timer = Timer.now();
         model_mutex.lock();
+
+        //
+        // Update once per second
+        //
+        second_counter += 1;
+        if (second_counter % 60 == 0) {
+            second_counter = 0;
+            _ = model.thread_util.update() catch {
+                std.log.warn("core: Failed to get thread utilization", .{});
+                @memset(model.thread_util.perc_buffer, 0);
+            };
+        }
 
         //
         // TODO: This will block everything that tries to write to it for the duration of

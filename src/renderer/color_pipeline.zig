@@ -24,6 +24,9 @@ const Dimensions2D = geometry.Dimensions2D;
 const Radius2D = geometry.Radius2D;
 const RGBA = graphics.RGBA;
 
+const common = @import("common.zig");
+const VertexRange = common.VertexRange;
+
 pub const Vertex = extern struct {
     x: f32,
     y: f32,
@@ -156,15 +159,6 @@ pub inline fn overwriteQuad(
     quad_ptr[2].color = color;
     quad_ptr[3].color = color;
 }
-
-pub const VertexRange = packed struct(u32) {
-    start: u16,
-    count: u16,
-
-    pub inline fn end(self: @This()) usize {
-        return self.start + self.count;
-    }
-};
 
 pub inline fn drawRoundedRect(
     extent: Extent3D(f32),

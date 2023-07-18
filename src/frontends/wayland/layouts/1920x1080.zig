@@ -31,14 +31,37 @@ const event_system = @import("../event_system.zig");
 const sidebar_color = RGBA{ .r = 17, .g = 20, .b = 26, .a = 255 };
 const window_color = RGBA.fromInt(28, 30, 35, 255);
 
+var cpu_vertex_range: renderer.VertexRange = undefined;
+
 pub fn update(
     model: *const Model,
     ui_state: *UIState,
     screen_scale: ScaleFactor2D(f32),
 ) !void {
-    _ = model;
     _ = ui_state;
-    _ = screen_scale;
+
+    const thread_usage: f32 = blk: {
+        var accum: f32 = 0.0;
+        for (model.thread_util.perc_buffer) |perc| {
+            accum += perc;
+        }
+        const thread_count: f32 = @floatFromInt(model.thread_util.thread_count);
+        break :blk (accum / thread_count);
+    };
+
+    var usage_string_buffer: [6]u8 = undefined;
+    const usage_safe: f32 = if (thread_usage >= 0.0 and thread_usage <= 100.0) thread_usage else 0.0;
+    const usage_string = std.fmt.bufPrint(&usage_string_buffer, "{d:.1}", .{usage_safe}) catch "0.0";
+
+    const cpu_usage_extent = Extent3D(f32){
+        .x = 0.8,
+        .y = 0.8,
+        .z = ui_layer.middle,
+        .width = 0.1,
+        .height = 0.1,
+    };
+
+    renderer.overwriteText(cpu_vertex_range, usage_string, cpu_usage_extent, screen_scale, .small, .regular, RGBA.white, .center);
 }
 
 pub fn draw(
@@ -60,6 +83,30 @@ pub fn draw(
         ui_state.open_sidemenu_button.background_color = RGBA{ .r = 36, .g = 39, .b = 47, .a = 255 };
         ui_state.open_sidemenu_button.on_hover_background_color = ui_state.open_sidemenu_button.background_color;
         ui_state.open_sidemenu_button.icon = .arrow_forward_32px;
+    }
+
+    {
+        const thread_usage: f32 = blk: {
+            var accum: f32 = 0.0;
+            for (model.thread_util.perc_buffer) |perc| {
+                accum += perc;
+            }
+            const thread_count: f32 = @floatFromInt(model.thread_util.thread_count);
+            break :blk (accum / thread_count);
+        };
+        var usage_string_buffer: [6]u8 = undefined;
+        const usage_safe: f32 = if (thread_usage >= 0.0 and thread_usage <= 100.0) thread_usage else 0.0;
+        const usage_string = std.fmt.bufPrint(&usage_string_buffer, "{d:.1}", .{usage_safe}) catch "0.0";
+
+        const cpu_usage_extent = Extent3D(f32){
+            .x = 0.8,
+            .y = 0.8,
+            .z = ui_layer.middle,
+            .width = 0.1,
+            .height = 0.1,
+        };
+        cpu_vertex_range = renderer.reserveTextBuffer(6);
+        renderer.overwriteText(cpu_vertex_range, usage_string, cpu_usage_extent, screen_scale, .small, .regular, RGBA.white, .center);
     }
 
     var icon_bar_region: Region = .{};

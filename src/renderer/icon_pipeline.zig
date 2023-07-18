@@ -27,6 +27,9 @@ const TextureGreyscale = graphics.TextureGreyscale;
 const zigimg = @import("zigimg");
 const renderer = @import("../renderer.zig");
 
+const common = @import("common.zig");
+const VertexRange = common.VertexRange;
+
 var descriptor_set_layout_buffer: [8]vk.DescriptorSetLayout = undefined;
 var descriptor_set_buffer: [8]vk.DescriptorSet = undefined;
 
@@ -323,8 +326,7 @@ pub const LayoutAnchor = enum {
 
 const DrawTextResult = struct {
     written_extent: Extent2D(f32),
-    vertex_start: u16,
-    vertex_count: u16,
+    vertex_range: VertexRange,
 };
 
 const PenSize = enum {
@@ -529,8 +531,10 @@ pub fn drawText(
     assert(vertex_count % 4 == 0);
     return .{
         .written_extent = rendered_extent,
-        .vertex_start = pre_vertices_used,
-        .vertex_count = vertex_count,
+        .vertex_range = .{
+            .start = pre_vertices_used,
+            .count = vertex_count,
+        },
     };
 }
 
