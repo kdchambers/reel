@@ -11,6 +11,9 @@ const RGBA = graphics.RGBA;
 
 const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 
+const utils = @import("utils.zig");
+const ThreadUtilMonitor = utils.ThreadUtilMonitor;
+
 pub const ImageFormat = enum {
     // bmp,
     // jpg,
@@ -124,3 +127,4 @@ video_streams: []VideoStream,
 
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,
+thread_util: ThreadUtilMonitor,

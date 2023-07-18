@@ -38,7 +38,7 @@ pub const Stat = struct {
     pub fn init(allocator: std.mem.Allocator, thread_count: usize) !@This() {
         assert(thread_count <= 256);
         var threads = try allocator.alloc(StatEntry, thread_count * 2);
-        _ = try loadStat(threads[0..thread_count]);
+
         return @This(){
             .threads = threads,
             .offset = 0,
@@ -100,9 +100,9 @@ pub fn deinit(self: *@This(), allocator: std.mem.allocator) void {
 }
 
 pub fn update(self: *@This()) ![]f32 {
-    const previous_stats = self.stat_buffer[self.offset .. self.offset + self.thread_count];
+    const previous_stats = self.stat_entry_buffer[self.offset .. self.offset + self.thread_count];
     const next_offset = (self.offset + self.thread_count) % (self.thread_count * 2);
-    const stats = try loadStat(self.stat_buffer[next_offset .. next_offset + self.thread_count]);
+    const stats = try loadStat(self.stat_entry_buffer[next_offset .. next_offset + self.thread_count]);
     for (previous_stats, stats, 0..) |prev, current, i| {
         self.perc_buffer[i] = @floatCast(calculateLoad(prev, current));
     }
