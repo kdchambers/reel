@@ -820,25 +820,25 @@ fn rgbaToNV122(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dimensio
     //
     const uv_channel_base: u32 = pixel_count;
 
-    const y_const_a = @splat(8, @as(i32, 66));
-    const y_const_b = @splat(8, @as(i32, 129));
-    const y_const_c = @splat(8, @as(i32, 25));
-    const y_const_d = @splat(8, @as(i32, 128));
-    const y_const_e = @splat(8, @as(i32, 16));
+    const y_const_a: @Vector(8, i32) = @splat(66);
+    const y_const_b: @Vector(8, i32) = @splat(129);
+    const y_const_c: @Vector(8, i32) = @splat(25);
+    const y_const_d: @Vector(8, i32) = @splat(128);
+    const y_const_e: @Vector(8, i32) = @splat(16);
 
-    const u_const_a = @splat(8, @as(i32, -38));
-    const u_const_b = @splat(8, @as(i32, 74));
-    const u_const_c = @splat(8, @as(i32, 112));
-    const u_const_d = @splat(8, @as(i32, 128));
-    const u_const_e = @splat(8, @as(i32, 128));
+    const u_const_a: @Vector(8, i32) = @splat(-38);
+    const u_const_b: @Vector(8, i32) = @splat(74);
+    const u_const_c: @Vector(8, i32) = @splat(112);
+    const u_const_d: @Vector(8, i32) = @splat(128);
+    const u_const_e: @Vector(8, i32) = @splat(128);
 
-    const v_const_a = @splat(8, @as(i32, 112));
-    const v_const_b = @splat(8, @as(i32, 94));
-    const v_const_c = @splat(8, @as(i32, 18));
-    const v_const_d = @splat(8, @as(i32, 128));
-    const v_const_e = @splat(8, @as(i32, 128));
+    const v_const_a: @Vector(8, i32) = @splat(112);
+    const v_const_b: @Vector(8, i32) = @splat(94);
+    const v_const_c: @Vector(8, i32) = @splat(18);
+    const v_const_d: @Vector(8, i32) = @splat(128);
+    const v_const_e: @Vector(8, i32) = @splat(128);
 
-    const divider = @splat(8, @as(i32, 8));
+    const divider: @Vector(8, i32) = @splat(8);
 
     var i: usize = 0;
     while (i < pixel_count) : (i += 8) {
@@ -938,25 +938,25 @@ fn rgbaToPlanarYuv(pixels: [*]const graphics.RGBA(u8), dimensions: geometry.Dime
     const y_channel_base: u32 = pixel_count;
     const v_channel_base: u32 = pixel_count * 2;
 
-    const y_const_a = @splat(8, @as(i32, 66));
-    const y_const_b = @splat(8, @as(i32, 129));
-    const y_const_c = @splat(8, @as(i32, 25));
-    const y_const_d = @splat(8, @as(i32, 128));
-    const y_const_e = @splat(8, @as(i32, 16));
+    const y_const_a: @Vector(8, i32) = @splat(66);
+    const y_const_b: @Vector(8, i32) = @splat(129);
+    const y_const_c: @Vector(8, i32) = @splat(25);
+    const y_const_d: @Vector(8, i32) = @splat(128);
+    const y_const_e: @Vector(8, i32) = @splat(16);
 
-    const u_const_a = @splat(8, @as(i32, -38));
-    const u_const_b = @splat(8, @as(i32, 74));
-    const u_const_c = @splat(8, @as(i32, 112));
-    const u_const_d = @splat(8, @as(i32, 128));
-    const u_const_e = @splat(8, @as(i32, 128));
+    const u_const_a: @Vector(8, i32) = @splat(-38);
+    const u_const_b: @Vector(8, i32) = @splat(74);
+    const u_const_c: @Vector(8, i32) = @splat(112);
+    const u_const_d: @Vector(8, i32) = @splat(128);
+    const u_const_e: @Vector(8, i32) = @splat(128);
 
-    const v_const_a = @splat(8, @as(i32, 112));
-    const v_const_b = @splat(8, @as(i32, 94));
-    const v_const_c = @splat(8, @as(i32, 18));
-    const v_const_d = @splat(8, @as(i32, 128));
-    const v_const_e = @splat(8, @as(i32, 128));
+    const v_const_a: @Vector(8, i32) = @splat(112);
+    const v_const_b: @Vector(8, i32) = @splat(94);
+    const v_const_c: @Vector(8, i32) = @splat(18);
+    const v_const_d: @Vector(8, i32) = @splat(128);
+    const v_const_e: @Vector(8, i32) = @splat(128);
 
-    const divider = @splat(8, @as(i32, 8));
+    const divider: @Vector(8, i32) = @splat(8);
 
     var i: usize = 0;
     while (i < pixel_count) : (i += 8) {
