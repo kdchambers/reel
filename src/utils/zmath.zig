@@ -332,10 +332,10 @@ pub inline fn veclen(comptime T: type) comptime_int {
 }
 
 pub inline fn splat(comptime T: type, value: f32) T {
-    return @splat(veclen(T), value);
+    return @splat(value);
 }
 pub inline fn splatInt(comptime T: type, value: u32) T {
-    return @splat(veclen(T), @as(f32, @bitCast(value)));
+    return @splat(@bitCast(value));
 }
 
 pub fn load(mem: []const f32, comptime T: type, comptime len: u32) T {
@@ -540,23 +540,23 @@ test "zmath.isNearEqual" {
         try expect(@reduce(.And, b == boolx8(true, false, false, true, false, false, true, true)));
     }
     try expect(all(isNearEqual(
-        splat(F32x4, math.inf_f32),
-        splat(F32x4, math.inf_f32),
+        splat(F32x4, math.inf(f32)),
+        splat(F32x4, math.inf(f32)),
         splat(F32x4, 0.0001),
     ), 0) == false);
     try expect(all(isNearEqual(
-        splat(F32x4, -math.inf_f32),
-        splat(F32x4, math.inf_f32),
+        splat(F32x4, -math.inf(f32)),
+        splat(F32x4, math.inf(f32)),
         splat(F32x4, 0.0001),
     ), 0) == false);
     try expect(all(isNearEqual(
-        splat(F32x4, -math.inf_f32),
-        splat(F32x4, -math.inf_f32),
+        splat(F32x4, -math.inf(f32)),
+        splat(F32x4, -math.inf(f32)),
         splat(F32x4, 0.0001),
     ), 0) == false);
     try expect(all(isNearEqual(
         splat(F32x4, -math.nan_f32),
-        splat(F32x4, math.inf_f32),
+        splat(F32x4, math.inf(f32)),
         splat(F32x4, 0.0001),
     ), 0) == false);
 }
@@ -568,12 +568,12 @@ pub inline fn isNan(
 }
 test "zmath.isNan" {
     {
-        const v0 = f32x4(math.inf_f32, math.nan_f32, math.nan_f32, 7.0);
+        const v0 = f32x4(math.inf(f32), math.nan_f32, math.nan_f32, 7.0);
         const b = isNan(v0);
         try expect(@reduce(.And, b == boolx4(false, true, true, false)));
     }
     {
-        const v0 = f32x8(0, math.nan_f32, 0, 0, math.inf_f32, math.nan_f32, math.qnan_f32, 7.0);
+        const v0 = f32x8(0, math.nan_f32, 0, 0, math.inf(f32), math.nan_f32, math.qnan_f32, 7.0);
         const b = isNan(v0);
         try expect(@reduce(.And, b == boolx8(false, true, false, false, false, true, true, false)));
     }
@@ -583,16 +583,16 @@ pub inline fn isInf(
     v: anytype,
 ) @Vector(veclen(@TypeOf(v)), bool) {
     const T = @TypeOf(v);
-    return abs(v) == splat(T, math.inf_f32);
+    return abs(v) == splat(T, math.inf(f32));
 }
 test "zmath.isInf" {
     {
-        const v0 = f32x4(math.inf_f32, math.nan_f32, math.qnan_f32, 7.0);
+        const v0 = f32x4(math.inf(f32), math.nan_f32, math.qnan_f32, 7.0);
         const b = isInf(v0);
         try expect(@reduce(.And, b == boolx4(true, false, false, false)));
     }
     {
-        const v0 = f32x8(0, math.inf_f32, 0, 0, math.inf_f32, math.nan_f32, math.qnan_f32, 7.0);
+        const v0 = f32x8(0, math.inf(f32), 0, 0, math.inf(f32), math.nan_f32, math.qnan_f32, 7.0);
         const b = isInf(v0);
         try expect(@reduce(.And, b == boolx8(false, true, false, false, true, false, false, false)));
     }
@@ -625,7 +625,7 @@ test "zmath.isInBounds" {
     }
     {
         const v0 = f32x8(2.0, 1.0, 2.0, 1.0, 0.5, -2.0, -1.0, 1.9);
-        const bounds = f32x8(1.0, 1.0, 1.0, math.inf_f32, 1.0, math.nan_f32, 1.0, 2.0);
+        const bounds = f32x8(1.0, 1.0, 1.0, math.inf(f32), 1.0, math.nan_f32, 1.0, 2.0);
         const b0 = isInBounds(v0, bounds);
         try expect(@reduce(.And, b0 == boolx8(false, true, false, true, true, false, true, true)));
     }
@@ -641,17 +641,17 @@ pub inline fn andInt(v0: anytype, v1: anytype) @TypeOf(v0, v1) {
 test "zmath.andInt" {
     {
         const v0 = f32x4(0, @as(f32, @bitCast(~@as(u32, 0))), 0, @as(f32, @bitCast(~@as(u32, 0))));
-        const v1 = f32x4(1.0, 2.0, 3.0, math.inf_f32);
+        const v1 = f32x4(1.0, 2.0, 3.0, math.inf(f32));
         const v = andInt(v0, v1);
-        try expect(v[3] == math.inf_f32);
-        try expect(approxEqAbs(v, f32x4(0.0, 2.0, 0.0, math.inf_f32), 0.0));
+        try expect(v[3] == math.inf(f32));
+        try expect(approxEqAbs(v, f32x4(0.0, 2.0, 0.0, math.inf(f32)), 0.0));
     }
     {
         const v0 = f32x8(0, 0, 0, 0, 0, @as(f32, @bitCast(~@as(u32, 0))), 0, @as(f32, @bitCast(~@as(u32, 0))));
-        const v1 = f32x8(0, 0, 0, 0, 1.0, 2.0, 3.0, math.inf_f32);
+        const v1 = f32x8(0, 0, 0, 0, 1.0, 2.0, 3.0, math.inf(f32));
         const v = andInt(v0, v1);
-        try expect(v[7] == math.inf_f32);
-        try expect(approxEqAbs(v, f32x8(0, 0, 0, 0, 0.0, 2.0, 0.0, math.inf_f32), 0.0));
+        try expect(v[7] == math.inf(f32));
+        try expect(approxEqAbs(v, f32x8(0, 0, 0, 0, 0.0, 2.0, 0.0, math.inf(f32)), 0.0));
     }
 }
 
@@ -747,19 +747,19 @@ pub inline fn minFast(v0: anytype, v1: anytype) @TypeOf(v0, v1) {
 test "zmath.minFast" {
     {
         const v0 = f32x4(1.0, 3.0, 2.0, 7.0);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = minFast(v0, v1);
         try expect(approxEqAbs(v, f32x4(1.0, 1.0, 2.0, 7.0), 0.0));
     }
     {
         const v0 = f32x4(1.0, math.nan_f32, 5.0, math.qnan_f32);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = minFast(v0, v1);
         try expect(v[0] == 1.0);
         try expect(v[1] == 1.0);
         try expect(!math.isNan(v[1]));
         try expect(v[2] == 4.0);
-        try expect(v[3] == math.inf_f32);
+        try expect(v[3] == math.inf(f32));
         try expect(!math.isNan(v[3]));
     }
 }
@@ -770,18 +770,18 @@ pub inline fn maxFast(v0: anytype, v1: anytype) @TypeOf(v0, v1) {
 test "zmath.maxFast" {
     {
         const v0 = f32x4(1.0, 3.0, 2.0, 7.0);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = maxFast(v0, v1);
-        try expect(approxEqAbs(v, f32x4(2.0, 3.0, 4.0, math.inf_f32), 0.0));
+        try expect(approxEqAbs(v, f32x4(2.0, 3.0, 4.0, math.inf(f32)), 0.0));
     }
     {
         const v0 = f32x4(1.0, math.nan_f32, 5.0, math.qnan_f32);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = maxFast(v0, v1);
         try expect(v[0] == 2.0);
         try expect(v[1] == 1.0);
         try expect(v[2] == 5.0);
-        try expect(v[3] == math.inf_f32);
+        try expect(v[3] == math.inf(f32));
         try expect(!math.isNan(v[3]));
     }
 }
@@ -794,34 +794,34 @@ test "zmath.min" {
     if (builtin.target.os.tag == .macos) return error.SkipZigTest;
     {
         const v0 = f32x4(1.0, 3.0, 2.0, 7.0);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = min(v0, v1);
         try expect(approxEqAbs(v, f32x4(1.0, 1.0, 2.0, 7.0), 0.0));
     }
     {
         const v0 = f32x8(0, 0, -2.0, 0, 1.0, 3.0, 2.0, 7.0);
-        const v1 = f32x8(0, 1.0, 0, 0, 2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x8(0, 1.0, 0, 0, 2.0, 1.0, 4.0, math.inf(f32));
         const v = min(v0, v1);
         try expect(approxEqAbs(v, f32x8(0.0, 0.0, -2.0, 0.0, 1.0, 1.0, 2.0, 7.0), 0.0));
     }
     {
         const v0 = f32x4(1.0, math.nan_f32, 5.0, math.qnan_f32);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = min(v0, v1);
         try expect(v[0] == 1.0);
         try expect(v[1] == 1.0);
         try expect(!math.isNan(v[1]));
         try expect(v[2] == 4.0);
-        try expect(v[3] == math.inf_f32);
+        try expect(v[3] == math.inf(f32));
         try expect(!math.isNan(v[3]));
     }
     {
-        const v0 = f32x4(-math.inf_f32, math.inf_f32, math.inf_f32, math.qnan_f32);
-        const v1 = f32x4(math.qnan_f32, -math.inf_f32, math.qnan_f32, math.nan_f32);
+        const v0 = f32x4(-math.inf(f32), math.inf(f32), math.inf(f32), math.qnan_f32);
+        const v1 = f32x4(math.qnan_f32, -math.inf(f32), math.qnan_f32, math.nan_f32);
         const v = min(v0, v1);
-        try expect(v[0] == -math.inf_f32);
-        try expect(v[1] == -math.inf_f32);
-        try expect(v[2] == math.inf_f32);
+        try expect(v[0] == -math.inf(f32));
+        try expect(v[1] == -math.inf(f32));
+        try expect(v[2] == math.inf(f32));
         try expect(!math.isNan(v[2]));
         try expect(math.isNan(v[3]));
         try expect(!math.isInf(v[3]));
@@ -836,33 +836,33 @@ test "zmath.max" {
     if (builtin.target.os.tag == .macos) return error.SkipZigTest;
     {
         const v0 = f32x4(1.0, 3.0, 2.0, 7.0);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = max(v0, v1);
-        try expect(approxEqAbs(v, f32x4(2.0, 3.0, 4.0, math.inf_f32), 0.0));
+        try expect(approxEqAbs(v, f32x4(2.0, 3.0, 4.0, math.inf(f32)), 0.0));
     }
     {
         const v0 = f32x8(0, 0, -2.0, 0, 1.0, 3.0, 2.0, 7.0);
-        const v1 = f32x8(0, 1.0, 0, 0, 2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x8(0, 1.0, 0, 0, 2.0, 1.0, 4.0, math.inf(f32));
         const v = max(v0, v1);
-        try expect(approxEqAbs(v, f32x8(0.0, 1.0, 0.0, 0.0, 2.0, 3.0, 4.0, math.inf_f32), 0.0));
+        try expect(approxEqAbs(v, f32x8(0.0, 1.0, 0.0, 0.0, 2.0, 3.0, 4.0, math.inf(f32)), 0.0));
     }
     {
         const v0 = f32x4(1.0, math.nan_f32, 5.0, math.qnan_f32);
-        const v1 = f32x4(2.0, 1.0, 4.0, math.inf_f32);
+        const v1 = f32x4(2.0, 1.0, 4.0, math.inf(f32));
         const v = max(v0, v1);
         try expect(v[0] == 2.0);
         try expect(v[1] == 1.0);
         try expect(v[2] == 5.0);
-        try expect(v[3] == math.inf_f32);
+        try expect(v[3] == math.inf(f32));
         try expect(!math.isNan(v[3]));
     }
     {
-        const v0 = f32x4(-math.inf_f32, math.inf_f32, math.inf_f32, math.qnan_f32);
-        const v1 = f32x4(math.qnan_f32, -math.inf_f32, math.qnan_f32, math.nan_f32);
+        const v0 = f32x4(-math.inf(f32), math.inf(f32), math.inf(f32), math.qnan_f32);
+        const v1 = f32x4(math.qnan_f32, -math.inf(f32), math.qnan_f32, math.nan_f32);
         const v = max(v0, v1);
-        try expect(v[0] == -math.inf_f32);
-        try expect(v[1] == math.inf_f32);
-        try expect(v[2] == math.inf_f32);
+        try expect(v[0] == -math.inf(f32));
+        try expect(v[1] == math.inf(f32));
+        try expect(v[2] == math.inf(f32));
         try expect(!math.isNan(v[2]));
         try expect(math.isNan(v[3]));
         try expect(!math.isInf(v[3]));
@@ -913,8 +913,8 @@ pub fn round(v: anytype) @TypeOf(v) {
 }
 test "zmath.round" {
     {
-        try expect(all(round(splat(F32x4, math.inf_f32)) == splat(F32x4, math.inf_f32), 0));
-        try expect(all(round(splat(F32x4, -math.inf_f32)) == splat(F32x4, -math.inf_f32), 0));
+        try expect(all(round(splat(F32x4, math.inf(f32))) == splat(F32x4, math.inf(f32)), 0));
+        try expect(all(round(splat(F32x4, -math.inf(f32))) == splat(F32x4, -math.inf(f32)), 0));
         try expect(all(isNan(round(splat(F32x4, math.nan_f32))), 0));
         try expect(all(isNan(round(splat(F32x4, -math.nan_f32))), 0));
         try expect(all(isNan(round(splat(F32x4, math.qnan_f32))), 0));
@@ -931,17 +931,17 @@ test "zmath.round" {
     var v = round(f32x4(1.1, -1.1, -1.5, 1.5));
     try expect(approxEqAbs(v, f32x4(1.0, -1.0, -2.0, 2.0), 0.0));
 
-    const v1 = f32x4(-10_000_000.1, -math.inf_f32, 10_000_001.5, math.inf_f32);
+    const v1 = f32x4(-10_000_000.1, -math.inf(f32), 10_000_001.5, math.inf(f32));
     v = round(v1);
-    try expect(v[3] == math.inf_f32);
-    try expect(approxEqAbs(v, f32x4(-10_000_000.1, -math.inf_f32, 10_000_001.5, math.inf_f32), 0.0));
+    try expect(v[3] == math.inf(f32));
+    try expect(approxEqAbs(v, f32x4(-10_000_000.1, -math.inf(f32), 10_000_001.5, math.inf(f32)), 0.0));
 
-    const v2 = f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf_f32);
+    const v2 = f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf(f32));
     v = round(v2);
     try expect(math.isNan(v2[0]));
     try expect(math.isNan(v2[1]));
     try expect(math.isNan(v2[2]));
-    try expect(v2[3] == -math.inf_f32);
+    try expect(v2[3] == -math.inf(f32));
 
     const v3 = f32x4(1001.5, -201.499, -10000.99, -101.5);
     v = round(v3);
@@ -1001,14 +1001,14 @@ pub fn trunc(v: anytype) @TypeOf(v) {
         }
     } else {
         const mask = abs(v) < splatNoFraction(T);
-        const result = intFromFloatAndBack(v);
+        const result = floatToIntAndBack(v);
         return select(mask, result, v);
     }
 }
 test "zmath.trunc" {
     {
-        try expect(all(trunc(splat(F32x4, math.inf_f32)) == splat(F32x4, math.inf_f32), 0));
-        try expect(all(trunc(splat(F32x4, -math.inf_f32)) == splat(F32x4, -math.inf_f32), 0));
+        try expect(all(trunc(splat(F32x4, math.inf(f32))) == splat(F32x4, math.inf(f32)), 0));
+        try expect(all(trunc(splat(F32x4, -math.inf(f32))) == splat(F32x4, -math.inf(f32)), 0));
         try expect(all(isNan(trunc(splat(F32x4, math.nan_f32))), 0));
         try expect(all(isNan(trunc(splat(F32x4, -math.nan_f32))), 0));
         try expect(all(isNan(trunc(splat(F32x4, math.qnan_f32))), 0));
@@ -1025,14 +1025,14 @@ test "zmath.trunc" {
     var v = trunc(f32x4(1.1, -1.1, -1.5, 1.5));
     try expect(approxEqAbs(v, f32x4(1.0, -1.0, -1.0, 1.0), 0.0));
 
-    v = trunc(f32x4(-10_000_002.1, -math.inf_f32, 10_000_001.5, math.inf_f32));
-    try expect(approxEqAbs(v, f32x4(-10_000_002.1, -math.inf_f32, 10_000_001.5, math.inf_f32), 0.0));
+    v = trunc(f32x4(-10_000_002.1, -math.inf(f32), 10_000_001.5, math.inf(f32)));
+    try expect(approxEqAbs(v, f32x4(-10_000_002.1, -math.inf(f32), 10_000_001.5, math.inf(f32)), 0.0));
 
-    v = trunc(f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf_f32));
+    v = trunc(f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf(f32)));
     try expect(math.isNan(v[0]));
     try expect(math.isNan(v[1]));
     try expect(math.isNan(v[2]));
-    try expect(v[3] == -math.inf_f32);
+    try expect(v[3] == -math.inf(f32));
 
     v = trunc(f32x4(1000.5001, -201.499, -10000.99, 100.750001));
     try expect(approxEqAbs(v, f32x4(1000.0, -201.0, -10000.0, 100.0), 0.0));
@@ -1090,7 +1090,7 @@ pub fn floor(v: anytype) @TypeOf(v) {
         }
     } else {
         const mask = abs(v) < splatNoFraction(T);
-        var result = intFromFloatAndBack(v);
+        var result = floatToIntAndBack(v);
         const larger_mask = result > v;
         const larger = select(larger_mask, splat(T, -1.0), splat(T, 0.0));
         result = result + larger;
@@ -1099,8 +1099,8 @@ pub fn floor(v: anytype) @TypeOf(v) {
 }
 test "zmath.floor" {
     {
-        try expect(all(floor(splat(F32x4, math.inf_f32)) == splat(F32x4, math.inf_f32), 0));
-        try expect(all(floor(splat(F32x4, -math.inf_f32)) == splat(F32x4, -math.inf_f32), 0));
+        try expect(all(floor(splat(F32x4, math.inf(f32))) == splat(F32x4, math.inf(f32)), 0));
+        try expect(all(floor(splat(F32x4, -math.inf(f32))) == splat(F32x4, -math.inf(f32)), 0));
         try expect(all(isNan(floor(splat(F32x4, math.nan_f32))), 0));
         try expect(all(isNan(floor(splat(F32x4, -math.nan_f32))), 0));
         try expect(all(isNan(floor(splat(F32x4, math.qnan_f32))), 0));
@@ -1117,14 +1117,14 @@ test "zmath.floor" {
     var v = floor(f32x4(1.5, -1.5, -1.7, -2.1));
     try expect(approxEqAbs(v, f32x4(1.0, -2.0, -2.0, -3.0), 0.0));
 
-    v = floor(f32x4(-10_000_002.1, -math.inf_f32, 10_000_001.5, math.inf_f32));
-    try expect(approxEqAbs(v, f32x4(-10_000_002.1, -math.inf_f32, 10_000_001.5, math.inf_f32), 0.0));
+    v = floor(f32x4(-10_000_002.1, -math.inf(f32), 10_000_001.5, math.inf(f32)));
+    try expect(approxEqAbs(v, f32x4(-10_000_002.1, -math.inf(f32), 10_000_001.5, math.inf(f32)), 0.0));
 
-    v = floor(f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf_f32));
+    v = floor(f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf(f32)));
     try expect(math.isNan(v[0]));
     try expect(math.isNan(v[1]));
     try expect(math.isNan(v[2]));
-    try expect(v[3] == -math.inf_f32);
+    try expect(v[3] == -math.inf(f32));
 
     v = floor(f32x4(1000.5001, -201.499, -10000.99, 100.75001));
     try expect(approxEqAbs(v, f32x4(1000.0, -202.0, -10001.0, 100.0), 0.0));
@@ -1182,7 +1182,7 @@ pub fn ceil(v: anytype) @TypeOf(v) {
         }
     } else {
         const mask = abs(v) < splatNoFraction(T);
-        var result = intFromFloatAndBack(v);
+        var result = floatToIntAndBack(v);
         const smaller_mask = result < v;
         const smaller = select(smaller_mask, splat(T, -1.0), splat(T, 0.0));
         result = result - smaller;
@@ -1191,8 +1191,8 @@ pub fn ceil(v: anytype) @TypeOf(v) {
 }
 test "zmath.ceil" {
     {
-        try expect(all(ceil(splat(F32x4, math.inf_f32)) == splat(F32x4, math.inf_f32), 0));
-        try expect(all(ceil(splat(F32x4, -math.inf_f32)) == splat(F32x4, -math.inf_f32), 0));
+        try expect(all(ceil(splat(F32x4, math.inf(f32))) == splat(F32x4, math.inf(f32)), 0));
+        try expect(all(ceil(splat(F32x4, -math.inf(f32))) == splat(F32x4, -math.inf(f32)), 0));
         try expect(all(isNan(ceil(splat(F32x4, math.nan_f32))), 0));
         try expect(all(isNan(ceil(splat(F32x4, -math.nan_f32))), 0));
         try expect(all(isNan(ceil(splat(F32x4, math.qnan_f32))), 0));
@@ -1209,14 +1209,14 @@ test "zmath.ceil" {
     var v = ceil(f32x4(1.5, -1.5, -1.7, -2.1));
     try expect(approxEqAbs(v, f32x4(2.0, -1.0, -1.0, -2.0), 0.0));
 
-    v = ceil(f32x4(-10_000_002.1, -math.inf_f32, 10_000_001.5, math.inf_f32));
-    try expect(approxEqAbs(v, f32x4(-10_000_002.1, -math.inf_f32, 10_000_001.5, math.inf_f32), 0.0));
+    v = ceil(f32x4(-10_000_002.1, -math.inf(f32), 10_000_001.5, math.inf(f32)));
+    try expect(approxEqAbs(v, f32x4(-10_000_002.1, -math.inf(f32), 10_000_001.5, math.inf(f32)), 0.0));
 
-    v = ceil(f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf_f32));
+    v = ceil(f32x4(-math.qnan_f32, math.qnan_f32, math.nan_f32, -math.inf(f32)));
     try expect(math.isNan(v[0]));
     try expect(math.isNan(v[1]));
     try expect(math.isNan(v[2]));
-    try expect(v[3] == -math.inf_f32);
+    try expect(v[3] == -math.inf(f32));
 
     v = ceil(f32x4(1000.5001, -201.499, -10000.99, 100.75001));
     try expect(approxEqAbs(v, f32x4(1001.0, -201.0, -10000.0, 101.0), 0.0));
@@ -1258,12 +1258,12 @@ test "zmath.clamp" {
         try expect(approxEqAbs(v, f32x8(-0.5, 0.25, -0.25, 0.5, -0.5, 0.2, 0.5, -0.3), 0.0001));
     }
     {
-        const v0 = f32x4(-math.inf_f32, math.inf_f32, math.nan_f32, math.qnan_f32);
+        const v0 = f32x4(-math.inf(f32), math.inf(f32), math.nan_f32, math.qnan_f32);
         const v = clamp(v0, f32x4(-100.0, 0.0, -100.0, 0.0), f32x4(0.0, 100.0, 0.0, 100.0));
         try expect(approxEqAbs(v, f32x4(-100.0, 100.0, -100.0, 0.0), 0.0001));
     }
     {
-        const v0 = f32x4(math.inf_f32, math.inf_f32, -math.nan_f32, -math.qnan_f32);
+        const v0 = f32x4(math.inf(f32), math.inf(f32), -math.nan_f32, -math.qnan_f32);
         const v = clamp(v0, splat(F32x4, -1.0), splat(F32x4, 1.0));
         try expect(approxEqAbs(v, f32x4(1.0, 1.0, -1.0, -1.0), 0.0001));
     }
@@ -1301,12 +1301,12 @@ test "zmath.saturate" {
         try expect(approxEqAbs(v, f32x8(0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 1.0, 0.0), 0.0001));
     }
     {
-        const v0 = f32x4(-math.inf_f32, math.inf_f32, math.nan_f32, math.qnan_f32);
+        const v0 = f32x4(-math.inf(f32), math.inf(f32), math.nan_f32, math.qnan_f32);
         const v = saturate(v0);
         try expect(approxEqAbs(v, f32x4(0.0, 1.0, 0.0, 0.0), 0.0001));
     }
     {
-        const v0 = f32x4(math.inf_f32, math.inf_f32, -math.nan_f32, -math.qnan_f32);
+        const v0 = f32x4(math.inf(f32), math.inf(f32), -math.nan_f32, -math.qnan_f32);
         const v = saturate(v0);
         try expect(approxEqAbs(v, f32x4(1.0, 1.0, 0.0, 0.0), 0.0001));
     }
@@ -1330,12 +1330,12 @@ test "zmath.saturateFast" {
         try expect(approxEqAbs(v, f32x8(0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 1.0, 0.0), 0.0001));
     }
     {
-        const v0 = f32x4(-math.inf_f32, math.inf_f32, math.nan_f32, math.qnan_f32);
+        const v0 = f32x4(-math.inf(f32), math.inf(f32), math.nan_f32, math.qnan_f32);
         const v = saturateFast(v0);
         try expect(approxEqAbs(v, f32x4(0.0, 1.0, 0.0, 0.0), 0.0001));
     }
     {
-        const v0 = f32x4(math.inf_f32, math.inf_f32, -math.nan_f32, -math.qnan_f32);
+        const v0 = f32x4(math.inf(f32), math.inf(f32), -math.nan_f32, -math.qnan_f32);
         const v = saturateFast(v0);
         try expect(approxEqAbs(v, f32x4(1.0, 1.0, 0.0, 0.0), 0.0001));
     }
@@ -1375,6 +1375,23 @@ test "zmath.lerpInverse" {
     try expect(math.approxEqAbs(f32, lerpInverseV(10.0, 100.0, 100.0), 1, 0.0005));
     try expect(math.approxEqAbs(f32, lerpInverseV(10.0, 100.0, 55.0), 0.5, 0.05));
     try expect(approxEqAbs(lerpInverse(f32x4(0, 0, 10, 10), f32x4(100, 200, 100, 100), 10.0), f32x4(0.1, 0.05, 0, 0), 0.0005));
+}
+
+// Frame rate independent lerp (or "damp"), for approaching things over time.
+// Reference: https://www.gamedeveloper.com/programming/improved-lerp-smoothing-
+pub inline fn lerpOverTime(v0: anytype, v1: anytype, rate: anytype, dt: anytype) @TypeOf(v0, v1) {
+    const t = std.math.exp2(-rate * dt);
+    return lerp(v0, v1, t);
+}
+
+pub inline fn lerpVOverTime(v0: anytype, v1: anytype, rate: anytype, dt: anytype) @TypeOf(v0, v1, rate, dt) {
+    const t = std.math.exp2(-rate * dt);
+    return lerpV(v0, v1, t);
+}
+test "zmath.lerpOverTime" {
+    try expect(math.approxEqAbs(f32, lerpVOverTime(0.0, 1.0, 1.0, 1.0), 0.5, 0.0005));
+    try expect(math.approxEqAbs(f32, lerpVOverTime(0.5, 1.0, 1.0, 1.0), 0.75, 0.0005));
+    try expect(approxEqAbs(lerpOverTime(f32x4(0, 0, 10, 10), f32x4(100, 200, 100, 100), 1.0, 1.0), f32x4(50, 100, 55, 55), 0.0005));
 }
 
 /// To transform a vector of values from one range to another.
@@ -1422,16 +1439,16 @@ test "zmath.mod" {
     try expect(approxEqAbs(mod(splat(F32x4, -3.0), splat(F32x4, 2.0)), splat(F32x4, -1.0), 0.0005));
     try expect(approxEqAbs(mod(splat(F32x4, -3.0), splat(F32x4, -2.0)), splat(F32x4, -1.0), 0.0005));
     try expect(approxEqAbs(mod(splat(F32x4, 3.0), splat(F32x4, -2.0)), splat(F32x4, 1.0), 0.0005));
-    try expect(all(isNan(mod(splat(F32x4, math.inf_f32), splat(F32x4, 1.0))), 0));
-    try expect(all(isNan(mod(splat(F32x4, -math.inf_f32), splat(F32x4, 123.456))), 0));
+    try expect(all(isNan(mod(splat(F32x4, math.inf(f32)), splat(F32x4, 1.0))), 0));
+    try expect(all(isNan(mod(splat(F32x4, -math.inf(f32)), splat(F32x4, 123.456))), 0));
     try expect(all(isNan(mod(splat(F32x4, math.nan_f32), splat(F32x4, 123.456))), 0));
     try expect(all(isNan(mod(splat(F32x4, math.qnan_f32), splat(F32x4, 123.456))), 0));
     try expect(all(isNan(mod(splat(F32x4, -math.qnan_f32), splat(F32x4, 123.456))), 0));
-    try expect(all(isNan(mod(splat(F32x4, 123.456), splat(F32x4, math.inf_f32))), 0));
-    try expect(all(isNan(mod(splat(F32x4, 123.456), splat(F32x4, -math.inf_f32))), 0));
-    try expect(all(isNan(mod(splat(F32x4, math.inf_f32), splat(F32x4, math.inf_f32))), 0));
+    try expect(all(isNan(mod(splat(F32x4, 123.456), splat(F32x4, math.inf(f32)))), 0));
+    try expect(all(isNan(mod(splat(F32x4, 123.456), splat(F32x4, -math.inf(f32)))), 0));
+    try expect(all(isNan(mod(splat(F32x4, math.inf(f32)), splat(F32x4, math.inf(f32)))), 0));
     try expect(all(isNan(mod(splat(F32x4, 123.456), splat(F32x4, math.nan_f32))), 0));
-    try expect(all(isNan(mod(splat(F32x4, math.inf_f32), splat(F32x4, math.nan_f32))), 0));
+    try expect(all(isNan(mod(splat(F32x4, math.inf(f32)), splat(F32x4, math.nan_f32))), 0));
 }
 
 pub fn modAngle(v: anytype) @TypeOf(v) {
@@ -1495,8 +1512,8 @@ test "zmath.sin" {
     try expect(approxEqAbs(sin(splat(F32x4, 89.123)), splat(F32x4, 0.916166), epsilon));
     try expect(approxEqAbs(sin(splat(F32x8, 89.123)), splat(F32x8, 0.916166), epsilon));
     try expect(approxEqAbs(sin(splat(F32x16, 89.123)), splat(F32x16, 0.916166), epsilon));
-    try expect(all(isNan(sin(splat(F32x4, math.inf_f32))), 0) == true);
-    try expect(all(isNan(sin(splat(F32x4, -math.inf_f32))), 0) == true);
+    try expect(all(isNan(sin(splat(F32x4, math.inf(f32)))), 0) == true);
+    try expect(all(isNan(sin(splat(F32x4, -math.inf(f32)))), 0) == true);
     try expect(all(isNan(sin(splat(F32x4, math.nan_f32))), 0) == true);
     try expect(all(isNan(sin(splat(F32x4, math.qnan_f32))), 0) == true);
 
@@ -1543,8 +1560,8 @@ test "zmath.cos" {
     try expect(approxEqAbs(cos(splat(F32x4, 0.5 * math.pi)), splat(F32x4, 0.0), epsilon));
     try expect(approxEqAbs(cos(splat(F32x4, 0.0)), splat(F32x4, 1.0), epsilon));
     try expect(approxEqAbs(cos(splat(F32x4, -0.0)), splat(F32x4, 1.0), epsilon));
-    try expect(all(isNan(cos(splat(F32x4, math.inf_f32))), 0) == true);
-    try expect(all(isNan(cos(splat(F32x4, -math.inf_f32))), 0) == true);
+    try expect(all(isNan(cos(splat(F32x4, math.inf(f32)))), 0) == true);
+    try expect(all(isNan(cos(splat(F32x4, -math.inf(f32)))), 0) == true);
     try expect(all(isNan(cos(splat(F32x4, math.nan_f32))), 0) == true);
     try expect(all(isNan(cos(splat(F32x4, math.qnan_f32))), 0) == true);
 
@@ -1756,8 +1773,8 @@ test "zmath.atan" {
         try expect(approxEqAbs(e, atan(v), epsilon));
     }
     {
-        try expect(approxEqAbs(atan(splat(F32x4, math.inf_f32)), splat(F32x4, 0.5 * math.pi), epsilon));
-        try expect(approxEqAbs(atan(splat(F32x4, -math.inf_f32)), splat(F32x4, -0.5 * math.pi), epsilon));
+        try expect(approxEqAbs(atan(splat(F32x4, math.inf(f32))), splat(F32x4, 0.5 * math.pi), epsilon));
+        try expect(approxEqAbs(atan(splat(F32x4, -math.inf(f32))), splat(F32x4, -0.5 * math.pi), epsilon));
         try expect(all(isNan(atan(splat(F32x4, math.nan_f32))), 0) == true);
         try expect(all(isNan(atan(splat(F32x4, -math.nan_f32))), 0) == true);
     }
@@ -1768,13 +1785,13 @@ pub fn atan2(vy: anytype, vx: anytype) @TypeOf(vx, vy) {
     const Tu = @Vector(veclen(T), u32);
 
     const vx_is_positive =
-        (@as(Tu, @bitCast(vx)) & @splat(veclen(T), @as(u32, 0x8000_0000))) == @splat(veclen(T), @as(u32, 0));
+        (@as(Tu, @bitCast(vx)) & @as(Tu, @splat(0x8000_0000))) == @as(Tu, @splat(0));
 
     const vy_sign = andInt(vy, splatNegativeZero(T));
-    const c0_25pi = orInt(vy_sign, splat(T, 0.25 * math.pi));
-    const c0_50pi = orInt(vy_sign, splat(T, 0.50 * math.pi));
-    const c0_75pi = orInt(vy_sign, splat(T, 0.75 * math.pi));
-    const c1_00pi = orInt(vy_sign, splat(T, 1.00 * math.pi));
+    const c0_25pi = orInt(vy_sign, @as(T, @splat(0.25 * math.pi)));
+    const c0_50pi = orInt(vy_sign, @as(T, @splat(0.50 * math.pi)));
+    const c0_75pi = orInt(vy_sign, @as(T, @splat(0.75 * math.pi)));
+    const c1_00pi = orInt(vy_sign, @as(T, @splat(1.00 * math.pi)));
 
     var r1 = select(vx_is_positive, vy_sign, c1_00pi);
     var r2 = select(vx == splat(T, 0.0), c0_50pi, splatInt(T, 0xffff_ffff));
@@ -1782,7 +1799,7 @@ pub fn atan2(vy: anytype, vx: anytype) @TypeOf(vx, vy) {
     const r4 = select(vx_is_positive, c0_25pi, c0_75pi);
     const r5 = select(isInf(vx), r4, c0_50pi);
     const result = select(isInf(vy), r5, r3);
-    const result_valid = @as(Tu, @bitCast(result)) == @splat(veclen(T), @as(u32, 0xffff_ffff));
+    const result_valid = @as(Tu, @bitCast(result)) == @as(Tu, @splat(0xffff_ffff));
 
     const v = vy / vx;
     const r0 = atan(v);
@@ -1822,44 +1839,44 @@ test "zmath.atan2" {
         splat(F32x4, math.atan(@as(f32, 5.0)) - math.pi),
         epsilon,
     ));
-    try expect(approxEqAbs(atan2(splat(F32x4, 1.0), splat(F32x4, -math.inf_f32)), splat(F32x4, math.pi), epsilon));
-    try expect(approxEqAbs(atan2(splat(F32x4, -1.0), splat(F32x4, -math.inf_f32)), splat(F32x4, -math.pi), epsilon));
-    try expect(approxEqAbs(atan2(splat(F32x4, 1.0), splat(F32x4, math.inf_f32)), splat(F32x4, 0.0), epsilon));
-    try expect(approxEqAbs(atan2(splat(F32x4, -1.0), splat(F32x4, math.inf_f32)), splat(F32x4, -0.0), epsilon));
+    try expect(approxEqAbs(atan2(splat(F32x4, 1.0), splat(F32x4, -math.inf(f32))), splat(F32x4, math.pi), epsilon));
+    try expect(approxEqAbs(atan2(splat(F32x4, -1.0), splat(F32x4, -math.inf(f32))), splat(F32x4, -math.pi), epsilon));
+    try expect(approxEqAbs(atan2(splat(F32x4, 1.0), splat(F32x4, math.inf(f32))), splat(F32x4, 0.0), epsilon));
+    try expect(approxEqAbs(atan2(splat(F32x4, -1.0), splat(F32x4, math.inf(f32))), splat(F32x4, -0.0), epsilon));
     try expect(approxEqAbs(
-        atan2(splat(F32x4, math.inf_f32), splat(F32x4, 2.0)),
+        atan2(splat(F32x4, math.inf(f32)), splat(F32x4, 2.0)),
         splat(F32x4, 0.5 * math.pi),
         epsilon,
     ));
     try expect(approxEqAbs(
-        atan2(splat(F32x4, -math.inf_f32), splat(F32x4, 2.0)),
+        atan2(splat(F32x4, -math.inf(f32)), splat(F32x4, 2.0)),
         splat(F32x4, -0.5 * math.pi),
         epsilon,
     ));
     try expect(approxEqAbs(
-        atan2(splat(F32x4, math.inf_f32), splat(F32x4, -math.inf_f32)),
+        atan2(splat(F32x4, math.inf(f32)), splat(F32x4, -math.inf(f32))),
         splat(F32x4, 0.75 * math.pi),
         epsilon,
     ));
     try expect(approxEqAbs(
-        atan2(splat(F32x4, -math.inf_f32), splat(F32x4, -math.inf_f32)),
+        atan2(splat(F32x4, -math.inf(f32)), splat(F32x4, -math.inf(f32))),
         splat(F32x4, -0.75 * math.pi),
         epsilon,
     ));
     try expect(approxEqAbs(
-        atan2(splat(F32x4, math.inf_f32), splat(F32x4, math.inf_f32)),
+        atan2(splat(F32x4, math.inf(f32)), splat(F32x4, math.inf(f32))),
         splat(F32x4, 0.25 * math.pi),
         epsilon,
     ));
     try expect(approxEqAbs(
-        atan2(splat(F32x4, -math.inf_f32), splat(F32x4, math.inf_f32)),
+        atan2(splat(F32x4, -math.inf(f32)), splat(F32x4, math.inf(f32))),
         splat(F32x4, -0.25 * math.pi),
         epsilon,
     ));
     try expect(approxEqAbs(
         atan2(
-            f32x8(0.0, -math.inf_f32, -0.0, 2.0, math.inf_f32, math.inf_f32, 1.0, -math.inf_f32),
-            f32x8(-2.0, math.inf_f32, 1.0, 0.0, 10.0, -math.inf_f32, 1.0, -math.inf_f32),
+            f32x8(0.0, -math.inf(f32), -0.0, 2.0, math.inf(f32), math.inf(f32), 1.0, -math.inf(f32)),
+            f32x8(-2.0, math.inf(f32), 1.0, 0.0, 10.0, -math.inf(f32), 1.0, -math.inf(f32)),
         ),
         f32x8(
             math.pi,
@@ -1984,7 +2001,7 @@ test "zmath.length3" {
         try expect(all(isNan(v), 0));
     }
     {
-        const v = length3(f32x4(1.0, math.inf_f32, 3.0, 1000.0));
+        const v = length3(f32x4(1.0, math.inf(f32), 3.0, 1000.0));
         try expect(all(isInf(v), 0));
     }
     {
@@ -2009,8 +2026,8 @@ test "zmath.normalize3" {
         try expect(approxEqAbs(v, v0 * splat(F32x4, 1.0 / math.sqrt(14.0)), 0.0005));
     }
     {
-        try expect(any(isNan(normalize3(f32x4(1.0, math.inf_f32, 1.0, 1.0))), 0));
-        try expect(any(isNan(normalize3(f32x4(-math.inf_f32, math.inf_f32, 0.0, 0.0))), 0));
+        try expect(any(isNan(normalize3(f32x4(1.0, math.inf(f32), 1.0, 1.0))), 0));
+        try expect(any(isNan(normalize3(f32x4(-math.inf(f32), math.inf(f32), 0.0, 0.0))), 0));
         try expect(any(isNan(normalize3(f32x4(-math.nan_f32, math.qnan_f32, 0.0, 0.0))), 0));
         try expect(any(isNan(normalize3(f32x4(0, 0, 0, 0))), 0));
     }
@@ -2022,8 +2039,8 @@ test "zmath.normalize4" {
         try expect(approxEqAbs(v, v0 * splat(F32x4, 1.0 / math.sqrt(114.0)), 0.0005));
     }
     {
-        try expect(any(isNan(normalize4(f32x4(1.0, math.inf_f32, 1.0, 1.0))), 0));
-        try expect(any(isNan(normalize4(f32x4(-math.inf_f32, math.inf_f32, 0.0, 0.0))), 0));
+        try expect(any(isNan(normalize4(f32x4(1.0, math.inf(f32), 1.0, 1.0))), 0));
+        try expect(any(isNan(normalize4(f32x4(-math.inf(f32), math.inf(f32), 0.0, 0.0))), 0));
         try expect(any(isNan(normalize4(f32x4(-math.nan_f32, math.qnan_f32, 0.0, 0.0))), 0));
         try expect(any(isNan(normalize4(f32x4(0, 0, 0, 0))), 0));
     }
@@ -2259,7 +2276,7 @@ test "zmath.matrix.lookToLh" {
 pub fn perspectiveFovLh(fovy: f32, aspect: f32, near: f32, far: f32) Mat {
     const scfov = sincos(0.5 * fovy);
 
-    assert(near > 0.0 and far > 0.0 and far > near);
+    assert(near > 0.0 and far > 0.0);
     assert(!math.approxEqAbs(f32, scfov[0], 0.0, 0.001));
     assert(!math.approxEqAbs(f32, far, near, 0.001));
     assert(!math.approxEqAbs(f32, aspect, 0.0, 0.01));
@@ -2277,7 +2294,7 @@ pub fn perspectiveFovLh(fovy: f32, aspect: f32, near: f32, far: f32) Mat {
 pub fn perspectiveFovRh(fovy: f32, aspect: f32, near: f32, far: f32) Mat {
     const scfov = sincos(0.5 * fovy);
 
-    assert(near > 0.0 and far > 0.0 and far > near);
+    assert(near > 0.0 and far > 0.0);
     assert(!math.approxEqAbs(f32, scfov[0], 0.0, 0.001));
     assert(!math.approxEqAbs(f32, far, near, 0.001));
     assert(!math.approxEqAbs(f32, aspect, 0.0, 0.01));
@@ -2297,7 +2314,7 @@ pub fn perspectiveFovRh(fovy: f32, aspect: f32, near: f32, far: f32) Mat {
 pub fn perspectiveFovLhGl(fovy: f32, aspect: f32, near: f32, far: f32) Mat {
     const scfov = sincos(0.5 * fovy);
 
-    assert(near > 0.0 and far > 0.0 and far > near);
+    assert(near > 0.0 and far > 0.0);
     assert(!math.approxEqAbs(f32, scfov[0], 0.0, 0.001));
     assert(!math.approxEqAbs(f32, far, near, 0.001));
     assert(!math.approxEqAbs(f32, aspect, 0.0, 0.01));
@@ -2317,7 +2334,7 @@ pub fn perspectiveFovLhGl(fovy: f32, aspect: f32, near: f32, far: f32) Mat {
 pub fn perspectiveFovRhGl(fovy: f32, aspect: f32, near: f32, far: f32) Mat {
     const scfov = sincos(0.5 * fovy);
 
-    assert(near > 0.0 and far > 0.0 and far > near);
+    assert(near > 0.0 and far > 0.0);
     assert(!math.approxEqAbs(f32, scfov[0], 0.0, 0.001));
     assert(!math.approxEqAbs(f32, far, near, 0.001));
     assert(!math.approxEqAbs(f32, aspect, 0.0, 0.01));
@@ -2583,7 +2600,7 @@ pub fn inverseDet(m: Mat, out_det: ?*F32x4) Mat {
         out_det.?.* = det;
     }
 
-    if (math.approxEqAbs(f32, det[0], 0.0, math.f32_epsilon)) {
+    if (math.approxEqAbs(f32, det[0], 0.0, math.floatEps(f32))) {
         return .{
             f32x4(0.0, 0.0, 0.0, 0.0),
             f32x4(0.0, 0.0, 0.0, 0.0),
@@ -2985,7 +3002,7 @@ pub inline fn conjugate(quat: Quat) Quat {
 fn inverseQuat(quat: Quat) Quat {
     const l = lengthSq4(quat);
     const conj = conjugate(quat);
-    return select(l <= splat(F32x4, math.f32_epsilon), splat(F32x4, 0.0), conj / l);
+    return select(l <= splat(F32x4, math.floatEps(f32)), splat(F32x4, 0.0), conj / l);
 }
 test "zmath.quaternion.inverseQuat" {
     try expect(approxEqAbs(
@@ -3175,7 +3192,7 @@ pub fn rgbToHsl(rgb: F32x4) F32x4 {
     const d = maxv - minv;
     const la = select(boolx4(true, true, true, false), l, rgb);
 
-    if (all(d < f32x4s(math.f32_epsilon), 3)) {
+    if (all(d < f32x4s(math.floatEps(f32)), 3)) {
         return select(boolx4(true, true, false, false), f32x4s(0.0), la);
     } else {
         var s: F32x4 = undefined;
@@ -3241,7 +3258,7 @@ pub fn hslToRgb(hsl: F32x4) F32x4 {
     const s = swizzle(hsl, .y, .y, .y, .y);
     const l = swizzle(hsl, .z, .z, .z, .z);
 
-    if (all(isNearEqual(s, f32x4s(0.0), f32x4s(math.f32_epsilon)), 3)) {
+    if (all(isNearEqual(s, f32x4s(0.0), f32x4s(math.floatEps(f32))), 3)) {
         return select(boolx4(true, true, true, false), l, hsl);
     } else {
         const h = swizzle(hsl, .x, .x, .x, .x);
@@ -3301,9 +3318,9 @@ pub fn rgbToHsv(rgb: F32x4) F32x4 {
     const minv = min(r, min(g, b));
     const v = max(r, max(g, b));
     const d = v - minv;
-    const s = if (all(isNearEqual(v, f32x4s(0.0), f32x4s(math.f32_epsilon)), 3)) f32x4s(0.0) else d / v;
+    const s = if (all(isNearEqual(v, f32x4s(0.0), f32x4s(math.floatEps(f32))), 3)) f32x4s(0.0) else d / v;
 
-    if (all(d < f32x4s(math.f32_epsilon), 3)) {
+    if (all(d < f32x4s(math.floatEps(f32)), 3)) {
         const hv = select(boolx4(true, false, false, false), f32x4s(0.0), v);
         const hva = select(boolx4(true, true, true, false), hv, rgb);
         return select(boolx4(true, false, true, true), hva, s);
@@ -3560,17 +3577,17 @@ fn sincos32(v: f32) [2]f32 {
 test "zmath.sincos32" {
     const epsilon = 0.0001;
 
-    try expect(math.isNan(sincos32(math.inf_f32)[0]));
-    try expect(math.isNan(sincos32(math.inf_f32)[1]));
-    try expect(math.isNan(sincos32(-math.inf_f32)[0]));
-    try expect(math.isNan(sincos32(-math.inf_f32)[1]));
+    try expect(math.isNan(sincos32(math.inf(f32))[0]));
+    try expect(math.isNan(sincos32(math.inf(f32))[1]));
+    try expect(math.isNan(sincos32(-math.inf(f32))[0]));
+    try expect(math.isNan(sincos32(-math.inf(f32))[1]));
     try expect(math.isNan(sincos32(math.nan_f32)[0]));
     try expect(math.isNan(sincos32(-math.nan_f32)[1]));
 
-    try expect(math.isNan(sin32(math.inf_f32)));
-    try expect(math.isNan(cos32(math.inf_f32)));
-    try expect(math.isNan(sin32(-math.inf_f32)));
-    try expect(math.isNan(cos32(-math.inf_f32)));
+    try expect(math.isNan(sin32(math.inf(f32))));
+    try expect(math.isNan(cos32(math.inf(f32))));
+    try expect(math.isNan(sin32(-math.inf(f32))));
+    try expect(math.isNan(cos32(-math.inf(f32))));
     try expect(math.isNan(sin32(math.nan_f32)));
     try expect(math.isNan(cos32(-math.nan_f32)));
 
@@ -3616,15 +3633,15 @@ test "zmath.asin32" {
     try expect(math.approxEqAbs(f32, asin(@as(f32, 1.1)), 0.5 * math.pi, epsilon));
     try expect(math.approxEqAbs(f32, asin(@as(f32, -1000.1)), -0.5 * math.pi, epsilon));
     try expect(math.approxEqAbs(f32, asin(@as(f32, 100000.1)), 0.5 * math.pi, epsilon));
-    try expect(math.isNan(asin(math.inf_f32)));
-    try expect(math.isNan(asin(-math.inf_f32)));
+    try expect(math.isNan(asin(math.inf(f32))));
+    try expect(math.isNan(asin(-math.inf(f32))));
     try expect(math.isNan(asin(math.nan_f32)));
     try expect(math.isNan(asin(-math.nan_f32)));
 
     try expect(approxEqAbs(asin(splat(F32x8, -100.0)), splat(F32x8, -0.5 * math.pi), epsilon));
     try expect(approxEqAbs(asin(splat(F32x16, 100.0)), splat(F32x16, 0.5 * math.pi), epsilon));
-    try expect(all(isNan(asin(splat(F32x4, math.inf_f32))), 0) == true);
-    try expect(all(isNan(asin(splat(F32x4, -math.inf_f32))), 0) == true);
+    try expect(all(isNan(asin(splat(F32x4, math.inf(f32)))), 0) == true);
+    try expect(all(isNan(asin(splat(F32x4, -math.inf(f32)))), 0) == true);
     try expect(all(isNan(asin(splat(F32x4, math.nan_f32))), 0) == true);
     try expect(all(isNan(asin(splat(F32x4, math.qnan_f32))), 0) == true);
 
@@ -3670,15 +3687,15 @@ test "zmath.acos32" {
     try expect(math.approxEqAbs(f32, acos(@as(f32, -10000.1)), math.pi, epsilon));
     try expect(math.approxEqAbs(f32, acos(@as(f32, 1.1)), 0.0, epsilon));
     try expect(math.approxEqAbs(f32, acos(@as(f32, 1000.1)), 0.0, epsilon));
-    try expect(math.isNan(acos(math.inf_f32)));
-    try expect(math.isNan(acos(-math.inf_f32)));
+    try expect(math.isNan(acos(math.inf(f32))));
+    try expect(math.isNan(acos(-math.inf(f32))));
     try expect(math.isNan(acos(math.nan_f32)));
     try expect(math.isNan(acos(-math.nan_f32)));
 
     try expect(approxEqAbs(acos(splat(F32x8, -100.0)), splat(F32x8, math.pi), epsilon));
     try expect(approxEqAbs(acos(splat(F32x16, 100.0)), splat(F32x16, 0.0), epsilon));
-    try expect(all(isNan(acos(splat(F32x4, math.inf_f32))), 0) == true);
-    try expect(all(isNan(acos(splat(F32x4, -math.inf_f32))), 0) == true);
+    try expect(all(isNan(acos(splat(F32x4, math.inf(f32)))), 0) == true);
+    try expect(all(isNan(acos(splat(F32x4, -math.inf(f32)))), 0) == true);
     try expect(all(isNan(acos(splat(F32x4, math.nan_f32))), 0) == true);
     try expect(all(isNan(acos(splat(F32x4, math.qnan_f32))), 0) == true);
 
@@ -4422,16 +4439,16 @@ const f32x4_mask3: F32x4 = F32x4{
 };
 
 inline fn splatNegativeZero(comptime T: type) T {
-    return @splat(veclen(T), @as(f32, @bitCast(@as(u32, 0x8000_0000))));
+    return @splat(@as(f32, @bitCast(@as(u32, 0x8000_0000))));
 }
 inline fn splatNoFraction(comptime T: type) T {
-    return @splat(veclen(T), @as(f32, 8_388_608.0));
+    return @splat(@as(f32, 8_388_608.0));
 }
 inline fn splatAbsMask(comptime T: type) T {
-    return @splat(veclen(T), @as(f32, @bitCast(@as(u32, 0x7fff_ffff))));
+    return @splat(@as(f32, @bitCast(@as(u32, 0x7fff_ffff))));
 }
 
-fn intFromFloatAndBack(v: anytype) @TypeOf(v) {
+fn floatToIntAndBack(v: anytype) @TypeOf(v) {
     // This routine won't handle nan, inf and numbers greater than 8_388_608.0 (will generate undefined values).
     @setRuntimeSafety(false);
 
@@ -4454,17 +4471,17 @@ fn intFromFloatAndBack(v: anytype) @TypeOf(v) {
 
     return vf32;
 }
-test "zmath.intFromFloatAndBack" {
+test "zmath.floatToIntAndBack" {
     {
-        const v = intFromFloatAndBack(f32x4(1.1, 2.9, 3.0, -4.5));
+        const v = floatToIntAndBack(f32x4(1.1, 2.9, 3.0, -4.5));
         try expect(approxEqAbs(v, f32x4(1.0, 2.0, 3.0, -4.0), 0.0));
     }
     {
-        const v = intFromFloatAndBack(f32x8(1.1, 2.9, 3.0, -4.5, 2.5, -2.5, 1.1, -100.2));
+        const v = floatToIntAndBack(f32x8(1.1, 2.9, 3.0, -4.5, 2.5, -2.5, 1.1, -100.2));
         try expect(approxEqAbs(v, f32x8(1.0, 2.0, 3.0, -4.0, 2.0, -2.0, 1.0, -100.0), 0.0));
     }
     {
-        const v = intFromFloatAndBack(f32x4(math.inf_f32, 2.9, math.nan_f32, math.qnan_f32));
+        const v = floatToIntAndBack(f32x4(math.inf(f32), 2.9, math.nan_f32, math.qnan_f32));
         try expect(v[1] == 2.0);
     }
 }
