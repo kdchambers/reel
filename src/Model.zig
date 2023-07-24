@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const assert = std.debug.assert;
 
 const geometry = @import("geometry.zig");
 const Dimensions2D = geometry.Dimensions2D;
@@ -112,9 +113,48 @@ pub const AudioSourceProvider = struct {
     name: []const u8,
 };
 
+pub const Scene = struct {
+    name: []const u8 = "",
+    audio_streams: [8]u16 = [1]u16{std.math.maxInt(u16)} ** 8,
+    video_streams: [8]u16 = [1]u16{std.math.maxInt(u16)} ** 8,
+
+    pub inline fn isNull(self: *@This()) bool {
+        return self.name.len == 0;
+    }
+
+    pub inline fn setNull(self: *@This()) void {
+        self.name = "";
+        assert(self.isNull());
+    }
+};
+
+pub fn addScene(self: *@This(), name: []const u8) usize {
+    for (self.scenes, 0..) |*scene, scene_i| {
+        if (scene.isNull()) {
+            scene.name = name;
+            return scene_i;
+        }
+    }
+    std.log.err("Scene buffer full", .{});
+    unreachable;
+}
+
+pub fn switchScene(self: *@This(), scene_index: usize) void {
+    self.active_scene_index = scene_index;
+}
+
+pub fn rmScene(self: *@This(), scene_index: usize) void {
+    assert(scene_index < self.scenes.len);
+    assert(!self.scenes[scene_index].isNull());
+    self.scenes[scene_index].setNull();
+}
+
 //
 // This defines all state that is relevant to the user interface
 //
+
+scenes: []Scene,
+active_scene_index: usize = 0,
 
 video_source_providers: []VideoSourceProvider,
 webcam_source_providers: []WebcamSourceProvider,

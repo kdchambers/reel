@@ -94,6 +94,9 @@ var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
 const max_video_streams = 4;
 var video_stream_buffer: [max_video_streams]Model.VideoStream = undefined;
 
+var max_scene_count: usize = 8;
+var scene_buffer: [max_scene_count]Model.Scene = [1]Model.Scene{.{}} ** max_scene_count;
+
 fn printVideoStreamBuffer() void {
     const print = std.debug.print;
     print("***** Video stream buffer ******\n", .{});
@@ -124,6 +127,7 @@ var model: Model = .{
     .video_source_providers = &.{},
     .audio_source_providers = &.{},
     .webcam_source_providers = &.{},
+    .scenes = &.{},
     .audio_streams = &.{},
     .video_streams = &.{},
     .recording_context = .{
