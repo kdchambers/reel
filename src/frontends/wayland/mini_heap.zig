@@ -91,9 +91,27 @@ pub fn Cluster(comptime Type: type) type {
     return packed struct(u32) {
         const alignment = @alignOf(Type);
 
+        const invalid = @This(){ .base_index = Index(Type).invalid, .capacity = 0, .len = 0 };
+
         base_index: Index(Type),
         capacity: u8,
         len: u8,
+
+        pub fn create(capacity: usize) !Cluster(Type) {
+            return try allocateCluster(Type, capacity);
+        }
+
+        pub fn init(self: *@This(), capacity: usize) !void {
+            self.* = try allocateCluster(Type, capacity);
+        }
+
+        pub inline fn setNull(self: *@This()) void {
+            self.base_index = Index(Type).invalid;
+        }
+
+        pub inline fn isNull(self: *@This()) bool {
+            return self.base_index == Index(Type).invalid;
+        }
 
         pub inline fn remove(self: *@This(), index: u16) void {
             assert(self.len > 0);
