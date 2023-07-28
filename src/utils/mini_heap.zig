@@ -347,11 +347,11 @@ pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
     assert(@alignOf(Type) <= heap_alignment);
     const alignment_padding = comptime heap_alignment - @alignOf(Type);
     @as(*Type, @ptrCast(@alignCast(&heap_memory[heap_index]))).* = value.*;
-    const result_index: u16 = heap_index;
+    const result_index: usize = heap_index;
     heap_index += @sizeOf(Type) + alignment_padding;
     assert(heap_index % heap_alignment == 0);
     assert(result_index % @alignOf(Type) == 0);
-    return .{ .index = result_index };
+    return .{ .index = @intCast(result_index) };
 }
 
 pub inline fn writeString(bytes: []const u8) []const u8 {
@@ -371,11 +371,11 @@ inline fn roundUp(value: anytype, multiple: @TypeOf(value)) @TypeOf(value) {
 pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime options: WriteOptions) SliceIndex(Type) {
     _ = options;
     comptime assert(@alignOf(Type) <= heap_alignment);
-    const result_index = heap_index;
+    const result_index: usize = heap_index;
     @memcpy(@as([*]Type, @ptrCast(@alignCast(&heap_memory[heap_index])))[0..slice.len], slice);
     heap_index += @intCast(@sizeOf(Type) * slice.len);
     heap_index = roundUp(heap_index, heap_alignment);
-    return .{ .index = result_index, .count = @as(u16, @intCast(slice.len)) };
+    return .{ .index = @intCast(result_index), .count = @intCast(slice.len) };
 }
 
 pub inline fn writeN(comptime Type: type, value: *const Type, count: u16) SliceIndex(Type) {
@@ -384,7 +384,7 @@ pub inline fn writeN(comptime Type: type, value: *const Type, count: u16) SliceI
     @memset(@as([*]Type, @ptrCast(@alignCast(&heap_memory[heap_index])))[0..count], value.*);
     heap_index += @intCast(@sizeOf(Type) * count);
     heap_index = roundUp(heap_index, heap_alignment);
-    return .{ .index = @intCast(result_index), .count = @as(u16, @intCast(count)) };
+    return .{ .index = @intCast(result_index), .count = @intCast(count) };
 }
 
 fn ClusterBuffer(comptime Type: type, comptime buffer_count: usize, comptime buffer_capacity: usize) type {
