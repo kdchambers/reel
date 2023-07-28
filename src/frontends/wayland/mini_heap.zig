@@ -87,11 +87,131 @@ pub fn SliceIndex(comptime Type: type) type {
     };
 }
 
+pub fn BlockStable(comptime Type: type) type {
+    return packed struct(u64) {
+        const alignment = @alignOf(Type);
+
+        pub const invalid = @This(){ .base_index = Index(Type).invalid, .capacity = 0, .used_bits = 0, .len = 0 };
+
+        base_index: Index(Type),
+        capacity: u8,
+        len: u8,
+        used_bits: u32,
+
+        pub fn init(self: *@This(), capacity: usize) !void {
+            const is_aligned = ((@alignOf(Type) * @as(usize, @intCast(capacity))) % heap_alignment) == 0;
+            // TODO: Do proper tests for non-aligned types, for now be safe and disable
+            if (!is_aligned) {
+                std.log.err("cluster allocation of {s} x {d} is not aligned", .{
+                    @typeName(Type),
+                    capacity,
+                });
+                assert(is_aligned);
+            }
+            const slice = reserve(Type, capacity, .{ .pad_to_alignment = false });
+            self.base_index = .{ .index = slice.index };
+            self.capacity = @intCast(capacity);
+            self.used_bits = 0;
+            self.len = 0;
+        }
+
+        pub inline fn isNull(self: *@This()) bool {
+            return self.base_index.index == Index(Type).invalid.index;
+        }
+
+        pub inline fn spaceCount(self: *@This()) usize {
+            var unset_count: usize = 0;
+            var i: usize = 0;
+            while (i < 32) : (i += 1) {
+                const bitshift: u5 = @intCast(i);
+                if ((self.used_bits >> bitshift) & 0x1 == 0) {
+                    unset_count += 1;
+                }
+            }
+            return unset_count;
+        }
+
+        pub inline fn isSpace(self: *@This()) bool {
+            for (0..32) |i| {
+                if ((self.used_bits >> i) & 0x1 == 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        pub inline fn reserveNextFreeIndex(self: *@This()) ?usize {
+            for (0..32) |i| {
+                const bitshift: u5 = @intCast(i);
+                if ((self.used_bits >> bitshift) & 0x1 == 0) {
+                    self.used_bits |= (@as(u32, 0x1) << bitshift);
+                    assert((self.used_bits >> bitshift) & @as(u32, 0x1) == 1);
+                    return i;
+                }
+            }
+            return null;
+        }
+
+        pub inline fn add(self: *@This(), value: *const Type) !usize {
+            assert(self.spaceCount() > 0);
+            const next_index: usize = self.reserveNextFreeIndex() orelse return error.NoSpace;
+            @as(*Type, @ptrCast(@alignCast(&heap_memory[self.base_index.index + (@sizeOf(Type) * next_index)]))).* = value.*;
+            self.len += 1;
+            return next_index;
+        }
+
+        pub inline fn remove(self: *@This(), index: usize) void {
+            var set_bits_count: usize = 0;
+            assert(self.capacity > 0);
+            for (0..self.capacity) |i| {
+                const bitshift: u5 = @intCast(i);
+                if ((self.used_bits >> bitshift) & @as(u32, 0x1) == 1) {
+                    if (set_bits_count == index) {
+                        self.used_bits &= ~(@as(u32, 0x1) << bitshift);
+                        assert((self.used_bits >> bitshift) & @as(u32, 0x1) == 0);
+                        self.len -= 1;
+                        return;
+                    }
+                    set_bits_count += 1;
+                }
+            }
+            unreachable;
+        }
+
+        pub inline fn valueFromIndex(self: @This(), index: usize) Type {
+            return @as([*]Type, @ptrCast(@alignCast(&heap_memory[self.base_index.index])))[index];
+        }
+
+        pub inline fn ptrMutableFromIndex(self: @This(), index: usize) *Type {
+            var set_bits_count: usize = 0;
+            assert(self.capacity > 0);
+            for (0..self.capacity) |i| {
+                const bitshift: u5 = @intCast(i);
+                if ((self.used_bits >> bitshift) & @as(u32, 0x1) == 1) {
+                    if (set_bits_count == index) {
+                        return @ptrCast(@alignCast(&heap_memory[self.base_index.index + (i * @sizeOf(Type))]));
+                    }
+                    set_bits_count += 1;
+                }
+            }
+            unreachable;
+        }
+
+        pub inline fn ptrFromIndex(self: @This(), index: usize) *const Type {
+            return @ptrCast(self.ptrMutableFromIndex(index));
+        }
+
+        pub inline fn ptrIndexFromIndex(self: @This(), index: u16) Index(Type) {
+            return Index(Type){ .index = self.base_index.index + index };
+        }
+    };
+}
+
 pub fn Cluster(comptime Type: type) type {
     return packed struct(u32) {
         const alignment = @alignOf(Type);
 
-        const invalid = @This(){ .base_index = Index(Type).invalid, .capacity = 0, .len = 0 };
+        pub const invalid = @This(){ .base_index = Index(Type).invalid, .capacity = 0, .len = 0 };
 
         base_index: Index(Type),
         capacity: u8,
@@ -110,7 +230,7 @@ pub fn Cluster(comptime Type: type) type {
         }
 
         pub inline fn isNull(self: *@This()) bool {
-            return self.base_index == Index(Type).invalid;
+            return self.base_index.index == Index(Type).invalid.index;
         }
 
         pub inline fn remove(self: *@This(), index: u16) void {
@@ -140,11 +260,11 @@ pub fn Cluster(comptime Type: type) type {
             return .{ .index = index };
         }
 
-        pub inline fn at(self: @This(), index: u8) Type {
+        pub inline fn at(self: @This(), index: usize) Type {
             return @as([*]Type, @ptrCast(@alignCast(&heap_memory[self.base_index.index])))[index];
         }
 
-        pub inline fn atPtr(self: @This(), index: u8) *Type {
+        pub inline fn atPtr(self: @This(), index: usize) *Type {
             const misalignment = (self.base_index.index + (index * @sizeOf(Type))) % alignment;
             if (misalignment != 0) {
                 std.log.err("Base index: {d} Type: {s}, alignment: {d}, index: {d} is misaligned", .{
@@ -157,7 +277,7 @@ pub fn Cluster(comptime Type: type) type {
             return @ptrCast(@alignCast(&heap_memory[self.base_index.index + (index * @sizeOf(Type))]));
         }
 
-        pub inline fn atIndex(self: @This(), index: u8) Index(Type) {
+        pub inline fn atIndex(self: @This(), index: usize) Index(Type) {
             return Index(Type){ .index = self.base_index.index + index };
         }
 
@@ -168,7 +288,7 @@ pub fn Cluster(comptime Type: type) type {
 }
 
 var heap_memory: []align(heap_alignment) u8 = undefined;
-var heap_index: u16 = undefined;
+var heap_index: usize = undefined;
 
 pub fn init() !void {
     heap_memory = (try std.heap.page_allocator.alignedAlloc(u8, heap_alignment, std.math.maxInt(u16)));
@@ -183,29 +303,29 @@ pub inline fn reset() void {
     heap_index = 0;
 }
 
-pub inline fn freeBytesCount() u16 {
+pub inline fn freeBytesCount() usize {
     return heap_memory.len - heap_index;
 }
 
-pub inline fn usedBytesCount() u16 {
+pub inline fn usedBytesCount() usize {
     return heap_index;
 }
 
-pub inline fn reserve(comptime Type: type, count: u16, comptime options: WriteOptions) SliceIndex(Type) {
+pub inline fn reserve(comptime Type: type, count: usize, comptime options: WriteOptions) SliceIndex(Type) {
     _ = options;
     assert(heap_index % heap_alignment == 0);
     assert(@alignOf(Type) <= heap_alignment);
-    const result_index: u16 = heap_index;
+    const result_index: u16 = @intCast(heap_index);
     const allocation_size: usize = @sizeOf(Type) * count;
     heap_index += allocation_size;
     heap_index = roundUp(heap_index, heap_alignment);
     assert(heap_index % heap_alignment == 0);
     assert(result_index % @alignOf(Type) == 0);
-    return .{ .index = result_index, .count = count };
+    return .{ .index = result_index, .count = @intCast(count) };
 }
 
-pub fn allocateCluster(comptime Type: type, capacity: u8) Cluster(Type) {
-    const is_aligned = ((@alignOf(Type) * @as(usize, @intCast(capacity))) % heap_alignment) == 0;
+pub fn allocateCluster(comptime Type: type, capacity: usize) !Cluster(Type) {
+    const is_aligned = ((@alignOf(Type) * capacity) % heap_alignment) == 0;
     // TODO: Do proper tests for non-aligned types, for now be safe and disable
     if (!is_aligned) {
         std.log.err("cluster allocation of {s} x {d} is not aligned", .{
@@ -217,7 +337,7 @@ pub fn allocateCluster(comptime Type: type, capacity: u8) Cluster(Type) {
     const slice = reserve(Type, capacity, .{ .pad_to_alignment = false });
     return .{
         .base_index = .{ .index = slice.index },
-        .capacity = capacity,
+        .capacity = @intCast(capacity),
         .len = 0,
     };
 }
@@ -260,11 +380,11 @@ pub inline fn writeSlice(comptime Type: type, slice: []const Type, comptime opti
 
 pub inline fn writeN(comptime Type: type, value: *const Type, count: u16) SliceIndex(Type) {
     comptime assert(@alignOf(Type) <= heap_alignment);
-    const result_index = heap_index;
+    const result_index: usize = heap_index;
     @memset(@as([*]Type, @ptrCast(@alignCast(&heap_memory[heap_index])))[0..count], value.*);
     heap_index += @intCast(@sizeOf(Type) * count);
     heap_index = roundUp(heap_index, heap_alignment);
-    return .{ .index = result_index, .count = @as(u16, @intCast(count)) };
+    return .{ .index = @intCast(result_index), .count = @as(u16, @intCast(count)) };
 }
 
 fn ClusterBuffer(comptime Type: type, comptime buffer_count: usize, comptime buffer_capacity: usize) type {
