@@ -1016,7 +1016,8 @@ pub const Dropdown = struct {
     const Model = struct {
         is_open: bool,
         selected_index: u16,
-        labels: []const []const u8,
+        labels: [max_label_count][]const u8,
+        label_count: usize,
     };
     model: Model,
 
@@ -1036,6 +1037,7 @@ pub const Dropdown = struct {
             .is_open = false,
             .selected_index = 0,
             .labels = undefined,
+            .label_count = 0,
         };
         self.vertex_index_buffer = [1]u16{std.math.maxInt(u16)} ** max_label_count;
     }
@@ -1063,7 +1065,7 @@ pub const Dropdown = struct {
         }
 
         if (self.model.is_open) {
-            for (self.mouse_event_slots.get(), 0..self.model.labels.len) |*event, i| {
+            for (self.mouse_event_slots.get(), 0..self.model.label_count) |*event, i| {
                 const item_state_copy = event.state;
                 event.state.clear();
                 if (item_state_copy.hover_enter) {
@@ -1087,7 +1089,7 @@ pub const Dropdown = struct {
                     self.model.selected_index = @intCast(i);
                     response.active_index = self.model.selected_index;
                     self.model.is_open = false;
-                    std.log.info("Item selected: {d}", .{i});
+                    response.redraw = true;
                 }
             }
         }
@@ -1166,8 +1168,8 @@ pub const Dropdown = struct {
             const vertical_gap = vertical_gap_pixels * screen_scale.vertical;
             const item_height = extent.height - vertical_gap;
             const vertical_stride = item_height + vertical_gap;
-            self.mouse_event_slots = event_system.reserveMouseEventSlots(@intCast(self.model.labels.len));
-            for (self.model.labels, self.mouse_event_slots.get(), 0..) |label, *slot, i| {
+            self.mouse_event_slots = event_system.reserveMouseEventSlots(@intCast(self.model.label_count));
+            for (self.model.labels[0..self.model.label_count], self.mouse_event_slots.get(), 0..) |label, *slot, i| {
                 const item_extent = Extent3D(f32){
                     .x = extent.x,
                     .y = extent.y + (vertical_stride * @as(f32, @floatFromInt(i + 1))),
