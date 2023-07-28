@@ -7,7 +7,7 @@
 
 #### ⚠️ **Early development warning** ⚠️
 
-A MPV release is targetted for early July. However, if you're interested in this project now you can checkout one of the following.
+If you're interested in this project now you can checkout one of the following.
 
 - [frequently asked questions](./doc/FAQ.md)
 - [design document](doc/DESIGN.md)
