@@ -48,7 +48,7 @@ const Coordinates3D = geometry.Coordinates3D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 const ui_layer = geometry.ui_layer;
 
-const mini_heap = @import("wayland/mini_heap.zig");
+const mini_heap = @import("../utils/mini_heap.zig");
 
 const event_system = @import("wayland/event_system.zig");
 const MouseEventEntry = event_system.MouseEventEntry;
@@ -398,8 +398,8 @@ fn processWidgets(model: *const Model) !void {
             is_render_requested = true;
     }
 
-    if (model.audio_streams.len != 0) {
-        ui_state.scene_volume_level.update(model.audio_streams[0].volume_db, screen_scale);
+    if (model.audio_stream_blocks.len() != 0) {
+        ui_state.scene_volume_level.update(model.audio_stream_blocks.ptrFromIndex(0).volume_db, screen_scale);
     }
 
     {
@@ -425,7 +425,7 @@ fn processWidgets(model: *const Model) !void {
     }
 
     if (ui_state.sidebar_state == .open) {
-        const source_count = model.video_streams.len;
+        const source_count: usize = model.video_stream_blocks.len();
         const source_entries = ui_state.video_source_entry_buffer[0..source_count];
         for (source_entries, 0..) |*entry, i| {
             const entry_response = entry.remove_icon.update();
@@ -658,7 +658,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     if (have_drawn)
         try processWidgets(model);
 
-    if (model.video_streams.len != 0)
+    if (model.video_stream_blocks.len() != 0)
         is_render_requested = true;
 
     if (model.recording_context.state != last_recording_state) {

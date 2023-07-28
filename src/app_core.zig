@@ -22,6 +22,7 @@ const Extent2D = geometry.Extent2D;
 const video4linux = @import("video4linux.zig");
 const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 const ThreadUtilMonitor = utils.ThreadUtilMonitor;
+const audio_utils = @import("frontends/wayland/audio.zig");
 
 // TODO: Audit, doesn't renderer belong here?
 const renderer = @import("renderer.zig");
@@ -88,24 +89,16 @@ var app_state: State = .uninitialized;
 var screencapture_interface: screencapture.Interface = undefined;
 var frontend_interface: frontend.Interface = undefined;
 
-const max_audio_streams = 2;
-var audio_stream_buffer: [max_audio_streams]Model.AudioStream = undefined;
-
-const max_video_streams = 4;
-var video_stream_buffer: [max_video_streams]Model.VideoStream = undefined;
-
-var max_scene_count: usize = 8;
-var scene_buffer: [max_scene_count]Model.Scene = [1]Model.Scene{.{}} ** max_scene_count;
-
 fn printVideoStreamBuffer() void {
     const print = std.debug.print;
     print("***** Video stream buffer ******\n", .{});
-    for (model.video_streams, 0..) |stream, stream_i| {
-        print("  {d} :: source index {d} type {}", .{ stream_i, stream.source_handle, stream.provider_ref.kind });
+    for (0..model.video_stream_blocks.len()) |i| {
+        var stream = model.video_stream_blocks.ptrAt(i);
+        print("  {d} :: source index {d} type {}", .{ i, stream.source_handle, stream.provider_ref.kind });
     }
 }
 
-var webcam_pixel_buffer: [max_video_streams][]RGBA(u8) = undefined;
+var webcam_pixel_buffer: [4][]RGBA(u8) = undefined;
 
 const max_video4linux_streams = 2;
 var video4linux_sources_buffer: [max_video4linux_streams]Model.WebcamSourceProvider.Source = undefined;
@@ -127,9 +120,6 @@ var model: Model = .{
     .video_source_providers = &.{},
     .audio_source_providers = &.{},
     .webcam_source_providers = &.{},
-    .scenes = &.{},
-    .audio_streams = &.{},
-    .video_streams = &.{},
     .recording_context = .{
         .format = .mp4,
         .quality = .low,
@@ -258,6 +248,8 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     model.thread_util = ThreadUtilMonitor.init(gpa) catch {
         return error.OutOfMemory;
     };
+
+    model.addScene("default") catch unreachable;
 }
 
 pub fn run() !void {
@@ -329,25 +321,24 @@ pub fn run() !void {
 
                     model_mutex.lock();
 
-                    const screencapture_source_handle = model.video_streams[stream_index].source_handle;
-                    const renderer_stream_handle = model.video_streams[stream_index].renderer_handle;
+                    const screencapture_source_handle = model.video_stream_blocks.ptrFromIndex(stream_index).source_handle;
+                    const renderer_stream_handle = model.video_stream_blocks.ptrFromIndex(stream_index).renderer_handle;
 
                     std.log.info("Removing video stream. Renderer handle: {d} Screencapture handle: {d}", .{
                         renderer_stream_handle,
                         screencapture_source_handle,
                     });
 
-                    switch (model.video_streams[stream_index].provider_ref.kind) {
+                    switch (model.video_stream_blocks.ptrFromIndex(stream_index).provider_ref.kind) {
                         .webcam => video4linux.close(),
                         .screen_capture => screencapture_interface.streamClose(screencapture_source_handle),
                     }
 
                     renderer.removeStream(renderer_stream_handle);
-                    const video_stream_count: usize = model.video_streams.len;
+                    const video_stream_count: usize = model.video_stream_blocks.len();
                     assert(video_stream_count > 0);
-                    utils.leftShiftRemove(Model.VideoStream, video_stream_buffer[0..video_stream_count], stream_index);
-                    model.video_streams = video_stream_buffer[0 .. video_stream_count - 1];
-                    assert(model.video_streams.len == video_stream_count - 1);
+
+                    model.removeVideoStream(stream_index);
 
                     model_mutex.unlock();
 
@@ -382,7 +373,7 @@ pub fn run() !void {
                     std.log.info("Screenshot display set to: {s}", .{display_list[display_index]});
                 },
                 .record_start => {
-                    if (model.video_streams.len == 0) {
+                    if (model.video_stream_blocks.len() == 0) {
                         std.log.err("Cannot start recording without streams", .{});
                         continue :request_loop;
                     }
@@ -455,9 +446,8 @@ pub fn run() !void {
 
                     const pixel_count: usize = wanted_dimensions.width * wanted_dimensions.height;
                     webcam_pixel_buffer[webcam_source_index] = try gpa.alloc(RGBA(u8), pixel_count);
-                    const current_video_stream_index = model.video_streams.len;
 
-                    video_stream_buffer[current_video_stream_index] = .{
+                    const video_stream: Model.VideoStream = .{
                         .dimensions = wanted_dimensions,
                         .pixels = webcam_pixel_buffer[webcam_source_index],
                         .frame_index = 0,
@@ -465,8 +455,11 @@ pub fn run() !void {
                         .renderer_handle = renderer_handle,
                         .provider_ref = .{ .index = 0, .kind = .webcam },
                     };
-                    model.video_streams = video_stream_buffer[0 .. current_video_stream_index + 1];
-                    assert(model.video_streams.len == (current_video_stream_index + 1));
+
+                    _ = model.addVideoStream(&video_stream) catch |err| {
+                        std.log.err("Failed to add webcam video stream. Error: {}", .{err});
+                        continue :request_loop;
+                    };
 
                     const relative_extent = Extent2D(f32){
                         .x = 0.0,
@@ -487,7 +480,8 @@ pub fn run() !void {
             }
         }
 
-        for (model.video_streams) |*stream| {
+        for (0..model.video_stream_blocks.len()) |i| {
+            var stream: *Model.VideoStream = model.video_stream_blocks.ptrMutableFromIndex(i);
             if (stream.provider_ref.kind == .webcam) {
                 assert(stream.source_handle == 0);
                 var pixel_buffer_ref = webcam_pixel_buffer[stream.source_handle];
@@ -528,9 +522,10 @@ pub fn run() !void {
 
 pub fn deinit() void {
     audio_source_interface.deinit();
-    for (model.audio_streams) |*audio_stream| {
-        audio_stream.sample_buffer.deinit(gpa);
+    for (0..model.audio_stream_blocks.len()) |i| {
+        model.audio_stream_blocks.ptrMutableFromIndex(i).sample_buffer.deinit(gpa);
     }
+
     screencapture_interface.deinit();
     video4linux.deinit(gpa);
     frontend_interface.deinit();
@@ -553,7 +548,8 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
     if (screencapture_start == null)
         screencapture_start = std.time.nanoTimestamp();
 
-    for (model.video_streams) |*stream| {
+    for (0..model.video_stream_blocks.len()) |i| {
+        var stream: *Model.VideoStream = model.video_stream_blocks.ptrMutableFromIndex(i);
         if (stream.provider_ref.kind == .screen_capture and stream.source_handle == stream_handle) {
             const pixel_count: usize = width * height;
             stream.pixels = pixels[0..pixel_count];
@@ -569,7 +565,8 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
     // We're given the source source handle generated by the provider, but we need to find the renderer handle that
     // has been assigned by the renderer so that we can upload the new framebuffer
     const renderer_stream_handle = blk: {
-        for (model.video_streams) |stream| {
+        for (0..model.video_stream_blocks.len()) |i| {
+            const stream = model.video_stream_blocks.ptrFromIndex(i);
             if (stream.source_handle == stream_handle)
                 break :blk stream.renderer_handle;
         }
@@ -577,12 +574,10 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
         unreachable;
     };
 
-    renderer.writeStreamFrame(renderer_stream_handle, @as([*]const u8, @ptrCast(pixels))[0 .. pixel_count * 4]) catch assert(false);
+    renderer.writeStreamFrame(renderer_stream_handle, @as([*]const u8, @ptrCast(pixels))[0 .. pixel_count * 4]) catch unreachable;
 
     frame_index += 1;
 }
-
-const audio_utils = @import("frontends/wayland/audio.zig");
 
 // NOTE: This will be called on a separate thread
 pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16) void {
@@ -595,9 +590,10 @@ pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16)
         //
         // TODO
         //
-        model.audio_streams[0].sample_buffer.appendOverwrite(pcm_buffer);
+        const audio_stream_ptr: *Model.AudioStream = model.audio_stream_blocks.ptrMutableFromIndex(0);
+        audio_stream_ptr.sample_buffer.appendOverwrite(pcm_buffer);
         const power_spectrum = audio_utils.samplesToPowerSpectrum(pcm_buffer);
-        model.audio_streams[0].volume_db = audio_utils.powerSpectrumToVolumeDb(power_spectrum);
+        audio_stream_ptr.volume_db = audio_utils.powerSpectrumToVolumeDb(power_spectrum);
     } else {
         std.log.info("Warning! audio callback stream doesn't match", .{});
     }
@@ -676,7 +672,7 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
 
         recording_start_timestamp = std.time.nanoTimestamp();
 
-        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
+        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_stream_blocks.len() != 0) model.audio_stream_blocks.ptrFromIndex(0).sample_buffer else null;
         const samples_for_frame = blk: {
             if (audio_buffer_opt) |audio_buffer| {
                 const sample_index = audio_buffer.lastNSample(sample_multiple);
@@ -695,7 +691,7 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
         recording_frame_index_base = frame_index;
         recording_sample_count = sample_multiple;
     } else if (model.recording_context.state == .recording) {
-        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_streams.len != 0) model.audio_streams[0].sample_buffer else null;
+        const audio_buffer_opt: ?AudioSampleRingBuffer = if (model.audio_stream_blocks.len() != 0) model.audio_stream_blocks.ptrFromIndex(0).sample_buffer else null;
         const samples_to_encode = blk: {
             if (audio_buffer_opt) |audio_buffer| {
                 const sample_index: u64 = recording_sample_base_index + recording_sample_count;
@@ -743,7 +739,7 @@ fn handlePreviewFrameReady(pixels: []const RGBA(u8)) void {
         if (video_frames_ms > audio_samples_ms) {
             const audio_required_ms = video_frames_ms - audio_samples_ms;
             const sample_count_required = audio_required_ms * 44;
-            const audio_buffer: AudioSampleRingBuffer = model.audio_streams[0].sample_buffer;
+            const audio_buffer: AudioSampleRingBuffer = model.audio_stream_blocks.ptrFromIndex(0).sample_buffer;
             const samples_to_encode = blk: {
                 const sample_index: u64 = recording_sample_base_index + recording_sample_count;
                 const samples_in_buffer: u64 = audio_buffer.availableSamplesFrom(sample_index);
@@ -778,23 +774,30 @@ fn handleAudioSourceInitFail(err: audio_source.InitError) void {
 }
 
 fn handleAudioSourceCreateStreamSuccess(stream: audio_source.StreamHandle) void {
-    const model_stream_index = model.audio_streams.len;
     const source_info = audio_sources_ref[stream.index];
     //
     // Buffer size of ~100 milliseconds at a sample rate of 44100 and 2 channels
     //
     const buffer_capacity_samples: usize = @divExact(44100, 10) * 2;
-    audio_stream_buffer[model_stream_index].sample_buffer.init(gpa, buffer_capacity_samples) catch |err| {
+
+    var audio_stream: Model.AudioStream = .{
+        .state = .open,
+        .source_name = std.mem.span(source_info.name),
+        .source_type = switch (source_info.source_type) {
+            .desktop => .desktop,
+            .microphone, .unknown => .microphone,
+        },
+        .volume_db = undefined,
+        .sample_buffer = undefined,
+    };
+    audio_stream.sample_buffer.init(gpa, buffer_capacity_samples) catch |err| {
         std.log.err("Failed to allocate audio stream. Error: {}", .{err});
         return;
     };
-    audio_stream_buffer[model_stream_index].state = .open;
-    audio_stream_buffer[model_stream_index].source_name = std.mem.span(source_info.name);
-    audio_stream_buffer[model_stream_index].source_type = switch (source_info.source_type) {
-        .desktop => .desktop,
-        .microphone, .unknown => .microphone,
+    _ = model.addAudioStream(&audio_stream) catch |err| {
+        std.log.err("Failed to add audio stream. Error: {}", .{err});
+        return;
     };
-    model.audio_streams = audio_stream_buffer[0 .. model_stream_index + 1];
 }
 
 fn handleAudioSourceCreateStreamFail(err: audio_source.CreateStreamError) void {
@@ -856,8 +859,7 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
         model.video_source_providers[0].sources = video_source_buffer[0 .. current_source_index + 1];
     }
 
-    const stream_count = model.video_streams.len;
-    video_stream_buffer[stream_count] = .{
+    const video_stream: Model.VideoStream = .{
         .frame_index = 0,
         .pixels = undefined,
         .provider_ref = .{ .index = 0, .kind = .screen_capture },
@@ -865,8 +867,9 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
         .source_handle = stream_handle,
         .dimensions = stream_info.dimensions,
     };
-    model.video_streams = video_stream_buffer[0 .. stream_count + 1];
-    assert(model.video_streams.len == (stream_count + 1));
+    _ = model.addVideoStream(&video_stream) catch |err| {
+        std.log.err("Failed to add video stream. Error: {}", .{err});
+    };
 
     update_encoder_mutex.lock();
     update_encoder.write(.video_source_added) catch unreachable;
