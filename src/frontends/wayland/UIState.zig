@@ -9,7 +9,7 @@ const Model = @import("../../Model.zig");
 const VideoFormat = Model.VideoFormat;
 const ImageFormat = Model.ImageFormat;
 
-const mini_heap = @import("mini_heap.zig");
+const mini_heap = @import("../../utils/mini_heap.zig");
 const Index = mini_heap.Index;
 
 const event_system = @import("event_system.zig");

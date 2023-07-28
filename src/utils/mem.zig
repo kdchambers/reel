@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const mini_heap = @import("../frontends/wayland/mini_heap.zig");
+const mini_heap = @import("mini_heap.zig");
 const Cluster = mini_heap.Cluster;
 
 const BlockStable = mini_heap.BlockStable;

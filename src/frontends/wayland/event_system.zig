@@ -8,7 +8,7 @@ const assert = std.debug.assert;
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 
-const mini_heap = @import("mini_heap.zig");
+const mini_heap = @import("../../utils/mini_heap.zig");
 const geometry = @import("../../geometry.zig");
 const Extent2D = geometry.Extent2D;
 
