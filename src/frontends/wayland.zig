@@ -367,6 +367,21 @@ pub fn init(allocator: std.mem.Allocator) !void {
         entry.remove_icon.icon = .delete_16px;
     }
 
+    ui_state.scene_selector.init();
+    ui_state.scene_selector.model.labels[0] = "main scene";
+    ui_state.scene_selector.model.label_count = 1;
+
+    ui_state.scene_selector.background_color = RGBA.fromInt(128, 87, 35, 255);
+    ui_state.scene_selector.background_color_hovered = RGBA.fromInt(128, 127, 35, 255);
+    ui_state.scene_selector.accent_color = RGBA.fromInt(200, 87, 200, 255);
+
+    ui_state.add_scene_button.init();
+    ui_state.add_scene_button.on_hover_icon_color = RGBA.white;
+    ui_state.add_scene_button.background_color = RGBA.fromInt(36, 39, 47, 255);
+    ui_state.add_scene_button.icon_color = RGBA.fromInt(200, 200, 200, 255);
+    ui_state.add_scene_button.icon = .add_circle_24px;
+    ui_state.add_scene_button.on_hover_background_color = ui_state.add_scene_button.background_color;
+
     //
     // TODO: Don't hardcode bin count
     //
@@ -631,6 +646,28 @@ fn processWidgets(model: *const Model) !void {
                 else => .closed,
             };
             is_draw_required = true;
+        }
+        if (response.modified)
+            is_render_requested = true;
+    }
+
+    {
+        const response = ui_state.scene_selector.update();
+        if (response.visual_change) {
+            is_render_requested = true;
+        }
+        if (response.active_index) |index| {
+            ui_state.scene_selector.model.selected_index = index;
+        }
+        if (response.redraw) {
+            is_draw_required = true;
+        }
+    }
+
+    {
+        const response = ui_state.add_scene_button.update();
+        if (response.clicked) {
+            std.log.info("Adding scene..", .{});
         }
         if (response.modified)
             is_render_requested = true;

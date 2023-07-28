@@ -457,6 +457,31 @@ pub fn draw(
         }
     }
 
+    var scene_selector_region: Region = .{};
+    {
+        const scene_selector_height_pixels = 30;
+        scene_selector_region.width = 160 * screen_scale.horizontal;
+        scene_selector_region.height = scene_selector_height_pixels * screen_scale.vertical;
+        scene_selector_region.anchor.top = window.top;
+        scene_selector_region.margin.top = 10 * screen_scale.vertical;
+        scene_selector_region.anchor.right = right_sidebar_region.left();
+        scene_selector_region.margin.right = 10 * screen_scale.horizontal;
+
+        ui_state.scene_selector.draw(scene_selector_region.toExtent(), screen_scale);
+
+        var add_scene_button_region: Region = .{};
+        // NOTE: The pixel dimensions have to match the icon used by the button
+        const button_size_pixels = 24;
+        add_scene_button_region.anchor.right = scene_selector_region.left();
+        add_scene_button_region.margin.right = 10 * screen_scale.horizontal;
+        add_scene_button_region.anchor.top = scene_selector_region.top();
+        add_scene_button_region.margin.top = @divExact(scene_selector_height_pixels - button_size_pixels, 2) * screen_scale.vertical;
+        add_scene_button_region.width = button_size_pixels * screen_scale.horizontal;
+        add_scene_button_region.height = button_size_pixels * screen_scale.vertical;
+
+        ui_state.add_scene_button.draw(add_scene_button_region.placement(), 0.0, screen_scale);
+    }
+
     var preview_region: Region = .{};
     {
         const frame_dimensions: geometry.Dimensions2D(u32) = blk: {
@@ -473,7 +498,7 @@ pub fn draw(
         const margin_pixels: f32 = 10.0;
         const margin_horizontal: f32 = margin_pixels * screen_scale.horizontal;
 
-        const margin_top_pixels: f32 = if (have_horizontal_space) 20.0 else 50.0;
+        const margin_top_pixels: f32 = if (have_horizontal_space) 50.0 else 80.0;
         const margin_top: f32 = margin_top_pixels * screen_scale.vertical;
         const margin_bottom: f32 = 60.0 * screen_scale.vertical;
         const margin_vertical: f32 = margin_top + margin_bottom;
