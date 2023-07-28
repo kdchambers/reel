@@ -6,6 +6,7 @@ pub const Timer = @import("utils/Timer.zig");
 pub const FixedBuffer = @import("utils/FixedBuffer.zig").FixedBuffer;
 pub const math = @import("utils/zmath.zig");
 pub const ThreadUtilMonitor = @import("utils/ThreadUtilMonitor.zig");
+pub const mem = @import("utils/mem.zig");
 
 const profile = @import("utils/profile.zig");
 
