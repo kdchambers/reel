@@ -211,7 +211,9 @@ record_bitrate_slider: widgets.Slider,
 scene_volume_level: widgets.AudioVolumeLevelHorizontal,
 
 scene_selector: widgets.Dropdown,
-add_scene_button: widgets.IconButton,
+// add_scene_button: widgets.IconButton,
+
+// add_scene_popup_state: enum { closed, open },
 
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),

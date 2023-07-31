@@ -95,7 +95,7 @@ pub fn ClusterArray(comptime Type: type, comptime capacity: usize, comptime clus
             var valid_count: usize = 0;
             for (self.clusters) |cluster| {
                 if (!cluster.isNull()) {
-                    valid_count += 1;
+                    valid_count += cluster.len;
                 }
             }
             return valid_count;

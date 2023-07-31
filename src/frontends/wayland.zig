@@ -253,6 +253,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.add_source_state = .closed;
     ui_state.video_source_mouse_event_count = 0;
     ui_state.sidebar_state = .closed;
+    // ui_state.add_scene_popup_state = .closed;
 
     initWaylandClient() catch return error.WaylandClientInitFail;
 
@@ -368,19 +369,16 @@ pub fn init(allocator: std.mem.Allocator) !void {
     }
 
     ui_state.scene_selector.init();
-    ui_state.scene_selector.model.labels[0] = "main scene";
-    ui_state.scene_selector.model.label_count = 1;
+    ui_state.scene_selector.background_color = RGBA.fromInt(57, 59, 63, 255);
+    ui_state.scene_selector.background_color_hovered = RGBA.fromInt(77, 79, 83, 255);
+    ui_state.scene_selector.accent_color = RGBA.fromInt(220, 220, 220, 255);
 
-    ui_state.scene_selector.background_color = RGBA.fromInt(128, 87, 35, 255);
-    ui_state.scene_selector.background_color_hovered = RGBA.fromInt(128, 127, 35, 255);
-    ui_state.scene_selector.accent_color = RGBA.fromInt(200, 87, 200, 255);
-
-    ui_state.add_scene_button.init();
-    ui_state.add_scene_button.on_hover_icon_color = RGBA.white;
-    ui_state.add_scene_button.background_color = RGBA.fromInt(36, 39, 47, 255);
-    ui_state.add_scene_button.icon_color = RGBA.fromInt(200, 200, 200, 255);
-    ui_state.add_scene_button.icon = .add_circle_24px;
-    ui_state.add_scene_button.on_hover_background_color = ui_state.add_scene_button.background_color;
+    // ui_state.add_scene_button.init();
+    // ui_state.add_scene_button.on_hover_icon_color = RGBA.white;
+    // ui_state.add_scene_button.background_color = RGBA.fromInt(36, 39, 47, 255);
+    // ui_state.add_scene_button.icon_color = RGBA.fromInt(200, 200, 200, 255);
+    // ui_state.add_scene_button.icon = .add_circle_24px;
+    // ui_state.add_scene_button.on_hover_background_color = ui_state.add_scene_button.background_color;
 
     //
     // TODO: Don't hardcode bin count
@@ -664,14 +662,16 @@ fn processWidgets(model: *const Model) !void {
         }
     }
 
-    {
-        const response = ui_state.add_scene_button.update();
-        if (response.clicked) {
-            std.log.info("Adding scene..", .{});
-        }
-        if (response.modified)
-            is_render_requested = true;
-    }
+    // {
+    //     const response = ui_state.add_scene_button.update();
+    //     if (response.clicked) {
+    //         std.log.info("Adding scene..", .{});
+    //         ui_state.add_scene_popup_state = .open;
+    //         is_draw_required = true;
+    //     }
+    //     if (response.modified)
+    //         is_render_requested = true;
+    // }
 }
 
 pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
@@ -684,6 +684,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         switch (core_update) {
             .video_source_added => is_draw_required = true,
             .source_provider_added => syncSourceProviders(model),
+            .scene_update => reloadSceneList(model),
         }
     }
 
@@ -867,6 +868,14 @@ fn syncSourceProviders(model: *const Model) void {
         ui_state.select_webcam_source_popup.label_buffer[source_index] = source.name;
     }
     ui_state.select_webcam_source_popup.label_count = @intCast(model.webcam_source_providers[0].sources.len);
+}
+
+pub fn reloadSceneList(model: *const Model) void {
+    const scene_count: usize = model.scene_clusters.len();
+    for (0..scene_count) |scene_i| {
+        ui_state.scene_selector.model.labels[scene_i] = model.scene_clusters.ptrFromIndex(scene_i).name;
+    }
+    ui_state.scene_selector.model.label_count = scene_count;
 }
 
 inline fn setCursorState(cursor_state: CursorState) void {

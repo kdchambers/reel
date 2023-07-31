@@ -35,6 +35,7 @@ const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig")
 pub const CoreUpdate = enum {
     video_source_added,
     source_provider_added,
+    scene_update,
 };
 
 pub const Request = enum(u8) {
@@ -249,7 +250,23 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         return error.OutOfMemory;
     };
 
-    model.addScene("default") catch unreachable;
+    //
+    // For now we're just hardcoding the available scenes and not supporting
+    // adding and removing scenes
+    //
+    model.addScene("main") catch unreachable;
+
+    model.addScene("aux 1") catch unreachable;
+    model.addScene("aux 2") catch unreachable;
+    model.addScene("aux 3") catch unreachable;
+    model.addScene("aux 4") catch unreachable;
+    // model.addScene("aux 5") catch unreachable;
+    // model.addScene("aux 6") catch unreachable;
+    // model.addScene("aux 7") catch unreachable;
+
+    update_encoder_mutex.lock();
+    update_encoder.write(.scene_update) catch unreachable;
+    update_encoder_mutex.unlock();
 }
 
 pub fn run() !void {
