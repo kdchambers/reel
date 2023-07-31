@@ -363,7 +363,7 @@ pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
     assert(@alignOf(Type) <= heap_alignment);
     const alignment_padding = comptime heap_alignment - @alignOf(Type);
     var dst_ptr: *Type = @ptrCast(@alignCast(&heap_memory[heap_index]));
-    dst_ptr = value.*;
+    dst_ptr.* = value.*;
     const result_index: usize = heap_index;
     heap_index += @sizeOf(Type) + alignment_padding;
     assert(heap_index % heap_alignment == 0);
