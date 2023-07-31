@@ -204,7 +204,8 @@ pub fn draw(
                 const remove_icon_width: f32 = 16.0 * screen_scale.horizontal;
                 const remove_icon_height: f32 = 16.0 * screen_scale.vertical;
                 const remove_button_margin_right: f32 = 20.0 * screen_scale.horizontal;
-                for (model.video_streams, 0..) |stream, i| {
+                for (0..model.video_stream_blocks.len()) |i| {
+                    const stream: *const Model.VideoStream = model.video_stream_blocks.ptrFromIndex(i);
                     const extent = Extent3D(f32){
                         .x = right_sidebar_region.left() + margin_right,
                         .y = header_bar_extent.y + (@as(f32, @floatFromInt(i + 1)) * item_height),
@@ -456,6 +457,31 @@ pub fn draw(
         }
     }
 
+    var scene_selector_region: Region = .{};
+    {
+        const scene_selector_height_pixels = 30;
+        scene_selector_region.width = 120 * screen_scale.horizontal;
+        scene_selector_region.height = scene_selector_height_pixels * screen_scale.vertical;
+        scene_selector_region.anchor.top = window.top;
+        scene_selector_region.margin.top = 10 * screen_scale.vertical;
+        scene_selector_region.anchor.right = right_sidebar_region.left();
+        scene_selector_region.margin.right = 10 * screen_scale.horizontal;
+
+        ui_state.scene_selector.draw(scene_selector_region.toExtent(), screen_scale);
+
+        // var add_scene_button_region: Region = .{};
+        // // NOTE: The pixel dimensions have to match the icon used by the button
+        // const button_size_pixels = 24;
+        // add_scene_button_region.anchor.right = scene_selector_region.left();
+        // add_scene_button_region.margin.right = 10 * screen_scale.horizontal;
+        // add_scene_button_region.anchor.top = scene_selector_region.top();
+        // add_scene_button_region.margin.top = @divExact(scene_selector_height_pixels - button_size_pixels, 2) * screen_scale.vertical;
+        // add_scene_button_region.width = button_size_pixels * screen_scale.horizontal;
+        // add_scene_button_region.height = button_size_pixels * screen_scale.vertical;
+
+        // ui_state.add_scene_button.draw(add_scene_button_region.placement(), 0.0, screen_scale);
+    }
+
     var preview_region: Region = .{};
     {
         const frame_dimensions: geometry.Dimensions2D(u32) = blk: {
@@ -472,7 +498,7 @@ pub fn draw(
         const margin_pixels: f32 = 10.0;
         const margin_horizontal: f32 = margin_pixels * screen_scale.horizontal;
 
-        const margin_top_pixels: f32 = if (have_horizontal_space) 20.0 else 50.0;
+        const margin_top_pixels: f32 = if (have_horizontal_space) 50.0 else 80.0;
         const margin_top: f32 = margin_top_pixels * screen_scale.vertical;
         const margin_bottom: f32 = 60.0 * screen_scale.vertical;
         const margin_vertical: f32 = margin_top + margin_bottom;
@@ -542,7 +568,7 @@ pub fn draw(
         scene_volume_bar_region.height = 30.0 * screen_scale.vertical;
         ui_state.scene_volume_level.draw(scene_volume_bar_region.toExtent(), screen_scale);
 
-        if (model.video_streams.len > 0) {
+        if (model.video_stream_blocks.len() > 0) {
             const canvas_dimensions_pixels: Dimensions2D(u32) = .{
                 .width = @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.width)) * scale)),
                 .height = @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.height)) * scale)),
@@ -586,4 +612,38 @@ pub fn draw(
             // }
         }
     }
+
+    // if (ui_state.add_scene_popup_state == .open) {
+    //     const popup_region = Region{
+    //         .z = ui_layer.high_lower,
+    //         .width = 500 * screen_scale.horizontal,
+    //         .height = 200 * screen_scale.vertical,
+    //         .anchor = .{
+    //             .left = -0.2,
+    //             .top = -0.2,
+    //         },
+    //     };
+    //     const popup_background_color = RGBA.fromInt(20, 20, 20, 255);
+    //     _ = renderer.drawQuad(popup_region.toExtent(), popup_background_color, .bottom_left);
+
+    //     const header_region = Region{
+    //         .z = ui_layer.high_lower,
+    //         .width = popup_region.width,
+    //         .height = 30 * screen_scale.vertical,
+    //         .anchor = .{
+    //             .left = popup_region.left(),
+    //             .top = popup_region.top(),
+    //         },
+    //     };
+    //     _ = renderer.drawQuad(header_region.toExtent(), RGBA.fromInt(50, 20, 20, 255), .bottom_left);
+    //     _ = renderer.drawText(
+    //         "Add Scene",
+    //         header_region.toExtent(),
+    //         screen_scale,
+    //         .medium,
+    //         .regular,
+    //         RGBA.fromInt(210, 210, 210, 255),
+    //         .center,
+    //     );
+    // }
 }

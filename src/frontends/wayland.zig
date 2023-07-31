@@ -48,7 +48,7 @@ const Coordinates3D = geometry.Coordinates3D;
 const ScaleFactor2D = geometry.ScaleFactor2D;
 const ui_layer = geometry.ui_layer;
 
-const mini_heap = @import("wayland/mini_heap.zig");
+const mini_heap = @import("../utils/mini_heap.zig");
 
 const event_system = @import("wayland/event_system.zig");
 const MouseEventEntry = event_system.MouseEventEntry;
@@ -253,6 +253,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
     ui_state.add_source_state = .closed;
     ui_state.video_source_mouse_event_count = 0;
     ui_state.sidebar_state = .closed;
+    // ui_state.add_scene_popup_state = .closed;
 
     initWaylandClient() catch return error.WaylandClientInitFail;
 
@@ -367,6 +368,18 @@ pub fn init(allocator: std.mem.Allocator) !void {
         entry.remove_icon.icon = .delete_16px;
     }
 
+    ui_state.scene_selector.init();
+    ui_state.scene_selector.background_color = RGBA.fromInt(57, 59, 63, 255);
+    ui_state.scene_selector.background_color_hovered = RGBA.fromInt(77, 79, 83, 255);
+    ui_state.scene_selector.accent_color = RGBA.fromInt(220, 220, 220, 255);
+
+    // ui_state.add_scene_button.init();
+    // ui_state.add_scene_button.on_hover_icon_color = RGBA.white;
+    // ui_state.add_scene_button.background_color = RGBA.fromInt(36, 39, 47, 255);
+    // ui_state.add_scene_button.icon_color = RGBA.fromInt(200, 200, 200, 255);
+    // ui_state.add_scene_button.icon = .add_circle_24px;
+    // ui_state.add_scene_button.on_hover_background_color = ui_state.add_scene_button.background_color;
+
     //
     // TODO: Don't hardcode bin count
     //
@@ -398,8 +411,8 @@ fn processWidgets(model: *const Model) !void {
             is_render_requested = true;
     }
 
-    if (model.audio_streams.len != 0) {
-        ui_state.scene_volume_level.update(model.audio_streams[0].volume_db, screen_scale);
+    if (model.audio_stream_blocks.len() != 0) {
+        ui_state.scene_volume_level.update(model.audio_stream_blocks.ptrFromIndex(0).volume_db, screen_scale);
     }
 
     {
@@ -425,7 +438,7 @@ fn processWidgets(model: *const Model) !void {
     }
 
     if (ui_state.sidebar_state == .open) {
-        const source_count = model.video_streams.len;
+        const source_count: usize = model.video_stream_blocks.len();
         const source_entries = ui_state.video_source_entry_buffer[0..source_count];
         for (source_entries, 0..) |*entry, i| {
             const entry_response = entry.remove_icon.update();
@@ -635,6 +648,30 @@ fn processWidgets(model: *const Model) !void {
         if (response.modified)
             is_render_requested = true;
     }
+
+    {
+        const response = ui_state.scene_selector.update();
+        if (response.visual_change) {
+            is_render_requested = true;
+        }
+        if (response.active_index) |index| {
+            ui_state.scene_selector.model.selected_index = index;
+        }
+        if (response.redraw) {
+            is_draw_required = true;
+        }
+    }
+
+    // {
+    //     const response = ui_state.add_scene_button.update();
+    //     if (response.clicked) {
+    //         std.log.info("Adding scene..", .{});
+    //         ui_state.add_scene_popup_state = .open;
+    //         is_draw_required = true;
+    //     }
+    //     if (response.modified)
+    //         is_render_requested = true;
+    // }
 }
 
 pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError!CoreRequestDecoder {
@@ -647,6 +684,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         switch (core_update) {
             .video_source_added => is_draw_required = true,
             .source_provider_added => syncSourceProviders(model),
+            .scene_update => reloadSceneList(model),
         }
     }
 
@@ -658,7 +696,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     if (have_drawn)
         try processWidgets(model);
 
-    if (model.video_streams.len != 0)
+    if (model.video_stream_blocks.len() != 0)
         is_render_requested = true;
 
     if (model.recording_context.state != last_recording_state) {
@@ -830,6 +868,14 @@ fn syncSourceProviders(model: *const Model) void {
         ui_state.select_webcam_source_popup.label_buffer[source_index] = source.name;
     }
     ui_state.select_webcam_source_popup.label_count = @intCast(model.webcam_source_providers[0].sources.len);
+}
+
+pub fn reloadSceneList(model: *const Model) void {
+    const scene_count: usize = model.scene_clusters.len();
+    for (0..scene_count) |scene_i| {
+        ui_state.scene_selector.model.labels[scene_i] = model.scene_clusters.ptrFromIndex(scene_i).name;
+    }
+    ui_state.scene_selector.model.label_count = scene_count;
 }
 
 inline fn setCursorState(cursor_state: CursorState) void {

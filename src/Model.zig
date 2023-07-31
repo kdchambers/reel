@@ -2,6 +2,7 @@
 // Copyright (c) 2023 Keith Chambers
 
 const std = @import("std");
+const assert = std.debug.assert;
 
 const geometry = @import("geometry.zig");
 const Dimensions2D = geometry.Dimensions2D;
@@ -13,6 +14,11 @@ const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 
 const utils = @import("utils.zig");
 const ThreadUtilMonitor = utils.ThreadUtilMonitor;
+
+const BlockIndex = utils.mem.BlockIndex;
+const ClusterIndex = utils.mem.ClusterIndex;
+const BlockStableArray = utils.mem.BlockStableArray;
+const ClusterArray = utils.mem.ClusterArray;
 
 pub const ImageFormat = enum {
     // bmp,
@@ -112,18 +118,187 @@ pub const AudioSourceProvider = struct {
     name: []const u8,
 };
 
+pub const Scene = struct {
+    const video_stream_count: usize = 16;
+    const audio_stream_count: usize = 16;
+
+    name: []const u8 = "",
+    video_streams: [video_stream_count]BlockIndex = [1]BlockIndex{BlockIndex.invalid} ** video_stream_count,
+    audio_streams: [audio_stream_count]BlockIndex = [1]BlockIndex{BlockIndex.invalid} ** audio_stream_count,
+
+    pub inline fn appendVideoStreamID(self: *@This(), stream_id: BlockIndex) !usize {
+        for (&self.video_streams, 0..) |*video_stream, stream_i| {
+            if (video_stream.isNull()) {
+                video_stream.* = stream_id;
+                return stream_i;
+            }
+        }
+        return error.VideoStreamLimitReached;
+    }
+
+    pub inline fn appendAudioStreamID(self: *@This(), stream_id: BlockIndex) !usize {
+        for (&self.audio_streams, 0..) |*audio_stream, stream_i| {
+            if (audio_stream.isNull()) {
+                audio_stream.* = stream_id;
+                return stream_i;
+            }
+        }
+        return error.AudioStreamLimitReached;
+    }
+
+    pub inline fn videoStreamCount(self: *@This()) usize {
+        assert(!self.isNull());
+        var valid_count: usize = 0;
+        for (self.video_streams) |video_stream| {
+            if (video_stream != BlockIndex.invalid) {
+                valid_count += 1;
+            }
+        }
+        return valid_count;
+    }
+
+    pub inline fn audioStreamCount(self: *@This()) usize {
+        assert(!self.isNull());
+        var valid_count: usize = 0;
+        for (self.audio_streams) |audio_stream| {
+            if (audio_stream != BlockIndex.invalid) {
+                valid_count += 1;
+            }
+        }
+        return valid_count;
+    }
+
+    pub inline fn isNull(self: *@This()) bool {
+        return self.name.len == 0;
+    }
+
+    pub inline fn setNull(self: *@This()) void {
+        self.name = "";
+        assert(self.isNull());
+    }
+};
+
+pub fn addScene(self: *@This(), name: []const u8) !void {
+    const scene: Scene = .{ .name = name };
+    _ = self.scene_clusters.add(&scene) catch |err| return err;
+}
+
+pub fn removeScene(self: *@This(), scene_index: u16) void {
+    //
+    // We also need to remove all associated streams
+    //
+    const scene_ptr = scenePtrFromIndex(scene_index);
+    for (scene_ptr.audio_streams) |*block_index| {
+        self.audio_stream_blocks.remove(block_index);
+        block_index = BlockIndex.invalid;
+    }
+    for (scene_ptr.video_streams) |*block_index| {
+        self.video_stream_blocks.remove(block_index);
+        block_index = BlockIndex.invalid;
+    }
+    self.scene_clusters.remove(scene_index);
+}
+
+pub inline fn activeScenePtr(self: *@This()) *Scene {
+    return self.scenePtrFromIndex(self.active_scene_index);
+}
+
+pub inline fn scenePtrFromIndex(self: *@This(), scene_index: usize) *Scene {
+    assert(scene_index < max_scene_count);
+    var local_index: usize = scene_index;
+    for (&self.scene_clusters.clusters) |*scene_cluster| {
+        if (local_index < scene_cluster.len) {
+            return scene_cluster.atPtr(local_index);
+        }
+        local_index -= scene_cluster.len;
+    }
+    unreachable;
+}
+
+pub fn audioStreamCount(self: *@This()) usize {
+    const active_scene_ptr: *Scene = self.activeScenePtr();
+    return active_scene_ptr.audioStreamCount();
+}
+
+pub fn audioStreamAt(self: *@This(), index: usize) *AudioStream {
+    const active_scene_ptr: *const Scene = self.activeScenePtr();
+    assert(active_scene_ptr.audio_streams[index] != BlockIndex.invalid);
+    return self.audio_stream_clusters.ptrFromIndex(active_scene_ptr.audio_streams[index]);
+}
+
+pub fn addVideoStream(self: *@This(), video_stream: *const VideoStream) !usize {
+    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const block_index = self.video_stream_blocks.add(video_stream) catch return error.VideoStreamLimitReached;
+    errdefer self.video_stream_blocks.remove(block_index);
+    return active_scene_ptr.appendVideoStreamID(block_index) catch return error.VideoStreamLimitReached;
+}
+
+/// Add audio stream to the current active scene
+/// audio_stream will be copied so does not need to be valid after this call
+pub fn addAudioStream(self: *@This(), audio_stream: *const AudioStream) !usize {
+    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const block_index = self.audio_stream_blocks.add(audio_stream) catch return error.AudioStreamLimitReached;
+    errdefer self.audio_stream_blocks.remove(block_index);
+    return active_scene_ptr.appendAudioStreamID(block_index) catch return error.AudioStreamLimitReached;
+}
+
+pub fn removeVideoStream(self: *@This(), stream_index: usize) void {
+    assert(stream_index < Scene.video_stream_count);
+    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const block_index: BlockIndex = active_scene_ptr.video_streams[stream_index];
+    assert(!block_index.isNull());
+    self.video_stream_blocks.remove(block_index);
+}
+
+pub fn removeAudioStream(self: *@This(), stream_index: usize) void {
+    assert(stream_index < Scene.audio_stream_count);
+    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const block_index: BlockIndex = active_scene_ptr.audio_streams[stream_index];
+    assert(block_index != BlockIndex.invalid);
+    self.audio_stream_blocks.remove(block_index);
+}
+
+pub inline fn switchScene(self: *@This(), scene_index: usize) void {
+    self.active_scene_index = scene_index;
+}
+
+const max_video_stream_per_scene_count = 16;
+const max_audio_stream_per_scene_count = 16;
+
+const scene_video_steam_cluster_capacity = 4;
+const scene_audio_steam_cluster_capacity = 4;
+
+const scene_video_stream_cluster_count = @divExact(max_video_stream_per_scene_count, scene_video_steam_cluster_capacity);
+const scene_audio_stream_cluster_count = @divExact(max_audio_stream_per_scene_count, scene_audio_steam_cluster_capacity);
+
+const max_scene_count = 32;
+const max_video_stream_count = 32;
+const max_audio_stream_count = 32;
+
+const audio_stream_block_capacity = 4;
+const video_stream_block_capacity = 4;
+
+const video_stream_block_count = @divExact(max_video_stream_count, video_stream_block_capacity);
+const audio_stream_block_count = @divExact(max_audio_stream_count, audio_stream_block_capacity);
+
+const scene_cluster_capacity = 8;
+const scene_cluster_count = @divExact(max_scene_count, scene_cluster_capacity);
+
 //
 // This defines all state that is relevant to the user interface
 //
+
+scene_clusters: ClusterArray(Scene, scene_cluster_count, scene_cluster_capacity) = .{},
+audio_stream_blocks: BlockStableArray(AudioStream, audio_stream_block_count, audio_stream_block_capacity) = .{},
+video_stream_blocks: BlockStableArray(VideoStream, video_stream_block_count, video_stream_block_capacity) = .{},
+
+active_scene_index: usize = 0,
 
 video_source_providers: []VideoSourceProvider,
 webcam_source_providers: []WebcamSourceProvider,
 audio_source_providers: []AudioSourceProvider,
 
 canvas_dimensions: Dimensions2D(u32),
-
-audio_streams: []AudioStream,
-video_streams: []VideoStream,
 
 recording_context: RecordingContext,
 screenshot_format: ImageFormat,

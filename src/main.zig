@@ -39,5 +39,5 @@ comptime {
 
 test {
     _ = @import("utils.zig");
-    _ = @import("frontends/wayland/mini_heap.zig");
+    _ = @import("utils/mini_heap.zig");
 }

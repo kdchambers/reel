@@ -9,7 +9,7 @@ const Model = @import("../../Model.zig");
 const VideoFormat = Model.VideoFormat;
 const ImageFormat = Model.ImageFormat;
 
-const mini_heap = @import("mini_heap.zig");
+const mini_heap = @import("../../utils/mini_heap.zig");
 const Index = mini_heap.Index;
 
 const event_system = @import("event_system.zig");
@@ -209,6 +209,11 @@ record_quality_selector: widgets.Selector,
 record_bitrate_slider: widgets.Slider,
 
 scene_volume_level: widgets.AudioVolumeLevelHorizontal,
+
+scene_selector: widgets.Dropdown,
+// add_scene_button: widgets.IconButton,
+
+// add_scene_popup_state: enum { closed, open },
 
 video_source_mouse_edge_buffer: [2]EdgeRegions,
 video_source_mouse_event_buffer: [2]Index(MouseEventEntry),

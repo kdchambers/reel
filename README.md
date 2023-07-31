@@ -7,7 +7,7 @@
 
 #### ⚠️ **Early development warning** ⚠️
 
-A MPV release is targetted for early July. However, if you're interested in this project now you can checkout one of the following.
+If you're interested in this project now you can checkout one of the following.
 
 - [frequently asked questions](./doc/FAQ.md)
 - [design document](doc/DESIGN.md)
@@ -27,7 +27,7 @@ First install the required dependencies for your distribution.
 
 - [Fedora](doc/BUILD.md#Fedora)
 
-To build, you'll need a master build of the zig compiler. The latest verified version is **0.11.0-dev.3910**, but if out of date will be updated soon.
+To build, you'll need a master build of the zig compiler. The latest verified version is **0.11.0-dev.4059**, but if out of date will be updated soon.
 
 ```sh
 git clone https://github.com/kdchambers/reel --recursive
