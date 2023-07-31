@@ -94,15 +94,22 @@ pub fn ClusterArray(comptime Type: type, comptime capacity: usize, comptime clus
         pub fn len(self: *const @This()) usize {
             var valid_count: usize = 0;
             for (self.clusters) |cluster| {
-                if (cluster != Cluster(Type).invalid) {
+                if (!cluster.isNull()) {
                     valid_count += 1;
                 }
             }
             return valid_count;
         }
 
-        pub fn ptrAt(self: *@This()) *Type {
-            _ = self;
+        pub fn ptrFromIndex(self: @This(), index: usize) *const Type {
+            var local_index: usize = index;
+            for (self.clusters) |cluster| {
+                if (local_index < cluster.len) {
+                    return cluster.ptrFromIndex(local_index);
+                }
+                local_index -= cluster.len;
+            }
+            unreachable;
         }
 
         pub fn add(self: *@This(), value: *const Type) !ClusterIndex {

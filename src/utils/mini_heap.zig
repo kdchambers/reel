@@ -229,7 +229,7 @@ pub fn Cluster(comptime Type: type) type {
             self.base_index = Index(Type).invalid;
         }
 
-        pub inline fn isNull(self: *@This()) bool {
+        pub inline fn isNull(self: @This()) bool {
             return self.base_index.index == Index(Type).invalid.index;
         }
 
@@ -253,8 +253,11 @@ pub fn Cluster(comptime Type: type) type {
         }
 
         pub inline fn write(self: *@This(), value: *const Type) Index(Type) {
-            // TODO: Is memcpy faster?
-            @as(*Type, @ptrCast(@alignCast(&heap_memory[self.base_index.index + (@sizeOf(Type) * self.len)]))).* = value.*;
+            const dst_local_index: usize = @intCast(self.len);
+            const dst_local_offset: usize = @sizeOf(Type) * dst_local_index;
+            const dst_offset: usize = self.base_index.index + dst_local_offset;
+            var dst_ptr: *Type = @ptrCast(@alignCast(&heap_memory[dst_offset]));
+            dst_ptr.* = value.*;
             const index: u16 = self.base_index.index + self.len;
             self.len += 1;
             return .{ .index = index };
@@ -265,6 +268,19 @@ pub fn Cluster(comptime Type: type) type {
         }
 
         pub inline fn atPtr(self: @This(), index: usize) *Type {
+            const misalignment = (self.base_index.index + (index * @sizeOf(Type))) % alignment;
+            if (misalignment != 0) {
+                std.log.err("Base index: {d} Type: {s}, alignment: {d}, index: {d} is misaligned", .{
+                    self.base_index.index,
+                    @typeName(Type),
+                    alignment,
+                    index,
+                });
+            }
+            return @ptrCast(@alignCast(&heap_memory[self.base_index.index + (index * @sizeOf(Type))]));
+        }
+
+        pub inline fn ptrFromIndex(self: @This(), index: usize) *const Type {
             const misalignment = (self.base_index.index + (index * @sizeOf(Type))) % alignment;
             if (misalignment != 0) {
                 std.log.err("Base index: {d} Type: {s}, alignment: {d}, index: {d} is misaligned", .{
@@ -346,7 +362,8 @@ pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
     assert(heap_index % heap_alignment == 0);
     assert(@alignOf(Type) <= heap_alignment);
     const alignment_padding = comptime heap_alignment - @alignOf(Type);
-    @as(*Type, @ptrCast(@alignCast(&heap_memory[heap_index]))).* = value.*;
+    var dst_ptr: *Type = @ptrCast(@alignCast(&heap_memory[heap_index]));
+    dst_ptr = value.*;
     const result_index: usize = heap_index;
     heap_index += @sizeOf(Type) + alignment_padding;
     assert(heap_index % heap_alignment == 0);
