@@ -14,6 +14,11 @@ pub const BlockIndex = packed struct(u32) {
         return self.block_i == std.math.maxInt(u16) and self.item_i == std.math.maxInt(u16);
     }
 
+    pub inline fn setNull(self: *@This()) void {
+        self.block_i = std.math.maxInt(u16);
+        self.item_i = std.math.maxInt(u16);
+    }
+
     pub const invalid = @This(){
         .block_i = std.math.maxInt(u16),
         .item_i = std.math.maxInt(u16),
@@ -32,12 +37,12 @@ pub fn BlockStableArray(comptime Type: type, comptime capacity: usize, comptime 
             return count;
         }
 
-        pub fn ptrMutableFromIndex(self: *@This(), index: usize) *Type {
+        pub fn ptrMutFromIndex(self: *@This(), index: usize) *Type {
             assert(index < self.len());
             var local_index: usize = index;
             inline for (self.blocks) |block| {
                 if (local_index < block.len) {
-                    return block.ptrMutableFromIndex(@intCast(local_index));
+                    return block.ptrMutFromIndex(@intCast(local_index));
                 }
                 local_index -= block.len;
             }

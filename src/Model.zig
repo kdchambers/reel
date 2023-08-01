@@ -136,6 +136,16 @@ pub const Scene = struct {
         return error.VideoStreamLimitReached;
     }
 
+    pub inline fn removeVideoStream(self: *@This(), index: usize) void {
+        assert(!self.video_streams[index].isNull());
+        self.video_streams[index].setNull();
+    }
+
+    pub inline fn removeAudioStream(self: *@This(), index: usize) void {
+        assert(!self.audio_streams[index].isNull());
+        self.audio_streams[index].setNull();
+    }
+
     pub inline fn appendAudioStreamID(self: *@This(), stream_id: BlockIndex) !usize {
         for (&self.audio_streams, 0..) |*audio_stream, stream_i| {
             if (audio_stream.isNull()) {
@@ -146,18 +156,18 @@ pub const Scene = struct {
         return error.AudioStreamLimitReached;
     }
 
-    pub inline fn videoStreamCount(self: *@This()) usize {
+    pub inline fn videoStreamCount(self: @This()) usize {
         assert(!self.isNull());
         var valid_count: usize = 0;
         for (self.video_streams) |video_stream| {
-            if (video_stream != BlockIndex.invalid) {
+            if (!video_stream.isNull()) {
                 valid_count += 1;
             }
         }
         return valid_count;
     }
 
-    pub inline fn audioStreamCount(self: *@This()) usize {
+    pub inline fn audioStreamCount(self: @This()) usize {
         assert(!self.isNull());
         var valid_count: usize = 0;
         for (self.audio_streams) |audio_stream| {
@@ -168,7 +178,7 @@ pub const Scene = struct {
         return valid_count;
     }
 
-    pub inline fn isNull(self: *@This()) bool {
+    pub inline fn isNull(self: @This()) bool {
         return self.name.len == 0;
     }
 
@@ -199,11 +209,15 @@ pub fn removeScene(self: *@This(), scene_index: u16) void {
     self.scene_clusters.remove(scene_index);
 }
 
-pub inline fn activeScenePtr(self: *@This()) *Scene {
+pub inline fn activeScenePtr(self: @This()) *const Scene {
     return self.scenePtrFromIndex(self.active_scene_index);
 }
 
-pub inline fn scenePtrFromIndex(self: *@This(), scene_index: usize) *Scene {
+pub inline fn activeScenePtrMut(self: @This()) *Scene {
+    return self.scenePtrMutFromIndex(self.active_scene_index);
+}
+
+pub inline fn scenePtrMutFromIndex(self: @This(), scene_index: usize) *Scene {
     assert(scene_index < max_scene_count);
     var local_index: usize = scene_index;
     for (&self.scene_clusters.clusters) |*scene_cluster| {
@@ -215,8 +229,28 @@ pub inline fn scenePtrFromIndex(self: *@This(), scene_index: usize) *Scene {
     unreachable;
 }
 
+pub inline fn scenePtrFromIndex(self: @This(), scene_index: usize) *const Scene {
+    assert(scene_index < max_scene_count);
+    var local_index: usize = scene_index;
+    for (&self.scene_clusters.clusters) |*scene_cluster| {
+        if (local_index < scene_cluster.len) {
+            return scene_cluster.atPtr(local_index);
+        }
+        local_index -= scene_cluster.len;
+    }
+    unreachable;
+}
+
+pub inline fn videoStreamPtrFromBlockIndex(self: @This(), block_index: BlockIndex) *const VideoStream {
+    return self.video_stream_blocks.blocks[block_index.block_i].ptrFromIndex(block_index.item_i);
+}
+
+pub inline fn videoStreamPtrMutFromBlockIndex(self: *@This(), block_index: BlockIndex) *VideoStream {
+    return self.video_stream_blocks.blocks[block_index.block_i].ptrMutFromIndex(block_index.item_i);
+}
+
 pub fn audioStreamCount(self: *@This()) usize {
-    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const active_scene_ptr: *const Scene = self.activeScenePtr();
     return active_scene_ptr.audioStreamCount();
 }
 
@@ -227,7 +261,7 @@ pub fn audioStreamAt(self: *@This(), index: usize) *AudioStream {
 }
 
 pub fn addVideoStream(self: *@This(), video_stream: *const VideoStream) !usize {
-    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const active_scene_ptr: *Scene = self.activeScenePtrMut();
     const block_index = self.video_stream_blocks.add(video_stream) catch return error.VideoStreamLimitReached;
     errdefer self.video_stream_blocks.remove(block_index);
     return active_scene_ptr.appendVideoStreamID(block_index) catch return error.VideoStreamLimitReached;
@@ -236,7 +270,7 @@ pub fn addVideoStream(self: *@This(), video_stream: *const VideoStream) !usize {
 /// Add audio stream to the current active scene
 /// audio_stream will be copied so does not need to be valid after this call
 pub fn addAudioStream(self: *@This(), audio_stream: *const AudioStream) !usize {
-    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const active_scene_ptr: *Scene = self.activeScenePtrMut();
     const block_index = self.audio_stream_blocks.add(audio_stream) catch return error.AudioStreamLimitReached;
     errdefer self.audio_stream_blocks.remove(block_index);
     return active_scene_ptr.appendAudioStreamID(block_index) catch return error.AudioStreamLimitReached;
@@ -244,18 +278,20 @@ pub fn addAudioStream(self: *@This(), audio_stream: *const AudioStream) !usize {
 
 pub fn removeVideoStream(self: *@This(), stream_index: usize) void {
     assert(stream_index < Scene.video_stream_count);
-    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const active_scene_ptr: *Scene = self.activeScenePtrMut();
     const block_index: BlockIndex = active_scene_ptr.video_streams[stream_index];
     assert(!block_index.isNull());
     self.video_stream_blocks.remove(block_index);
+    active_scene_ptr.removeVideoStream(stream_index);
 }
 
 pub fn removeAudioStream(self: *@This(), stream_index: usize) void {
     assert(stream_index < Scene.audio_stream_count);
-    const active_scene_ptr: *Scene = self.activeScenePtr();
+    const active_scene_ptr: *Scene = self.activeScenePtrMut();
     const block_index: BlockIndex = active_scene_ptr.audio_streams[stream_index];
     assert(block_index != BlockIndex.invalid);
     self.audio_stream_blocks.remove(block_index);
+    active_scene_ptr.removeAudioStream(stream_index);
 }
 
 pub inline fn switchScene(self: *@This(), scene_index: usize) void {

@@ -71,6 +71,9 @@ pub fn draw(
 ) !void {
     const window = ui_state.window_region;
 
+    const active_scene_ptr = model.activeScenePtr();
+    const video_stream_count = active_scene_ptr.videoStreamCount();
+
     const have_horizontal_space: bool = (ui_root.screen_dimensions.width >= 1200);
     if (have_horizontal_space)
         ui_state.sidebar_state = .open;
@@ -204,8 +207,10 @@ pub fn draw(
                 const remove_icon_width: f32 = 16.0 * screen_scale.horizontal;
                 const remove_icon_height: f32 = 16.0 * screen_scale.vertical;
                 const remove_button_margin_right: f32 = 20.0 * screen_scale.horizontal;
-                for (0..model.video_stream_blocks.len()) |i| {
-                    const stream: *const Model.VideoStream = model.video_stream_blocks.ptrFromIndex(i);
+
+                for (0..video_stream_count) |i| {
+                    const stream_block_index = active_scene_ptr.video_streams[i];
+                    const stream: *const Model.VideoStream = model.videoStreamPtrFromBlockIndex(stream_block_index);
                     const extent = Extent3D(f32){
                         .x = right_sidebar_region.left() + margin_right,
                         .y = header_bar_extent.y + (@as(f32, @floatFromInt(i + 1)) * item_height),
@@ -568,7 +573,7 @@ pub fn draw(
         scene_volume_bar_region.height = 30.0 * screen_scale.vertical;
         ui_state.scene_volume_level.draw(scene_volume_bar_region.toExtent(), screen_scale);
 
-        if (model.video_stream_blocks.len() > 0) {
+        if (video_stream_count > 0) {
             const canvas_dimensions_pixels: Dimensions2D(u32) = .{
                 .width = @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.width)) * scale)),
                 .height = @intFromFloat(@floor(@as(f32, @floatFromInt(frame_dimensions.height)) * scale)),

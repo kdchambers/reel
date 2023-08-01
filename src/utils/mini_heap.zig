@@ -182,7 +182,7 @@ pub fn BlockStable(comptime Type: type) type {
             return @as([*]Type, @ptrCast(@alignCast(&heap_memory[self.base_index.index])))[index];
         }
 
-        pub inline fn ptrMutableFromIndex(self: @This(), index: usize) *Type {
+        pub inline fn ptrMutFromIndex(self: @This(), index: usize) *Type {
             var set_bits_count: usize = 0;
             assert(self.capacity > 0);
             for (0..self.capacity) |i| {
@@ -198,7 +198,7 @@ pub fn BlockStable(comptime Type: type) type {
         }
 
         pub inline fn ptrFromIndex(self: @This(), index: usize) *const Type {
-            return @ptrCast(self.ptrMutableFromIndex(index));
+            return @ptrCast(self.ptrMutFromIndex(index));
         }
 
         pub inline fn ptrIndexFromIndex(self: @This(), index: u16) Index(Type) {
