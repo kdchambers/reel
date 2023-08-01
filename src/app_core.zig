@@ -33,9 +33,16 @@ var audio_source_interface: audio_source.Interface = undefined;
 const wayland_core = if (build_options.have_wayland) @import("wayland_core.zig") else void;
 
 pub const CoreUpdate = enum {
-    video_source_added,
-    source_provider_added,
-    scene_update,
+    /// A video source was added or removed
+    video_source_list_modified,
+    /// A source provider was added or removed
+    source_provider_list_modified,
+    /// The list of available scenes has been changed. E.g A scene
+    /// was added or removed
+    scene_list_modified,
+    /// The current active scene has been changed. This means new audio
+    /// and video streams need to be displayed
+    scene_active_changed,
 };
 
 pub const Request = enum(u8) {
@@ -47,6 +54,8 @@ pub const Request = enum(u8) {
     record_stop,
     record_quality_set,
     record_format_set,
+
+    scene_set_active,
 
     stream_start,
 
@@ -223,7 +232,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
         model.webcam_source_providers = webcam_source_provider_buffer[0 .. webcam_source_provider_count + 1];
 
         update_encoder_mutex.lock();
-        update_encoder.write(.source_provider_added) catch unreachable;
+        update_encoder.write(.source_provider_list_modified) catch unreachable;
         update_encoder_mutex.unlock();
 
         break :blk true;
@@ -265,7 +274,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
     // model.addScene("aux 7") catch unreachable;
 
     update_encoder_mutex.lock();
-    update_encoder.write(.scene_update) catch unreachable;
+    update_encoder.write(.scene_list_modified) catch unreachable;
     update_encoder_mutex.unlock();
 }
 
@@ -346,21 +355,23 @@ pub fn run() !void {
                         screencapture_source_handle,
                     });
 
+                    renderer.removeStream(renderer_stream_handle);
+
                     switch (model.video_stream_blocks.ptrFromIndex(stream_index).provider_ref.kind) {
                         .webcam => video4linux.close(),
                         .screen_capture => screencapture_interface.streamClose(screencapture_source_handle),
                     }
 
-                    renderer.removeStream(renderer_stream_handle);
                     const video_stream_count: usize = model.video_stream_blocks.len();
                     assert(video_stream_count > 0);
 
-                    model.removeVideoStream(stream_index);
+                    var active_scene_ptr = model.activeScenePtrMut();
+                    active_scene_ptr.removeVideoStream(stream_index);
 
                     model_mutex.unlock();
 
                     update_encoder_mutex.lock();
-                    update_encoder.write(.video_source_added) catch unreachable;
+                    update_encoder.write(.video_source_list_modified) catch unreachable;
                     update_encoder_mutex.unlock();
                 },
                 .screencapture_request_source => {
@@ -490,15 +501,28 @@ pub fn run() !void {
                     renderer.writeStreamFrame(renderer_handle, pixel_byte_buffer) catch unreachable;
 
                     update_encoder_mutex.lock();
-                    update_encoder.write(.video_source_added) catch unreachable;
+                    update_encoder.write(.video_source_list_modified) catch unreachable;
+                    update_encoder_mutex.unlock();
+                },
+                .scene_set_active => {
+                    const scene_index = request_buffer.readInt(u16) catch blk: {
+                        std.log.err("scene_index not set for scene_set_active command", .{});
+                        break :blk 0;
+                    };
+                    model.switchScene(scene_index);
+                    update_encoder_mutex.lock();
+                    update_encoder.write(.scene_active_changed) catch unreachable;
                     update_encoder_mutex.unlock();
                 },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
 
-        for (0..model.video_stream_blocks.len()) |i| {
-            var stream: *Model.VideoStream = model.video_stream_blocks.ptrMutableFromIndex(i);
+        var active_scene_ptr = model.activeScenePtr();
+        const video_stream_count: usize = active_scene_ptr.videoStreamCount();
+        for (0..video_stream_count) |i| {
+            const stream_block_index = active_scene_ptr.video_streams[i];
+            var stream: *Model.VideoStream = model.videoStreamPtrMutFromBlockIndex(stream_block_index);
             if (stream.provider_ref.kind == .webcam) {
                 assert(stream.source_handle == 0);
                 var pixel_buffer_ref = webcam_pixel_buffer[stream.source_handle];
@@ -540,7 +564,7 @@ pub fn run() !void {
 pub fn deinit() void {
     audio_source_interface.deinit();
     for (0..model.audio_stream_blocks.len()) |i| {
-        model.audio_stream_blocks.ptrMutableFromIndex(i).sample_buffer.deinit(gpa);
+        model.audio_stream_blocks.ptrMutFromIndex(i).sample_buffer.deinit(gpa);
     }
 
     screencapture_interface.deinit();
@@ -566,7 +590,7 @@ fn onFrameReadyCallback(stream_handle: screencapture.StreamHandle, width: u32, h
         screencapture_start = std.time.nanoTimestamp();
 
     for (0..model.video_stream_blocks.len()) |i| {
-        var stream: *Model.VideoStream = model.video_stream_blocks.ptrMutableFromIndex(i);
+        var stream: *Model.VideoStream = model.video_stream_blocks.ptrMutFromIndex(i);
         if (stream.provider_ref.kind == .screen_capture and stream.source_handle == stream_handle) {
             const pixel_count: usize = width * height;
             stream.pixels = pixels[0..pixel_count];
@@ -607,7 +631,7 @@ pub fn onAudioSamplesReady(stream: audio_source.StreamHandle, pcm_buffer: []i16)
         //
         // TODO
         //
-        const audio_stream_ptr: *Model.AudioStream = model.audio_stream_blocks.ptrMutableFromIndex(0);
+        const audio_stream_ptr: *Model.AudioStream = model.audio_stream_blocks.ptrMutFromIndex(0);
         audio_stream_ptr.sample_buffer.appendOverwrite(pcm_buffer);
         const power_spectrum = audio_utils.samplesToPowerSpectrum(pcm_buffer);
         audio_stream_ptr.volume_db = audio_utils.powerSpectrumToVolumeDb(power_spectrum);
@@ -622,7 +646,7 @@ fn handleAudioSourceInitSuccess() void {
     model.audio_source_providers = audio_source_provider_buffer[0..1];
     assert(model.audio_source_providers.len == 1);
     update_encoder_mutex.lock();
-    update_encoder.write(.source_provider_added) catch unreachable;
+    update_encoder.write(.source_provider_list_modified) catch unreachable;
     update_encoder_mutex.unlock();
     audio_source_interface.listSources(gpa, handleSourceListReady);
 }
@@ -889,7 +913,7 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     };
 
     update_encoder_mutex.lock();
-    update_encoder.write(.video_source_added) catch unreachable;
+    update_encoder.write(.video_source_list_modified) catch unreachable;
     update_encoder_mutex.unlock();
 }
 

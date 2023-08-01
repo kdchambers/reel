@@ -654,8 +654,9 @@ fn processWidgets(model: *const Model) !void {
         if (response.visual_change) {
             is_render_requested = true;
         }
-        if (response.active_index) |index| {
-            ui_state.scene_selector.model.selected_index = index;
+        if (response.active_index) |scene_index| {
+            request_encoder.write(.scene_set_active) catch unreachable;
+            request_encoder.writeInt(u16, scene_index) catch unreachable;
         }
         if (response.redraw) {
             is_draw_required = true;
@@ -682,9 +683,9 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
 
     while (core_updates.next()) |core_update| {
         switch (core_update) {
-            .video_source_added => is_draw_required = true,
-            .source_provider_added => syncSourceProviders(model),
-            .scene_update => reloadSceneList(model),
+            .video_source_list_modified, .scene_active_changed => is_draw_required = true,
+            .source_provider_list_modified => syncSourceProviders(model),
+            .scene_list_modified => reloadSceneList(model),
         }
     }
 
