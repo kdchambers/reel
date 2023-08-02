@@ -438,8 +438,9 @@ fn processWidgets(model: *const Model) !void {
     }
 
     if (ui_state.sidebar_state == .open) {
-        const source_count: usize = model.video_stream_blocks.len();
-        const source_entries = ui_state.video_source_entry_buffer[0..source_count];
+        const active_scene_ptr = model.activeScenePtr();
+        const video_stream_count: usize = active_scene_ptr.videoStreamCount();
+        const source_entries = ui_state.video_source_entry_buffer[0..video_stream_count];
         for (source_entries, 0..) |*entry, i| {
             const entry_response = entry.remove_icon.update();
             if (entry_response.clicked) {

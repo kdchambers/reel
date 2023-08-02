@@ -223,6 +223,8 @@ pub fn open(
         libav.AV_PIX_FMT_RGBA,
         1,
     );
+
+    opened_stream_count += 1;
 }
 
 pub fn dimensions() geometry.Dimensions2D(u32) {
@@ -336,6 +338,7 @@ pub fn getFrame(
 
 pub fn close() void {
     assert(initialized);
+    assert(opened_stream_count > 0);
     libav.av_packet_unref(packet);
     libav.av_freep(@as(*anyopaque, @ptrCast(&converted_frame.?.data[0])));
     libav.av_frame_free(&video_frame);
@@ -346,6 +349,8 @@ pub fn close() void {
     libav.avformat_close_input(
         @as([*c][*c]av.FormatContext, @ptrCast(&format_context)),
     );
+
+    opened_stream_count -= 1;
 }
 
 pub fn deinit(allocator: std.mem.Allocator) void {
