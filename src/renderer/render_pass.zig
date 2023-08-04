@@ -53,33 +53,42 @@ pub fn init(
 }
 
 pub fn requiredMemoryTypeIndices() !u64 {
-    antialias_sample_count = blk: {
-        const physical_device_properties = vulkan_core.instance_dispatch.getPhysicalDeviceProperties(vulkan_core.physical_device);
-        const sample_counts = physical_device_properties.limits.framebuffer_color_sample_counts;
 
-        //
-        // Choose the highest sample rate from 16 bit
-        // Ignore 32 and 64 bit options
-        //
+    //
+    // Multisample buffer is disabled as it's been causing the swapchain re-creation
+    // to be very slow, and it doesn't even seem to improve visual quality. Code for it
+    // may be removed from the repo later on
+    //
+    have_multisample = false;
+    antialias_sample_count = .{ .@"1_bit" = true };
 
-        have_multisample = true;
+    // antialias_sample_count = blk: {
+    //     const physical_device_properties = vulkan_core.instance_dispatch.getPhysicalDeviceProperties(vulkan_core.physical_device);
+    //     const sample_counts = physical_device_properties.limits.framebuffer_color_sample_counts;
 
-        if (sample_counts.@"16_bit")
-            break :blk .{ .@"16_bit" = true };
+    //     //
+    //     // Choose the highest sample rate from 16 bit
+    //     // Ignore 32 and 64 bit options
+    //     //
 
-        if (sample_counts.@"8_bit")
-            break :blk .{ .@"8_bit" = true };
+    //     have_multisample = true;
 
-        if (sample_counts.@"4_bit")
-            break :blk .{ .@"4_bit" = true };
+    //     if (sample_counts.@"16_bit")
+    //         break :blk .{ .@"16_bit" = true };
 
-        if (sample_counts.@"2_bit")
-            break :blk .{ .@"2_bit" = true };
+    //     if (sample_counts.@"8_bit")
+    //         break :blk .{ .@"8_bit" = true };
 
-        have_multisample = false;
+    //     if (sample_counts.@"4_bit")
+    //         break :blk .{ .@"4_bit" = true };
 
-        break :blk .{ .@"1_bit" = true };
-    };
+    //     if (sample_counts.@"2_bit")
+    //         break :blk .{ .@"2_bit" = true };
+
+    //     have_multisample = false;
+
+    //     break :blk .{ .@"1_bit" = true };
+    // };
 
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
