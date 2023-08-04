@@ -55,7 +55,7 @@ pub fn Profiler(comptime profile_enabled: bool, comptime Action: type) type {
             });
             for (self.entry_buffer[0..self.entry_count], 0..) |entry, i| {
                 if (entry.parent == root_index)
-                    self.log(@as(u16, @intCast(i)), indent + 1, threshold_us);
+                    self.log(@as(u16, @intCast(i)), indent + 1, 0);
             }
         }
 
