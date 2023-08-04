@@ -398,8 +398,6 @@ pub fn overwriteText(
         .width = pixel_dimensions.width * screen_scale.horizontal,
         .height = pixel_dimensions.height * screen_scale.vertical,
     };
-    assert(extent.width >= dimensions.width);
-    assert(extent.height >= dimensions.height);
     const horizontal_free_space = extent.width - dimensions.width;
     const vertical_free_space = extent.height - dimensions.height;
 

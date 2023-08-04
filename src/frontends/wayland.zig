@@ -690,27 +690,6 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
         }
     }
 
-    if (ui_state.close_app_button.update().clicked) {
-        request_encoder.write(.core_shutdown) catch unreachable;
-        return request_encoder.decoder();
-    }
-
-    if (have_drawn)
-        try processWidgets(model);
-
-    if (model.video_stream_blocks.len() != 0)
-        is_render_requested = true;
-
-    if (model.recording_context.state != last_recording_state) {
-        last_recording_state = model.recording_context.state;
-        is_draw_required = true;
-    }
-
-    if (is_shutdown_requested) {
-        request_encoder.write(.core_shutdown) catch unreachable;
-        return request_encoder.decoder();
-    }
-
     if (framebuffer_resized) {
         framebuffer_resized = false;
         renderer.resizeSwapchain(screen_dimensions) catch |err| {
@@ -741,6 +720,27 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     }
     _ = profiler.pop(.mouse_input);
     mouse_input_timer.durationLog("Mouse input");
+
+    if (ui_state.close_app_button.update().clicked) {
+        request_encoder.write(.core_shutdown) catch unreachable;
+        return request_encoder.decoder();
+    }
+
+    if (have_drawn)
+        try processWidgets(model);
+
+    if (model.video_stream_blocks.len() != 0)
+        is_render_requested = true;
+
+    if (model.recording_context.state != last_recording_state) {
+        last_recording_state = model.recording_context.state;
+        is_draw_required = true;
+    }
+
+    if (is_shutdown_requested) {
+        request_encoder.write(.core_shutdown) catch unreachable;
+        return request_encoder.decoder();
+    }
 
     if (is_draw_required) {
         _ = profiler.push(.draw);
@@ -826,7 +826,7 @@ pub fn update(model: *const Model, core_updates: *CoreUpdateDecoder) UpdateError
     event_system.mouse_click_coordinates = null;
     profiler.pop(.frontend_update);
 
-    profiler.log(0, 0, std.time.us_per_ms * 1);
+    profiler.log(0, 0, std.time.us_per_ms * 10);
 
     return request_encoder.decoder();
 }

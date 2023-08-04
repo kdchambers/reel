@@ -105,8 +105,8 @@ pub fn draw(
             .x = 0.8,
             .y = 0.8,
             .z = ui_layer.middle,
-            .width = 0.1,
-            .height = 0.1,
+            .width = @max(0.1, 100 * screen_scale.horizontal),
+            .height = 30 * screen_scale.vertical,
         };
         cpu_vertex_range = renderer.reserveTextBuffer(6);
         renderer.overwriteText(cpu_vertex_range, usage_string, cpu_usage_extent, screen_scale, .small, .regular, RGBA.white, .center);
