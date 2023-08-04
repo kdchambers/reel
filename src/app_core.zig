@@ -24,7 +24,6 @@ const AudioSampleRingBuffer = @import("AudioSampleRingBuffer.zig");
 const ThreadUtilMonitor = utils.ThreadUtilMonitor;
 const audio_utils = @import("frontends/wayland/audio.zig");
 
-// TODO: Audit, doesn't renderer belong here?
 const renderer = @import("renderer.zig");
 
 const audio_source = @import("audio_source.zig");
@@ -279,7 +278,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) InitError!void {
 }
 
 pub fn run() !void {
-    const input_fps = 60;
+    const input_fps = 60 * 3;
     const ns_per_frame: u64 = @divFloor(std.time.ns_per_s, input_fps);
 
     _ = model.thread_util.update() catch {
@@ -299,7 +298,7 @@ pub fn run() !void {
         // Update once per second
         //
         second_counter += 1;
-        if (second_counter % 60 == 0) {
+        if (second_counter % input_fps == 0) {
             second_counter = 0;
             _ = model.thread_util.update() catch {
                 std.log.warn("core: Failed to get thread utilization", .{});
@@ -325,6 +324,8 @@ pub fn run() !void {
         update_encoder.reset();
         update_encoder_mutex.unlock();
 
+        var active_scene_ptr = model.activeScenePtrMut();
+
         request_loop: while (request_buffer.next()) |request| {
             switch (request) {
                 .core_shutdown => {
@@ -347,8 +348,14 @@ pub fn run() !void {
 
                     model_mutex.lock();
 
-                    const screencapture_source_handle = model.video_stream_blocks.ptrFromIndex(stream_index).source_handle;
-                    const renderer_stream_handle = model.video_stream_blocks.ptrFromIndex(stream_index).renderer_handle;
+                    const video_stream_count: usize = active_scene_ptr.videoStreamCount();
+                    assert(video_stream_count > 0);
+
+                    const stream_block_index = active_scene_ptr.video_streams[stream_index];
+                    const stream_ptr = model.videoStreamPtrFromBlockIndex(stream_block_index);
+
+                    const screencapture_source_handle = stream_ptr.source_handle;
+                    const renderer_stream_handle = stream_ptr.renderer_handle;
 
                     std.log.info("Removing video stream. Renderer handle: {d} Screencapture handle: {d}", .{
                         renderer_stream_handle,
@@ -357,15 +364,15 @@ pub fn run() !void {
 
                     renderer.removeStream(renderer_stream_handle);
 
-                    switch (model.video_stream_blocks.ptrFromIndex(stream_index).provider_ref.kind) {
-                        .webcam => video4linux.close(),
+                    switch (stream_ptr.provider_ref.kind) {
+                        .webcam => {
+                            video4linux.close();
+                            const webcam_index = stream_ptr.source_handle;
+                            gpa.free(webcam_pixel_buffer[webcam_index]);
+                        },
                         .screen_capture => screencapture_interface.streamClose(screencapture_source_handle),
                     }
 
-                    const video_stream_count: usize = model.video_stream_blocks.len();
-                    assert(video_stream_count > 0);
-
-                    var active_scene_ptr = model.activeScenePtrMut();
                     active_scene_ptr.removeVideoStream(stream_index);
 
                     model_mutex.unlock();
@@ -513,12 +520,13 @@ pub fn run() !void {
                     update_encoder_mutex.lock();
                     update_encoder.write(.scene_active_changed) catch unreachable;
                     update_encoder_mutex.unlock();
+
+                    active_scene_ptr = model.activeScenePtrMut();
                 },
                 else => std.log.err("Invalid core request", .{}),
             }
         }
 
-        var active_scene_ptr = model.activeScenePtr();
         const video_stream_count: usize = active_scene_ptr.videoStreamCount();
         for (0..video_stream_count) |i| {
             const stream_block_index = active_scene_ptr.video_streams[i];
@@ -549,6 +557,7 @@ pub fn run() !void {
             std.time.sleep(remaining_ns);
         } else {
             std.log.warn("Frame overbudget", .{});
+            // std.debug.assert(false);
         }
     }
 
