@@ -27,11 +27,12 @@ pub var pass: vk.RenderPass = undefined;
 
 pub var have_multisample: bool = false;
 
-var buffer_size_pixels: u32 = 0;
-
 const cache = struct {
     var multi_sampled_image_memory_index: u32 = 0;
 };
+
+var current_depth_image_requirements: vk.MemoryRequirements = undefined;
+var current_multisample_image_requirements: vk.MemoryRequirements = undefined;
 
 pub fn init(
     swapchain_dimensions: Dimensions2D(u32),
@@ -39,7 +40,6 @@ pub fn init(
     multi_sampled_image_memory_index: u32,
 ) !void {
     cache.multi_sampled_image_memory_index = multi_sampled_image_memory_index;
-    buffer_size_pixels = swapchain_dimensions.width * swapchain_dimensions.height;
     try createDepthImage(
         swapchain_dimensions.width,
         swapchain_dimensions.height,
@@ -139,109 +139,138 @@ pub fn requiredMemoryTypeIndices() !u64 {
     return required_bits;
 }
 
-pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u32)) !void {
+fn resizeDepthBuffer(dimensions: geometry.Dimensions2D(u32)) !void {
     const device_dispatch = vulkan_core.device_dispatch;
     const logical_device = vulkan_core.logical_device;
 
-    const new_pixel_count: u32 = (screen_dimensions.width * screen_dimensions.height);
-    const reallocate: bool = new_pixel_count > buffer_size_pixels;
-
     device_dispatch.destroyImage(logical_device, depth_image, null);
     device_dispatch.destroyImageView(logical_device, depth_image_view, null);
-    if (reallocate) {
-        buffer_size_pixels = new_pixel_count;
+
+    const depth_image_create_info = vk.ImageCreateInfo{
+        .flags = .{},
+        .image_type = .@"2d",
+        .format = .d32_sfloat,
+        .tiling = .optimal,
+        .extent = vk.Extent3D{
+            .width = dimensions.width,
+            .height = dimensions.height,
+            .depth = 1,
+        },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .initial_layout = .undefined,
+        .usage = .{ .depth_stencil_attachment_bit = true },
+        .samples = antialias_sample_count,
+        .sharing_mode = .exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+    };
+    depth_image = try device_dispatch.createImage(logical_device, &depth_image_create_info, null);
+    const depth_image_requirements = device_dispatch.getImageMemoryRequirements(logical_device, depth_image);
+
+    const alignment_fine: bool = depth_image_requirements.alignment > current_depth_image_requirements.alignment;
+    const memory_type_fine: bool = depth_image_requirements.memory_type_bits == current_depth_image_requirements.memory_type_bits;
+    const size_fine: bool = depth_image_requirements.size <= current_depth_image_requirements.size;
+
+    if (!alignment_fine or !memory_type_fine or !size_fine) {
+        //
+        // We can't reuse the memory we have allocated for the depth buffer, we have to free and reallocate
+        //
+        current_depth_image_requirements = depth_image_requirements;
         device_dispatch.freeMemory(logical_device, depth_image_memory, null);
-        try createDepthImage(
-            screen_dimensions.width,
-            screen_dimensions.height,
-            cache.multi_sampled_image_memory_index,
-        );
-    } else {
-        const image_create_info = vk.ImageCreateInfo{
-            .flags = .{},
-            .image_type = .@"2d",
-            .format = .d32_sfloat,
-            .tiling = .optimal,
-            .extent = vk.Extent3D{
-                .width = screen_dimensions.width,
-                .height = screen_dimensions.height,
-                .depth = 1,
-            },
-            .mip_levels = 1,
-            .array_layers = 1,
-            .initial_layout = .undefined,
-            .usage = .{ .transient_attachment_bit = true, .depth_stencil_attachment_bit = true },
-            .samples = antialias_sample_count,
-            .sharing_mode = .exclusive,
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-        };
-        depth_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
-        try device_dispatch.bindImageMemory(logical_device, depth_image, depth_image_memory, 0);
-        depth_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
-            .flags = .{},
-            .image = depth_image,
-            .view_type = .@"2d_array",
-            .format = .d32_sfloat,
-            .subresource_range = .{
-                .aspect_mask = .{ .depth_bit = true },
-                .base_mip_level = 0,
-                .level_count = 1,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
-            .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+
+        depth_image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
+            .allocation_size = depth_image_requirements.size,
+            .memory_type_index = cache.multi_sampled_image_memory_index,
         }, null);
+
+        try device_dispatch.bindImageMemory(logical_device, depth_image, depth_image_memory, 0);
     }
 
-    if (!have_multisample)
-        return;
+    depth_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
+        .flags = .{},
+        .image = depth_image,
+        .view_type = .@"2d_array",
+        .format = .d32_sfloat,
+        .subresource_range = .{
+            .aspect_mask = .{ .depth_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+    }, null);
+}
+
+fn resizeMultisampleBuffer(dimensions: geometry.Dimensions2D(u32)) !void {
+    const device_dispatch = vulkan_core.device_dispatch;
+    const logical_device = vulkan_core.logical_device;
 
     device_dispatch.destroyImage(logical_device, multisampled_image, null);
     device_dispatch.destroyImageView(logical_device, multisampled_image_view, null);
 
-    if (reallocate) {
+    const image_create_info = vk.ImageCreateInfo{
+        .flags = .{},
+        .image_type = .@"2d",
+        .format = .b8g8r8a8_unorm,
+        .tiling = .optimal,
+        .extent = vk.Extent3D{
+            .width = dimensions.width,
+            .height = dimensions.height,
+            .depth = 1,
+        },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .initial_layout = .undefined,
+        .usage = .{ .transient_attachment_bit = true, .color_attachment_bit = true },
+        .samples = antialias_sample_count,
+        .sharing_mode = .exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+    };
+    multisampled_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
+    const image_requirements = device_dispatch.getImageMemoryRequirements(logical_device, multisampled_image);
+
+    const alignment_fine: bool = image_requirements.alignment > current_multisample_image_requirements.alignment;
+    const memory_type_fine: bool = image_requirements.memory_type_bits == current_multisample_image_requirements.memory_type_bits;
+    const size_fine: bool = image_requirements.size <= current_multisample_image_requirements.size;
+
+    if (!alignment_fine or !memory_type_fine or !size_fine) {
+        //
+        // We can't reuse the memory we have allocated for the depth buffer, we have to free and reallocate
+        //
+        current_multisample_image_requirements = image_requirements;
         device_dispatch.freeMemory(logical_device, multisampled_image_memory, null);
-        try createMultiSampledImage(
-            screen_dimensions,
-            cache.multi_sampled_image_memory_index,
-        );
-    } else {
-        const image_create_info = vk.ImageCreateInfo{
-            .flags = .{},
-            .image_type = .@"2d",
-            .format = .b8g8r8a8_unorm,
-            .tiling = .optimal,
-            .extent = vk.Extent3D{
-                .width = screen_dimensions.width,
-                .height = screen_dimensions.height,
-                .depth = 1,
-            },
-            .mip_levels = 1,
-            .array_layers = 1,
-            .initial_layout = .undefined,
-            .usage = .{ .transient_attachment_bit = true, .color_attachment_bit = true },
-            .samples = antialias_sample_count,
-            .sharing_mode = .exclusive,
-            .queue_family_index_count = 0,
-            .p_queue_family_indices = undefined,
-        };
-        multisampled_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
-        try device_dispatch.bindImageMemory(logical_device, multisampled_image, multisampled_image_memory, 0);
-        multisampled_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
-            .flags = .{},
-            .image = multisampled_image,
-            .view_type = .@"2d_array",
-            .format = .b8g8r8a8_unorm,
-            .subresource_range = .{
-                .aspect_mask = .{ .color_bit = true },
-                .base_mip_level = 0,
-                .level_count = 1,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
-            .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+
+        multisampled_image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
+            .allocation_size = image_requirements.size,
+            .memory_type_index = cache.multi_sampled_image_memory_index,
         }, null);
+
+        try device_dispatch.bindImageMemory(logical_device, multisampled_image, multisampled_image_memory, 0);
+    }
+
+    multisampled_image_view = try device_dispatch.createImageView(logical_device, &vk.ImageViewCreateInfo{
+        .flags = .{},
+        .image = multisampled_image,
+        .view_type = .@"2d_array",
+        .format = .b8g8r8a8_unorm,
+        .subresource_range = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+    }, null);
+}
+
+pub fn resizeSwapchain(screen_dimensions: geometry.Dimensions2D(u32)) !void {
+    try resizeDepthBuffer(screen_dimensions);
+    if (have_multisample) {
+        try resizeMultisampleBuffer(screen_dimensions);
     }
 }
 
@@ -448,6 +477,8 @@ fn createMultiSampledImage(swapchain_dimensions: Dimensions2D(u32), memory_heap_
 
     const multisampled_image_requirements = device_dispatch.getImageMemoryRequirements(logical_device, multisampled_image);
 
+    current_multisample_image_requirements = multisampled_image_requirements;
+
     multisampled_image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = multisampled_image_requirements.size,
         .memory_type_index = memory_heap_index,
@@ -496,6 +527,8 @@ fn createDepthImage(width: u32, height: u32, memory_heap_index: u32) !void {
     depth_image = try device_dispatch.createImage(logical_device, &image_create_info, null);
 
     const depth_image_requirements = device_dispatch.getImageMemoryRequirements(logical_device, depth_image);
+
+    current_depth_image_requirements = depth_image_requirements;
 
     depth_image_memory = try device_dispatch.allocateMemory(logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = depth_image_requirements.size,
