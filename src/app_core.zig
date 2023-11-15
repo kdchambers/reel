@@ -340,7 +340,7 @@ pub fn run() !void {
                         &onFrameReadyCallback,
                         &openStreamSuccessCallback,
                         &openStreamErrorCallback,
-                        &.{},
+                        null,
                     );
                 },
                 .remove_source => {
@@ -392,7 +392,7 @@ pub fn run() !void {
                         &onFrameReadyCallback,
                         &openStreamSuccessCallback,
                         &openStreamErrorCallback,
-                        &.{},
+                        null,
                     );
                 },
                 .screenshot_do => screencapture_interface.screenshot(&onScreenshotReady, &onScreenshotFail),
@@ -872,7 +872,7 @@ const default_screen_names = [_][]const u8{
 
 var video_source_buffer: [8]Model.VideoSourceProvider.Source = undefined;
 
-fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyopaque) void {
+fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: ?*const anyopaque) void {
     const stream_info = screencapture_interface.streamInfo(stream_handle);
     const supported_image_format: renderer.SupportedVideoImageFormat = switch (stream_info.pixel_format.?) {
         .rgba => .rgba,
@@ -926,7 +926,7 @@ fn openStreamSuccessCallback(stream_handle: screencapture.StreamHandle, _: *anyo
     update_encoder_mutex.unlock();
 }
 
-fn openStreamErrorCallback(_: *anyopaque) void {
+fn openStreamErrorCallback(_: ?*const anyopaque) void {
     // TODO:
     std.log.err("Failed to open screencapture stream", .{});
 }

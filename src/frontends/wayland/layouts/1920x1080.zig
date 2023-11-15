@@ -515,12 +515,12 @@ pub fn draw(
         else
             window.right;
 
-        const horizontal_space = @fabs(left_side - right_anchor) - (margin_horizontal * 2.0);
+        const horizontal_space: f32 = @abs(left_side - right_anchor) - (margin_horizontal * 2.0);
 
         const top_anchor: f32 = window.top + margin_top;
         const bottom_anchor: f32 = activity_region.top();
 
-        const vertical_space = @fabs(bottom_anchor - top_anchor) - margin_vertical;
+        const vertical_space: f32 = @abs(bottom_anchor - top_anchor) - margin_vertical;
 
         const dimensions = geometry.Dimensions2D(f32){
             .width = dimensions_pixels.width * screen_scale.horizontal,

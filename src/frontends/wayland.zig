@@ -616,7 +616,7 @@ fn processWidgets(model: *const Model) !void {
                         std.log.info("Top edge of source {d} clicked", .{i});
                         source_resize_drag_context = .{
                             .edge = .top,
-                            .start_value = @fabs(@as(f32, @floatFromInt(relative_extent.y)) - @as(f32, @floatFromInt(relative_extent.height))),
+                            .start_value = @abs(@as(f32, @floatFromInt(relative_extent.y)) - @as(f32, @floatFromInt(relative_extent.height))),
                             .start_mouse_value = @floatCast(mouse_coordinates.y),
                             .source_index = @intCast(i),
                         };

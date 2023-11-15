@@ -7,7 +7,8 @@ const Build = std.Build;
 const Pkg = Build.Pkg;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
-const ScanProtocolsStep = @import("deps/zig-wayland/build.zig").ScanProtocolsStep;
+
+const Scanner = @import("deps/zig-wayland/build.zig").Scanner;
 
 const Options = struct {
     have_wayland: bool,
@@ -28,10 +29,15 @@ pub fn build(b: *Build) void {
     options.have_wayland = b.option(bool, "have_wayland", "Build with support for Wayland") orelse true;
 
     if (options.have_wayland) {
-        const scanner = ScanProtocolsStep.create(b);
-        scanner.addProtocolPath("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
-        scanner.addProtocolPath("deps/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
-        scanner.addProtocolPath("deps/wayland-protocols/unstable/wlr-screencopy/wlr-screencopy-unstable-v1.xml");
+        const scanner = Scanner.create(b, .{
+            .wayland_protocols_path = "deps/wayland-protocols",
+            .wayland_xml_path = "deps/wayland-protocols/wayland.xml",
+        });
+        const wayland_module = b.createModule(.{ .source_file = scanner.result });
+
+        scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
+        scanner.addSystemProtocol("unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
+        scanner.addSystemProtocol("unstable/wlr-screencopy/wlr-screencopy-unstable-v1.xml");
 
         scanner.generate("wl_compositor", 4);
         scanner.generate("wl_seat", 5);
@@ -41,13 +47,8 @@ pub fn build(b: *Build) void {
         scanner.generate("zwlr_screencopy_manager_v1", 3);
         scanner.generate("zxdg_decoration_manager_v1", 1);
 
-        exe.step.dependOn(&scanner.step);
-
-        const wayland_module = b.createModule(.{
-            .source_file = .{ .generated = &scanner.result },
-            .dependencies = &.{},
-        });
         exe.addModule("wayland", wayland_module);
+        exe.linkLibC();
         scanner.addCSource(exe);
 
         exe.linkSystemLibrary("wayland-client");
@@ -91,7 +92,7 @@ pub fn build(b: *Build) void {
             "-I/usr/include/pipewire-0.3",
             "-I/usr/include/spa-0.2",
         };
-        exe.addCSourceFile("src/screencapture/pipewire/pipewire_stream_extra.c", &flags);
+        exe.addCSourceFile(.{ .file = .{ .path = "src/screencapture/pipewire/pipewire_stream_extra.c" }, .flags = &flags });
     }
 
     {
@@ -101,15 +102,15 @@ pub fn build(b: *Build) void {
         // un-inline those functions and make them available to fix.
         //
         const flags = [_][]const u8{"-I/usr/include/spa-0.2"};
-        exe.addCSourceFile("src/bindings/spa/wrapper.c", &flags);
+        exe.addCSourceFile(.{ .file = .{ .path = "src/bindings/spa/wrapper.c" }, .flags = &flags });
     }
 
     //
     // TODO: Remove header dependencies
     // TODO: Use pkg-config when linking dbus and pipewire
     //
-    exe.addIncludePath("/usr/include/pipewire-0.3/");
-    exe.addIncludePath("/usr/include/spa-0.2/");
+    exe.addIncludePath(.{ .path = "/usr/include/pipewire-0.3/" });
+    exe.addIncludePath(.{ .path = "/usr/include/spa-0.2/" });
 
     exe.linkSystemLibrary("dbus-1");
     exe.linkSystemLibrary("pipewire-0.3");
@@ -117,7 +118,7 @@ pub fn build(b: *Build) void {
     //
     // FFMPEG
     //
-    exe.addIncludePath("/usr/include/ffmpeg");
+    exe.addIncludePath(.{ .path = "/usr/include/ffmpeg" });
     exe.linkSystemLibrary("avcodec");
     exe.linkSystemLibrary("avformat");
     exe.linkSystemLibrary("avutil");

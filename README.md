@@ -27,7 +27,7 @@ First install the required dependencies for your distribution.
 
 - [Fedora](doc/BUILD.md#Fedora)
 
-To build, you'll need a master build of the zig compiler. The latest verified version is **0.11.0-dev.4059**, but if out of date will be updated soon.
+To build, you'll need a master build of the zig compiler. The latest verified version is **0.12.0-dev.1607**, but if out of date will be updated soon.
 
 ```sh
 git clone https://github.com/kdchambers/reel --recursive

@@ -68,11 +68,11 @@ pub const RegionAnchors = struct {
     bottom: f32 = 1.0,
 
     pub inline fn width(self: @This()) f32 {
-        return @fabs(self.left - self.right);
+        return @abs(self.left - self.right);
     }
 
     pub inline fn height(self: @This()) f32 {
-        return @fabs(self.top - self.bottom);
+        return @abs(self.top - self.bottom);
     }
 
     pub inline fn toExtent(self: @This()) geometry.Extent2D(f32) {

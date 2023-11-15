@@ -233,7 +233,7 @@ pub fn openStream(
     onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
     successCallback: *const screencapture.OpenStreamOnSuccessFn,
     failCallback: *const screencapture.OpenStreamOnErrorFn,
-    user_data: *anyopaque,
+    user_data: ?*const anyopaque,
 ) void {
     _ = stream_index;
     frameReadyCallback = onFrameReadyCallback;
@@ -1812,7 +1812,7 @@ fn onParamChangedCallback(userdata_opt: ?*anyopaque, id: u32, params: ?*const pw
                 stream_ptr.format.height,
                 @tagName(stream_ptr.format.format),
             });
-            onStreamOpenSuccessCallback(stream_ptr.handle, &.{});
+            onStreamOpenSuccessCallback(stream_ptr.handle, null);
         }
     } else {
         std.log.err("screencapture(pipewire): userdata pointer null in onParamChangedCallback", .{});

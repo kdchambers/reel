@@ -204,7 +204,7 @@ pub fn openStream(
     onFrameReadyCallback: *const screencapture.OnFrameReadyFn,
     on_success_cb: *const screencapture.OpenStreamOnSuccessFn,
     on_error_cb: *const screencapture.OpenStreamOnErrorFn,
-    user_data: *anyopaque,
+    user_data: ?*const anyopaque,
 ) void {
     _ = on_error_cb;
 

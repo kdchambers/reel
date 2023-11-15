@@ -93,7 +93,7 @@ pub const OpenStreamFn = fn (
     onFrameReady: *const OnFrameReadyFn,
     on_success: *const OpenStreamOnSuccessFn,
     on_error: *const OpenStreamOnErrorFn,
-    user_data: *anyopaque,
+    user_data: ?*const anyopaque,
 ) void;
 pub const DeinitFn = fn () void;
 pub const ScreenshotFn = fn (onSuccess: *const OnScreenshotReadyFn, onFail: *const OnScreenshotFailFn) void;
@@ -108,8 +108,8 @@ pub const OnFrameReadyFn = fn (stream_handle: StreamHandle, width: u32, height: 
 pub const InitOnSuccessFn = fn () void;
 pub const InitOnErrorFn = fn (errcode: InitErrorSet) void;
 
-pub const OpenStreamOnSuccessFn = fn (stream: StreamHandle, user_data: *anyopaque) void;
-pub const OpenStreamOnErrorFn = fn (user_data: *anyopaque) void;
+pub const OpenStreamOnSuccessFn = fn (stream: StreamHandle, user_data: ?*const anyopaque) void;
+pub const OpenStreamOnErrorFn = fn (user_data: ?*const anyopaque) void;
 
 pub const StreamPauseFn = fn (handle: StreamHandle, is_paused: bool) void;
 pub const StreamStateFn = fn (handle: StreamHandle) StreamState;
