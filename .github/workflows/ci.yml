@@ -14,7 +14,7 @@ jobs:
       - name: Setup Zig
         run: |
           sudo apt install xz-utils
-          sudo sh -c 'wget -c https://ziglang.org/builds/zig-linux-x86_64-0.11.0-dev.4059+17255bed4.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+          sudo sh -c 'wget -c https://pkg.machengine.org/zig/zig-linux-x86_64-0.12.0-dev.3180+83e578a18.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
       - name: test
         run: |
           zig build test -Dhave_wayland=false
