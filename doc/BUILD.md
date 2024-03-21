@@ -16,3 +16,16 @@ sudo dnf install \
 ```
 
 NOTE: You may also need to enable vaapi support (For hardware accelerated encoding). See [this](https://fedoraproject.org/wiki/Firefox_Hardware_acceleration) guide for instructions
+
+# Ubuntu
+
+```sh
+sudo apt install libwayland-dev \
+                 libdbus-1-dev \
+                 libpipewire-0.3-dev \
+                 libswscale-dev \
+                 libavfilter-dev \
+                 libavdevice-dev \
+                 vulkan-validationlayers \
+                 mesa-vulkan-drivers
+```
