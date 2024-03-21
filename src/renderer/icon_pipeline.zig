@@ -644,7 +644,7 @@ pub fn drawGreyscale(
     color: RGBA(u8),
     comptime anchor_point: graphics.AnchorPoint,
 ) u16 {
-    var vertex_index: u16 = vertices_used;
+    const vertex_index: u16 = vertices_used;
     var quad: *[4]Vertex = @ptrCast(&vertices_buffer[vertices_used]);
     graphics.writeQuad(Vertex, extent, anchor_point, quad);
     quad[0].color = color;

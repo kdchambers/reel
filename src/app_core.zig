@@ -102,7 +102,7 @@ fn printVideoStreamBuffer() void {
     const print = std.debug.print;
     print("***** Video stream buffer ******\n", .{});
     for (0..model.video_stream_blocks.len()) |i| {
-        var stream = model.video_stream_blocks.ptrAt(i);
+        const stream = model.video_stream_blocks.ptrAt(i);
         print("  {d} :: source index {d} type {}", .{ i, stream.source_handle, stream.provider_ref.kind });
     }
 }
@@ -533,7 +533,7 @@ pub fn run() !void {
             var stream: *Model.VideoStream = model.videoStreamPtrMutFromBlockIndex(stream_block_index);
             if (stream.provider_ref.kind == .webcam) {
                 assert(stream.source_handle == 0);
-                var pixel_buffer_ref = webcam_pixel_buffer[stream.source_handle];
+                const pixel_buffer_ref = webcam_pixel_buffer[stream.source_handle];
                 const pixels_updated = video4linux.getFrame(pixel_buffer_ref.ptr, 0, 0, stream.dimensions.width) catch |err| blk: {
                     std.log.err("Failed to get webcam frame. Error: {}", .{err});
                     break :blk false;
@@ -550,7 +550,7 @@ pub fn run() !void {
             }
         }
 
-        var frame_duration_ns = frame_timer.duration();
+        const frame_duration_ns = frame_timer.duration();
         if (frame_duration_ns < ns_per_frame) {
             const remaining_ns = ns_per_frame - frame_duration_ns;
             // std.log.info("Frame duration: {d} ms", .{16 - @divFloor(remaining_ns, std.time.ns_per_ms)});
@@ -942,7 +942,7 @@ fn screenCaptureInitSuccess() void {
         const streams = screencapture_interface.queryStreams(gpa);
         assert(streams.len <= 16);
         model.video_source_providers[0].sources = gpa.alloc(Model.VideoSourceProvider.Source, streams.len) catch unreachable;
-        var sources_ptr = &(model.video_source_providers[0].sources.?);
+        const sources_ptr = &(model.video_source_providers[0].sources.?);
         for (streams, 0..) |stream, i| {
             std.log.info("  {s} {d} x {d}", .{ stream.name, stream.dimensions.width, stream.dimensions.height });
             sources_ptr.*[i].name = stream.name;
@@ -1006,7 +1006,7 @@ fn saveImageToFile(
     };
 
     const pixel_count: usize = @as(usize, @intCast(width)) * height;
-    var pixels_copy = gpa.dupe(graphics.RGBA(u8), pixels[0..pixel_count]) catch unreachable;
+    const pixels_copy = gpa.dupe(graphics.RGBA(u8), pixels[0..pixel_count]) catch unreachable;
     var image = zigimg.Image.create(gpa, width, height, .rgba32) catch {
         std.log.err("Failed to create screenshot image", .{});
         return;

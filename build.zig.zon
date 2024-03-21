@@ -1,0 +1,19 @@
+.{
+    .name = "reel",
+    .version = "0.1.0",
+    .paths = .{""},
+    .dependencies = .{
+        .vulkan_zig = .{
+            .url = "https://github.com/Snektron/vulkan-zig/archive/7f161ce0edfcc91bd4defe4fb2fa45a7d39097e7.tar.gz",
+            .hash = "1220e6c4e31599c25cc7df2b300ee5ece3d89ddf0c566dbb5e4eb8d0d49e32ad5bb6",
+        },
+        .fontana = .{
+            .url = "https://github.com/kdchambers/fontana/archive/d29ec52caa3a4a6f91523fa3b823c392f9670ab2.tar.gz",
+            .hash = "122083bb088fd8def57d5f0a32bc4c792665e6898c7f75fdf46d92f56699e23184de",
+        },
+        .zigimg = .{
+            .url = "https://github.com/zigimg/zigimg/archive/8873f29fc449e1b63400e9f4ad86d3c76204f962.tar.gz",
+            .hash = "122019f6439545235af116d0d8eb81fde1ff05fdb070da57c723772c557f84c5bf39",
+        },
+    },
+}

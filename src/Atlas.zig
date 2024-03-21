@@ -64,7 +64,7 @@ pub fn reserve(self: *Atlas, alloc: Allocator, width: u32, height: u32) !Region 
     if (width == 0 and height == 0) return region;
 
     // Find the location in our nodes list to insert the new node for this region.
-    var best_idx: usize = best_idx: {
+    const best_idx: usize = best_idx: {
         var best_height: u32 = std.math.maxInt(u32);
         var best_width: u32 = best_height;
         var chosen: ?usize = null;

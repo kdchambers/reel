@@ -171,7 +171,7 @@ pub inline fn addVideoSource(stream_handle: u32, relative_extent: Extent2D(f32))
     assert(relative_extent.height + relative_extent.y <= 1.0);
 
     const draw_handle = assignNewDrawHandle();
-    var draw_context_ptr = drawContextFromHandle(draw_handle);
+    const draw_context_ptr = drawContextFromHandle(draw_handle);
     draw_context_ptr.* = .{
         .relative_extent = relative_extent,
         .stream_handle = stream_handle,
@@ -645,7 +645,7 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
             .base_array_layer = 0,
         };
 
-        var src_region_offsets = [2]vk.Offset3D{
+        const src_region_offsets = [2]vk.Offset3D{
             .{ .x = 0, .y = 0, .z = 0 },
             .{
                 .x = @intFromFloat(stream_ptr.dimensions.width),
@@ -718,7 +718,7 @@ pub fn recordBlitCommand(command_buffer: vk.CommandBuffer) !void {
             .base_array_layer = 0,
         };
 
-        var src_region_offsets = [2]vk.Offset3D{
+        const src_region_offsets = [2]vk.Offset3D{
             .{ .x = 0, .y = 0, .z = 0 },
             .{
                 .x = @intFromFloat(stream_ptr.dimensions.width),
@@ -970,7 +970,8 @@ pub fn resizeCanvas(dimensions: Dimensions2D(u32)) !void {
             .allocation_size = memory_requirements.size,
             .memory_type_index = cpu_memory_index,
         }, null);
-        canvas_mapped_memory = @as([*]RGBA(u8), @ptrCast((try device_dispatch.mapMemory(logical_device, canvas_memory, 0, image_size_bytes, .{})).?))[0..pixel_count];
+        // TODO: Cleanup
+        canvas_mapped_memory = @as([*]RGBA(u8), @ptrCast(@alignCast((try device_dispatch.mapMemory(logical_device, canvas_memory, 0, image_size_bytes, .{})).?)))[0..pixel_count];
         @memset(canvas_mapped_memory, RGBA(u8).black);
     }
     try device_dispatch.bindImageMemory(logical_device, canvas_image, canvas_memory, 0);
@@ -1238,7 +1239,9 @@ pub fn init(
         .allocation_size = memory_requirements.size,
         .memory_type_index = cpu_memory_index,
     }, null);
-    unscaled_canvas_mapped_memory = @as([*]RGBA(u8), @ptrCast((try device_dispatch.mapMemory(logical_device, unscaled_canvas_memory, 0, image_size_bytes, .{})).?))[0..pixel_count];
+
+    // TODO: Fix this mess
+    unscaled_canvas_mapped_memory = @as([*]RGBA(u8), @ptrCast(@alignCast((try device_dispatch.mapMemory(logical_device, unscaled_canvas_memory, 0, image_size_bytes, .{})).?)))[0..pixel_count];
     @memset(unscaled_canvas_mapped_memory, RGBA(u8).black);
 
     try device_dispatch.bindImageMemory(logical_device, unscaled_canvas_image, unscaled_canvas_memory, 0);

@@ -289,7 +289,7 @@ pub fn getFrame(
     const width = @as(usize, @intCast(decoder_context.width));
     const height = @as(usize, @intCast(decoder_context.height));
 
-    var conversion = libav.sws_getContext(
+    const conversion = libav.sws_getContext(
         decoder_context.width,
         decoder_context.height,
         decoder_context.pix_fmt,
@@ -317,15 +317,14 @@ pub fn getFrame(
 
     const src_stride = @as(usize, @intCast(@divExact(converted_frame.?.linesize[0], @sizeOf(graphics.RGBA(u8)))));
 
-    const frame_pixels = @as([*]graphics.RGBA(u8), @ptrCast(&converted_frame.?.data[0][0]))[0..pixel_count];
+    const frame_pixels = @as([*]graphics.RGBA(u8), @ptrCast(@alignCast(&converted_frame.?.data[0][0])))[0..pixel_count];
 
-    var dst_x = dst_offset_x;
-    var dst_y = dst_offset_y;
+    const dst_x = dst_offset_x;
+    const dst_y = dst_offset_y;
     var dst_index = (dst_y * stride) + dst_x;
     var src_index: usize = 0;
     for (0..height) |_| {
-        std.mem.copy(
-            graphics.RGBA(u8),
+        @memcpy(
             output_buffer[dst_index .. dst_index + width],
             frame_pixels[src_index .. src_index + width],
         );

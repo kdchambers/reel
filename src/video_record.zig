@@ -350,8 +350,8 @@ pub fn open(options: RecordOptions) !void {
     };
 
     var output_name_full_buffer: [128]u8 = undefined;
-    std.mem.copy(u8, &output_name_full_buffer, options.output_name);
-    std.mem.copy(u8, output_name_full_buffer[options.output_name.len..], extension_name);
+    @memcpy(&output_name_full_buffer, options.output_name);
+    @memcpy(output_name_full_buffer[options.output_name.len..], extension_name);
 
     const output_length: usize = options.output_name.len + extension_name.len;
     output_name_full_buffer[output_length] = 0;
@@ -582,7 +582,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
         planar_buffer_index = (planar_buffer_index + 1) % planar_buffer_count;
         sample_index += sample_multiple;
 
-        var fill_audio_frame_code: i32 = libav.codecFillAudioFrame(
+        const fill_audio_frame_code: i32 = libav.codecFillAudioFrame(
             audio_frame,
             @as(i32, channel_count),
             libav.SampleFormat.fltp,
@@ -612,7 +612,7 @@ fn encodeAudioFrames(samples: []const f32) !void {
                 packet.size = 0;
                 packet.pts = audio_frame.pts;
 
-                var receive_packet_code = libav.codecReceivePacket(audio_codec_context, &packet);
+                const receive_packet_code = libav.codecReceivePacket(audio_codec_context, &packet);
                 if (receive_packet_code == EAGAIN) {
                     //
                     // Wants input again, write the frame (input) that we previously couldn't

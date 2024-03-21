@@ -37,7 +37,7 @@ pub const Stat = struct {
 
     pub fn init(allocator: std.mem.Allocator, thread_count: usize) !@This() {
         assert(thread_count <= 256);
-        var threads = try allocator.alloc(StatEntry, thread_count * 2);
+        const threads = try allocator.alloc(StatEntry, thread_count * 2);
 
         return @This(){
             .threads = threads,
@@ -80,7 +80,7 @@ pub fn init(allocator: std.mem.Allocator) !@This() {
     thread_count -= 1;
 
     var stat_entry_buffer = try allocator.alloc(StatEntry, thread_count * 2);
-    var perc_buffer = try allocator.alloc(f32, thread_count);
+    const perc_buffer = try allocator.alloc(f32, thread_count);
 
     _ = try loadStat(stat_entry_buffer[0..thread_count]);
 

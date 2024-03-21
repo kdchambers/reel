@@ -244,7 +244,7 @@ pub fn openStream(
 pub fn detectSupport() bool {
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
-    var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
+    const connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
     if (dbus.errorIsSet(&err) != 0) {
         return false;
     }
@@ -271,7 +271,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
 
-    var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
+    const connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
     const connection_name: []const u8 = blk: {
         const raw_name = dbus.busGetUniqueName(connection);
         const raw_name_len = std.mem.len(raw_name);
@@ -329,7 +329,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
         dbus.connectionFlush(connection);
     }
 
-    var request: *dbus.Message = dbus.messageNewMethodCall(
+    const request: *dbus.Message = dbus.messageNewMethodCall(
         bus_name,
         object_path,
         screenshot_interface_name,
@@ -481,7 +481,7 @@ fn takeScreenshotPipewire() ![*:0]const u8 {
     //
     // Send over the Bus and block on response
     //
-    var response_handle: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+    const response_handle: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
         connection,
         request,
         std.time.ms_per_s * 1,
@@ -613,7 +613,7 @@ fn closeSession() void {
     var dbus_err: dbus.Error = undefined;
     dbus.errorInit(&dbus_err);
 
-    var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &dbus_err);
+    const connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &dbus_err);
 
     var object_path_buffer: [64]u8 = undefined;
     const session_object_path = std.fmt.bufPrintZ(&object_path_buffer, "/org/freedesktop/portal/desktop/session/{s}/{s}", .{
@@ -624,7 +624,7 @@ fn closeSession() void {
         return;
     };
 
-    var query_message: *dbus.Message = dbus.messageNewMethodCall(
+    const query_message: *dbus.Message = dbus.messageNewMethodCall(
         bus_name,
         session_object_path,
         "org.freedesktop.portal.Session",
@@ -635,7 +635,7 @@ fn closeSession() void {
     };
     defer dbus.messageUnref(query_message);
 
-    var reply_message: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+    const reply_message: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
         connection,
         query_message,
         std.time.ms_per_s * 1,
@@ -668,7 +668,7 @@ pub fn getProperty(
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
 
-    var query_message: *dbus.Message = dbus.messageNewMethodCall(
+    const query_message: *dbus.Message = dbus.messageNewMethodCall(
         bus_name,
         object_path,
         "org.freedesktop.DBus.Properties",
@@ -686,7 +686,7 @@ pub fn getProperty(
         &property_name,
         c.DBUS_TYPE_INVALID,
     );
-    var reply_message: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+    const reply_message: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
         connection,
         query_message,
         std.time.ms_per_s * 1,
@@ -837,7 +837,7 @@ fn createSession(
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
 
-    var query_message: *dbus.Message = dbus.messageNewMethodCall(
+    const query_message: *dbus.Message = dbus.messageNewMethodCall(
         bus_name,
         object_path,
         interface_name,
@@ -943,7 +943,7 @@ fn createSession(
     //
     // Send over the Bus and block on response
     //
-    var reply_message: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+    const reply_message: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
         connection,
         query_message,
         std.time.ms_per_s * 1,
@@ -981,7 +981,7 @@ fn setSource(
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
 
-    var request: *dbus.Message = dbus.messageNewMethodCall(
+    const request: *dbus.Message = dbus.messageNewMethodCall(
         bus_name,
         object_path,
         interface_name,
@@ -1200,7 +1200,7 @@ fn setSource(
     //
     // Send over the Bus and block on response
     //
-    var response: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+    const response: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
         connection,
         request,
         std.time.ms_per_s * 1,
@@ -1234,7 +1234,7 @@ fn startStream(
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
 
-    var request: *dbus.Message = dbus.messageNewMethodCall(
+    const request: *dbus.Message = dbus.messageNewMethodCall(
         bus_name,
         object_path,
         interface_name,
@@ -1321,7 +1321,7 @@ fn startStream(
     //
     // Send over the Bus and block on response
     //
-    var response: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+    const response: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
         connection,
         request,
         std.time.ms_per_s * 1,
@@ -1355,7 +1355,7 @@ fn openPipewireRemote(
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
 
-    var request: *dbus.Message = dbus.messageNewMethodCall(
+    const request: *dbus.Message = dbus.messageNewMethodCall(
         bus_name,
         object_path,
         interface_name,
@@ -1394,7 +1394,7 @@ fn openPipewireRemote(
     //
     // Send over the Bus and block on response
     //
-    var response: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
+    const response: *dbus.Message = dbus.connectionSendWithReplyAndBlock(
         connection,
         request,
         std.time.ms_per_s * 1,
@@ -1434,7 +1434,7 @@ pub fn init() !void {
     var err: dbus.Error = undefined;
     dbus.errorInit(&err);
 
-    var connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
+    const connection: *dbus.Connection = dbus.busGet(dbus.BusType.session, &err);
 
     const connection_name: []const u8 = blk: {
         const raw_name = dbus.busGetUniqueName(connection);
@@ -1706,7 +1706,7 @@ pub fn init() !void {
     pw.pw_init(@ptrCast(&argc), @ptrCast(&argv));
 
     stream_ptr.thread_loop = pw.pw_thread_loop_new("Pipewire screencast thread loop", null) orelse return error.CreateThreadLoopFail;
-    var context = pw.pw_context_new(
+    const context = pw.pw_context_new(
         pw.pw_thread_loop_get_loop(stream_ptr.thread_loop),
         null,
         0,
@@ -1716,7 +1716,7 @@ pub fn init() !void {
     }
 
     pw.pw_thread_loop_lock(stream_ptr.thread_loop);
-    var core = pw.pw_context_connect_fd(
+    const core = pw.pw_context_connect_fd(
         context,
         c.fcntl(pipewire_fd, c.F_DUPFD_CLOEXEC, @as(i32, 5)),
         null,

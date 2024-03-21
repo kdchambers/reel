@@ -610,7 +610,7 @@ fn calcRequiredGpuMemory() usize {
 fn findGpuLocalMemoryIndex(minimum_size_bytes: u32) ?u32 {
     const memory_properties = vulkan_core.instance_dispatch.getPhysicalDeviceMemoryProperties(vulkan_core.physical_device);
     var memory_type_index: u32 = 0;
-    var memory_type_count = memory_properties.memory_type_count;
+    const memory_type_count = memory_properties.memory_type_count;
 
     var selected_memory_type_index_opt: ?u32 = null;
     var selected_heap_size: u64 = 0;
@@ -647,7 +647,7 @@ fn findGpuLocalMemoryIndex(minimum_size_bytes: u32) ?u32 {
 fn findCpuLocalMemoryIndex(minimum_size_bytes: u32) ?u32 {
     const memory_properties = vulkan_core.instance_dispatch.getPhysicalDeviceMemoryProperties(vulkan_core.physical_device);
     var memory_type_index: u32 = 0;
-    var memory_type_count = memory_properties.memory_type_count;
+    const memory_type_count = memory_properties.memory_type_count;
 
     var selected_memory_type_index_opt: ?u32 = null;
     var selected_heap_size: u64 = 0;
@@ -736,7 +736,7 @@ fn selectSurfaceFormat(
     }
 
     var formats_buffer: [32]vk.SurfaceFormatKHR = undefined;
-    var formats = if (format_count > 32)
+    const formats = if (format_count > 32)
         try allocator.alloc(vk.SurfaceFormatKHR, format_count)
     else
         formats_buffer[0..format_count];

@@ -111,20 +111,21 @@ pub inline fn writeQuadTextured(
 }
 
 pub fn RGB(comptime BaseType: type) type {
-    return extern struct {
-        const trait = std.meta.trait;
-        const math = std.math;
-        comptime {
-            if (!(trait.isFloat(BaseType) or trait.isUnsignedInt(BaseType))) {
-                std.debug.panic("RGB only accepts float and integer base types. Found {}", .{BaseType});
-            }
-        }
+    comptime var is_float: bool = false;
+    comptime var is_int: bool = false;
 
-        const upper_bound: BaseType = if (trait.isFloat(BaseType)) 1.0 else math.maxInt(BaseType);
+    switch (@typeInfo(BaseType)) {
+        .Int => is_int = true,
+        .Float => is_float = true,
+        else => std.debug.panic("RGBA only accepts float and integer base types. Found {}", .{BaseType}),
+    }
+    return packed struct {
+        const math = std.math;
+        const upper_bound: BaseType = if (is_float) 1.0 else math.maxInt(BaseType);
         const lower_bound: BaseType = 0;
 
         pub fn fromInt(r: u8, g: u8, b: u8) @This() {
-            if (comptime trait.isFloat(BaseType)) {
+            if (comptime is_float) {
                 return .{
                     .r = @as(BaseType, @floatFromInt(r)) / 255.0,
                     .g = @as(BaseType, @floatFromInt(g)) / 255.0,
@@ -155,16 +156,18 @@ pub fn RGB(comptime BaseType: type) type {
 }
 
 pub fn RGBA(comptime BaseType: type) type {
-    return extern struct {
-        const trait = std.meta.trait;
-        const math = std.math;
-        comptime {
-            if (!(trait.isFloat(BaseType) or trait.isUnsignedInt(BaseType))) {
-                std.debug.panic("RGBA only accepts float and integer base types. Found {}", .{BaseType});
-            }
-        }
+    comptime var is_float: bool = false;
+    comptime var is_int: bool = false;
 
-        const upper_bound: BaseType = if (trait.isFloat(BaseType)) 1.0 else math.maxInt(BaseType);
+    switch (@typeInfo(BaseType)) {
+        .Int => is_int = true,
+        .Float => is_float = true,
+        else => std.debug.panic("RGBA only accepts float and integer base types. Found {}", .{BaseType}),
+    }
+    return packed struct {
+        const math = std.math;
+
+        const upper_bound: BaseType = if (is_float) 1.0 else math.maxInt(BaseType);
         const lower_bound: BaseType = 0;
 
         pub const white: @This() = .{ .r = upper_bound, .g = upper_bound, .b = upper_bound, .a = upper_bound };
@@ -175,7 +178,7 @@ pub fn RGBA(comptime BaseType: type) type {
         pub const transparent: @This() = .{ .r = lower_bound, .g = lower_bound, .b = upper_bound, .a = lower_bound };
 
         pub fn fromInt(r: u8, g: u8, b: u8, a: u8) @This() {
-            if (comptime trait.isFloat(BaseType)) {
+            if (comptime is_float) {
                 return .{
                     .r = @as(BaseType, @floatFromInt(r)) / 255.0,
                     .g = @as(BaseType, @floatFromInt(g)) / 255.0,

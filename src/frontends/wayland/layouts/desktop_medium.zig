@@ -262,8 +262,8 @@ pub fn draw(
 
         const left_side = -1.0 + (300.0 * screen_scale.horizontal);
 
-        const horizontal_space = @fabs(left_side - window.right) - (margin_horizontal * 2.0);
-        const vertical_space = @fabs(audio_source_section_region.top() - window.top) - (margin_vertical * 2.0);
+        const horizontal_space = @abs(left_side - window.right) - (margin_horizontal * 2.0);
+        const vertical_space = @abs(audio_source_section_region.top() - window.top) - (margin_vertical * 2.0);
 
         const dimensions = geometry.Dimensions2D(f32){
             .width = dimensions_pixels.width * screen_scale.horizontal,
@@ -373,7 +373,7 @@ pub fn draw(
 
         audio_source_section_region.margin.right = 10 * screen_scale.horizontal;
 
-        const widget_width: f32 = @fabs(audio_source_section_region.anchor.right.? - audio_source_section_region.anchor.left.?);
+        const widget_width: f32 = @abs(audio_source_section_region.anchor.right.? - audio_source_section_region.anchor.left.?);
 
         const section_title = "Audio Source";
         const section_border_color = graphics.RGBA(u8){ .r = 155, .g = 155, .b = 155, .a = 255 };

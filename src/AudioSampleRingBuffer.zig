@@ -44,7 +44,7 @@ pub fn appendOverwrite(self: *@This(), samples: []const i16) void {
 
     var dst_index = self.tail();
     const contigious_space = self.sample_buffer.len - dst_index;
-    var samples_to_write = @min(contigious_space, samples.len);
+    const samples_to_write = @min(contigious_space, samples.len);
 
     const max = @as(f32, std.math.maxInt(i16));
 
@@ -117,8 +117,8 @@ pub fn samplesCopyIfRequired(self: @This(), global_sample_index: usize, sample_c
         return self.sample_buffer[src_index .. src_index + sample_count];
     }
 
-    mem.copy(f32, out_buffer[0..], self.sample_buffer[src_index .. src_index + contigious_space]);
-    mem.copy(f32, out_buffer[contigious_space..], self.sample_buffer[0 .. sample_count - contigious_space]);
+    @memcpy(out_buffer[0..], self.sample_buffer[src_index .. src_index + contigious_space]);
+    @memcpy(out_buffer[contigious_space..], self.sample_buffer[0 .. sample_count - contigious_space]);
     return out_buffer[0..sample_count];
 }
 
@@ -142,7 +142,7 @@ inline fn ensureCapacityFor(self: *@This(), sample_count: usize) void {
 test "writing & sample ranges" {
     const expect = std.testing.expect;
 
-    var allocator = std.testing.allocator;
+    const allocator = std.testing.allocator;
     var buffer = try @This().create(allocator, 4);
     defer buffer.deinit(allocator);
 

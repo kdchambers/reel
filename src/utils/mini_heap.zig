@@ -256,7 +256,7 @@ pub fn Cluster(comptime Type: type) type {
             const dst_local_index: usize = @intCast(self.len);
             const dst_local_offset: usize = @sizeOf(Type) * dst_local_index;
             const dst_offset: usize = self.base_index.index + dst_local_offset;
-            var dst_ptr: *Type = @ptrCast(@alignCast(&heap_memory[dst_offset]));
+            const dst_ptr: *Type = @ptrCast(@alignCast(&heap_memory[dst_offset]));
             dst_ptr.* = value.*;
             const index: u16 = self.base_index.index + self.len;
             self.len += 1;
@@ -362,7 +362,7 @@ pub inline fn write(comptime Type: type, value: *const Type) Index(Type) {
     assert(heap_index % heap_alignment == 0);
     assert(@alignOf(Type) <= heap_alignment);
     const alignment_padding = comptime heap_alignment - @alignOf(Type);
-    var dst_ptr: *Type = @ptrCast(@alignCast(&heap_memory[heap_index]));
+    const dst_ptr: *Type = @ptrCast(@alignCast(&heap_memory[heap_index]));
     dst_ptr.* = value.*;
     const result_index: usize = heap_index;
     heap_index += @sizeOf(Type) + alignment_padding;

@@ -13,13 +13,16 @@ const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 const zxdg = wayland.client.zxdg;
-const wlr = wayland.client.zwlr;
+
+const build_options = @import("build_options");
+
+const wlr = if (build_options.have_wlr_screencopy) wayland.client.zwlr else {};
 
 const geometry = @import("geometry.zig");
 const graphics = @import("graphics.zig");
 
 pub var display: *wl.Display = undefined;
-pub var screencopy_manager_opt: ?*wlr.ScreencopyManagerV1 = null;
+pub var screencopy_manager_opt: if (build_options.have_wlr_screencopy) ?*wlr.ScreencopyManagerV1 else void = if (build_options.have_wlr_screencopy) null else {};
 pub var shared_memory: *wl.Shm = undefined;
 
 pub var registry: *wl.Registry = undefined;
@@ -86,8 +89,10 @@ pub fn deinit() void {
 
     if (display.roundtrip() != .SUCCESS) assert(false);
 
-    if (screencopy_manager_opt) |*screencopy_manager| {
-        screencopy_manager.*.destroy();
+    if (comptime build_options.have_wlr_screencopy) {
+        if (screencopy_manager_opt) |*screencopy_manager| {
+            screencopy_manager.*.destroy();
+        }
     }
 
     if (window_decorations_opt) |*window_decorations| {
@@ -221,7 +226,7 @@ fn registryListener(registry_ref: *wl.Registry, event: wl.Registry.Event, _: *co
                 pointer = seat.getPointer() catch return;
             } else if (orderZ(u8, global.interface, wl.Shm.getInterface().name) == .eq) {
                 shared_memory = registry_ref.bind(global.name, wl.Shm, 1) catch return;
-            } else if (orderZ(u8, global.interface, wlr.ScreencopyManagerV1.getInterface().name) == .eq) {
+            } else if (comptime build_options.have_wlr_screencopy and orderZ(u8, global.interface, wlr.ScreencopyManagerV1.getInterface().name) == .eq) {
                 screencopy_manager_opt = registry_ref.bind(global.name, wlr.ScreencopyManagerV1, 3) catch return;
             } else if (orderZ(u8, global.interface, wl.Output.getInterface().name) == .eq) {
                 if (outputs.len < outputs.buffer.len) {

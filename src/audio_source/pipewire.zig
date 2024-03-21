@@ -276,7 +276,7 @@ pub fn createStream(
     };
 
     var param_ptr = &audio_format_param;
-    var ret_code = symbols.streamConnect(
+    const ret_code = symbols.streamConnect(
         stream_ptr.stream,
         .input,
         pw.id_any,

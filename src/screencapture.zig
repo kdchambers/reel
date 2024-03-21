@@ -8,7 +8,7 @@ const geometry = @import("geometry.zig");
 const Dimensions2D = geometry.Dimensions2D;
 
 const backend_pipewire = @import("screencapture/pipewire/screencapture_pipewire.zig");
-const backend_wlroots = if (build_options.have_wayland)
+const backend_wlroots = if (build_options.have_wayland and build_options.have_wlr_screencopy)
     @import("screencapture/wlroots/screencapture_wlroots.zig")
 else
     void;
@@ -81,7 +81,7 @@ pub const ScreenshotResponse = union(enum) {
 // TODO: This is to merge the error sets of all backends
 //
 
-pub const InitErrorSet = backend_wlroots.InitErrorSet;
+pub const InitErrorSet = error{Init};
 
 pub const ScreenshotError = error{
     unknown,
@@ -151,7 +151,7 @@ const InterfaceBackends = union(Backend) {
 };
 
 fn createInterfaceInternal(comptime backend: Backend) !Interface {
-    if (comptime build_options.have_wayland and backend == .wlroots)
+    if (comptime build_options.have_wlr_screencopy and backend == .wlroots)
         return backend_wlroots.createInterface();
     if (comptime backend == .pipewire)
         return backend_pipewire.createInterface();
@@ -183,7 +183,7 @@ pub fn createBestInterface(onFrameReady: *const OnFrameReadyFn) ?Interface {
 
 pub fn detectBackends() []Backend {
     var index: usize = 0;
-    if (comptime build_options.have_wayland) {
+    if (comptime build_options.have_wlr_screencopy) {
         const have_wlroots = backend_wlroots.detectSupport();
         if (have_wlroots) {
             backend_buffer[index] = .wlroots;
