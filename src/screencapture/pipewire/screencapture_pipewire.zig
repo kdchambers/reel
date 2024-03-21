@@ -1177,7 +1177,7 @@ fn setSource(
         if (dbus.messageIterOpenContainer(&dict_entry_iter, c.DBUS_TYPE_VARIANT, "b", &dict_variant_iter) != 1)
             return error.WriteDictFail;
 
-        const allow_multiple: bool = false;
+        const allow_multiple: dbus.Bool = 0;
         if (dbus.messageIterAppendBasic(&dict_variant_iter, c.DBUS_TYPE_BOOLEAN, @as(*const void, @ptrCast(&allow_multiple))) != 1)
             return error.AppendBasicFail;
 

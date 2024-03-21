@@ -49,7 +49,7 @@ pub extern fn dbus_connection_send_with_reply_and_block(
 ) ?*dbus.Message;
 
 pub const dbus = struct {
-    pub const bool_t = i32;
+    pub const bool_t = u32;
 
     pub const Error = extern struct {
         name: [*:0]const u8,

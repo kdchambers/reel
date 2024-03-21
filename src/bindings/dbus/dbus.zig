@@ -10,6 +10,8 @@ pub const MessageIter = dbus_bindings.dbus.MessageIter;
 pub const BusType = dbus_bindings.dbus.BusType;
 pub const Error = dbus_bindings.dbus.Error;
 
+pub const Bool = dbus_bindings.dbus.bool_t;
+
 pub const busGet = dbus_bindings.dbus_bus_get;
 pub const busGetUniqueName = dbus_bindings.dbus_bus_get_unique_name;
 pub const busAddMatch = dbus_bindings.dbus_bus_add_match;
